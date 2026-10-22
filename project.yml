@@ -43,6 +43,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: MDView
+        ITSAppUsesNonExemptEncryption: false
+        NSHumanReadableCopyright: Copyright © 2026 HighGainDesign
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSPrincipalClass: NSApplication
@@ -157,6 +159,8 @@ targets:
       path: iOS/Info.plist
       properties:
         CFBundleDisplayName: MDView
+        ITSAppUsesNonExemptEncryption: false
+        NSHumanReadableCopyright: Copyright © 2026 HighGainDesign
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSSupportsOpeningDocumentsInPlace: true
@@ -189,6 +193,9 @@ targets:
         TARGETED_DEVICE_FAMILY: '1,2'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: $(MDVIEW_IOS_PROFILE)
     dependencies:
       - package: Apex
         product: ApexC
