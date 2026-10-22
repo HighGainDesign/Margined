@@ -64,7 +64,13 @@ final class SpeechSession {
         }
         resolveVoice()
         guard resolvedVoice != nil else {
-            status = .failed; notice = String(localized: "No system voice is available. Add a voice in System Settings."); onStop?(); return
+            status = .failed
+            #if os(iOS)
+            notice = String(localized: "No system voice is available. Add a voice in Settings.")
+            #else
+            notice = String(localized: "No system voice is available. Add a voice in System Settings.")
+            #endif
+            onStop?(); return
         }
         coordinator.claim(self)
         enqueue()
@@ -126,7 +132,12 @@ final class SpeechSession {
         guard isActive else { return }
         if resolvedVoice == nil {
             invalidate(); status = .failed; coordinator.release(self)
-            notice = String(localized: "No system voice is available. Add a voice in System Settings."); onStop?()
+            #if os(iOS)
+            notice = String(localized: "No system voice is available. Add a voice in Settings.")
+            #else
+            notice = String(localized: "No system voice is available. Add a voice in System Settings.")
+            #endif
+            onStop?()
         } else if previous != resolvedVoice?.id { reconfigure() }
     }
 

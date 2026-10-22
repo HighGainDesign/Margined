@@ -106,3 +106,10 @@ new Keychain profile.
 
 By submitting a contribution, you agree to license it under the repository's
 MIT license. Retain third-party license notices when changing dependencies.
+
+### iOS
+
+After `xcodegen generate`, build or test the `MDViewiOS` scheme on an iPhone or
+iPad Simulator. Device builds need your own signing configuration. Keep shared
+rendering behavior consistent with macOS; test Files lifecycle and audio on a real
+device before shipping.

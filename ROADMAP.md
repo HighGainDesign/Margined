@@ -8,7 +8,7 @@ turning the app into a general Markdown editor. Saving checklist markers is the
 deliberate exception to read-only viewing.
 
 **1.7** adds GitHub alerts, offline math and Mermaid, with a bounded Mac readiness
-pass. Version 1.6 added printing and safe HTML/image sizing. Next is an iOS MVP
+pass. Version 1.6 added printing and safe HTML/image sizing. An iOS MVP is in development
 for 2.0; later milestones are plans, not delivery dates.
 
 | Release | Focus | Planned outcome |

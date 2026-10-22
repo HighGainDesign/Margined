@@ -297,3 +297,10 @@ For vulnerability reports, see [Security](SECURITY.md).
 
 Apex, libyaml, SwiftSoup, KaTeX and Mermaid use MIT licenses; cmark-gfm includes BSD-2-Clause and component notices. Dependency license texts are bundled with the reader.
 The Markdown Mark is public domain; its notice is also bundled.
+
+## iOS development
+
+An iPhone/iPad MVP is in development for iOS 17 and later. It shares the Mac renderer
+and adds Files access, checklists, change review and background Read Aloud. Build
+the `MDViewiOS` scheme to try it; no iOS download is available yet. Real-device
+File Provider, background audio and VoiceOver acceptance remain before release.

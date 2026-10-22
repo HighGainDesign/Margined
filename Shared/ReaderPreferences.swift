@@ -13,7 +13,11 @@ enum ReaderPreferences {
             return UserDefaults(suiteName: "MDViewTests.ReaderPreferences.\(ProcessInfo.processInfo.processIdentifier)")!
         }
         #endif
+        #if os(iOS)
+        return UserDefaults.standard
+        #else
         return UserDefaults(suiteName: groupIdentifier)!
+        #endif
     }
 
     static func appearance(in defaults: UserDefaults) -> DocumentAppearance {

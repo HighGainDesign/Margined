@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add an iPhone/iPad MVP with Files, change review and Read Aloud.
+
 ## 1.7.0 — 2026-10-22
 
 - Render GitHub alerts, math and Mermaid diagrams offline.

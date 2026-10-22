@@ -11,6 +11,12 @@ struct DiagramArtifact: Sendable {
 /// Bound expensive diagram work across documents; cache only in memory.
 actor DiagramRenderer {
     static let shared = DiagramRenderer()
+    #if DEBUG && os(iOS)
+    /// Exercises the real private WebKit worker without sharing its cache.
+    static func renderForTesting(_ source: String, minimumStartupDuration: Duration) async -> DiagramArtifact? {
+        await DiagramWorker.renderForTesting(source, minimumStartupDuration: minimumStartupDuration)
+    }
+    #endif
     private var cache: [String: DiagramArtifact] = [:]
     private var order: [String] = []
     private var bytes = 0
@@ -43,7 +49,15 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
     private var web: WKWebView?
     private var completion: CheckedContinuation<DiagramArtifact?, Never>?
     private var timer: Task<Void, Never>?
+    #if os(iOS)
+    private var executionTimer: Task<Void, Never>?
+    #endif
     private let source: String
+    #if DEBUG && os(iOS)
+    private var minimumStartupDuration = Duration.zero
+    private var budgetStarted = ContinuousClock.now
+    private var startupTask: Task<Void, Never>?
+    #endif
     private static let world = WKContentWorld.world(name: "MDViewDiagramRenderer")
     private static let script: String? = {
         guard let url = Bundle(for: DiagramWorker.self).url(forResource: "mermaid.min", withExtension: "js") else { return nil }
@@ -54,6 +68,18 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
 
     static func render(_ source: String) async -> DiagramArtifact? {
         let worker = DiagramWorker(source)
+        return await run(worker)
+    }
+
+    #if DEBUG && os(iOS)
+    static func renderForTesting(_ source: String, minimumStartupDuration: Duration) async -> DiagramArtifact? {
+        let worker = DiagramWorker(source)
+        worker.minimumStartupDuration = minimumStartupDuration
+        return await run(worker)
+    }
+    #endif
+
+    private static func run(_ worker: DiagramWorker) async -> DiagramArtifact? {
         return await withTaskCancellationHandler {
             await worker.start()
         } onCancel: {
@@ -70,8 +96,17 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
             config.defaultWebpagePreferences.allowsContentJavaScript = false
             let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 1000, height: 700), configuration: config)
             self.web = web; web.navigationDelegate = self
+            #if DEBUG && os(iOS)
+            budgetStarted = .now
+            #endif
             timer = Task { [weak self] in
+                #if os(iOS)
+                // Cold WebKit startup and loading the trusted bundled library
+                // need their own allowance. All phases still share this cap.
+                try? await Task.sleep(for: .seconds(6))
+                #else
                 try? await Task.sleep(for: .seconds(3))
+                #endif
                 if !Task.isCancelled { self?.finish(nil) }
             }
             web.loadHTMLString("""
@@ -86,12 +121,18 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         guard let completion else { return }
         self.completion = nil
         timer?.cancel(); timer = nil
+        #if os(iOS)
+        executionTimer?.cancel(); executionTimer = nil
+        #endif
+        #if DEBUG && os(iOS)
+        startupTask?.cancel(); startupTask = nil
+        #endif
         web?.stopLoading(); web?.navigationDelegate = nil; web = nil
         completion.resume(returning: result)
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(navigationAction.request.url?.absoluteString == "about:blank" ? .allow : .cancel)
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        navigationAction.request.url?.absoluteString == "about:blank" ? .allow : .cancel
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { finish(nil) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { finish(nil) }
@@ -102,13 +143,54 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         webView.evaluateJavaScript(script, in: nil, in: Self.world) { [weak self, weak webView] result in
             guard let self, let webView, self.completion != nil else { return }
             guard case .success = result else { self.finish(nil); return }
-            webView.callAsyncJavaScript("""
+            #if os(iOS)
+            self.initializeLibrary(in: webView)
+            #else
+            self.renderDiagram(in: webView)
+            #endif
+        }
+    }
+
+    private static let initializationScript = """
             const m = globalThis.mdviewMermaid;
             const secure = [...new Set([...Object.keys(m.mermaidAPI.defaultConfig), 'secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'htmlLabels', 'themeCSS', 'fontFamily'])];
             m.initialize({startOnLoad:false, securityLevel:'strict', secure,
                 maxTextSize:20000, maxEdges:200, suppressErrorRendering:true,
                 htmlLabels:false, flowchart:{htmlLabels:false}, theme:'default',
                 fontFamily:'Arial', deterministicIds:true, deterministicIDSeed:'mdview'});
+            """
+
+    #if os(iOS)
+    private func initializeLibrary(in webView: WKWebView) {
+        // Author source is first passed to WebKit only after trusted setup.
+        webView.callAsyncJavaScript(Self.initializationScript, arguments: [:], in: nil, in: Self.world) { [weak self, weak webView] result in
+            guard let self, let webView, completion != nil else { return }
+            guard case .success = result else { finish(nil); return }
+            #if DEBUG
+            startupTask = Task { [weak self, weak webView] in
+                guard let self else { return }
+                try? await Task.sleep(until: budgetStarted.advanced(by: minimumStartupDuration), clock: .continuous)
+                guard !Task.isCancelled, completion != nil, let webView else { return }
+                beginExecution(in: webView)
+            }
+            #else
+            beginExecution(in: webView)
+            #endif
+        }
+    }
+
+    private func beginExecution(in webView: WKWebView) {
+        guard completion != nil else { return }
+        executionTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { self?.finish(nil) }
+        }
+        renderDiagram(in: webView, initialize: false)
+    }
+    #endif
+
+    private func renderDiagram(in webView: WKWebView, initialize: Bool = true) {
+        let script = (initialize ? Self.initializationScript : "const m = globalThis.mdviewMermaid;") + """
             const {svg} = await m.render('mdviewDiagram', source);
             // Mermaid includes animation @keyframes even for static diagrams.
             // Let the browser parse CSS, retaining ordinary style rules only.
@@ -128,11 +210,11 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
                 }).join(' ');
             }
             return new XMLSerializer().serializeToString(doc.documentElement);
-            """, arguments: ["source": self.source], in: nil, in: Self.world) { [weak self] result in
-                guard let self else { return }
-                if case .success(let svg as String) = result { self.finish(Self.sanitize(svg)) }
-                else { self.finish(nil) }
-            }
+            """
+        webView.callAsyncJavaScript(script, arguments: ["source": source], in: nil, in: Self.world) { [weak self] result in
+            guard let self else { return }
+            if case .success(let svg as String) = result { self.finish(Self.sanitize(svg)) }
+            else { self.finish(nil) }
         }
     }
 

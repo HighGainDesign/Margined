@@ -4,6 +4,7 @@ options:
   minimumXcodeGenVersion: 2.44.0
   deploymentTarget:
     macOS: '14.0'
+    iOS: '17.0'
 settings:
   base:
     SWIFT_VERSION: '6.0'
@@ -128,6 +129,80 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview.tests
         GENERATE_INFOPLIST_FILE: YES
+  MDViewiOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: iOS
+        excludes: [Resources]
+      - path: iOS/Resources
+        buildPhase: resources
+      - path: Shared
+        excludes: [Resources]
+      - path: Shared/Resources
+        buildPhase: resources
+      - path: App/Resources
+        buildPhase: resources
+      - path: App/AppIcon.icon
+        buildPhase: resources
+      - path: App/Services/ImageSchemeHandler.swift
+      - path: App/Services/SpeechSession.swift
+      - path: App/Services/SpeechDriver.swift
+      - path: App/Services/SpeechPreferences.swift
+      - path: LICENSE
+        buildPhase: resources
+      - path: Fixtures/Rendering.md
+        buildPhase: resources
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: MDView
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSSupportsOpeningDocumentsInPlace: true
+        UIFileSharingEnabled: true
+        UIBackgroundModes: [audio]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Markdown
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [net.daringfireball.markdown]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: net.daringfireball.markdown
+            UTTypeDescription: Markdown document
+            UTTypeConformsTo: [public.plain-text]
+            UTTypeTagSpecification:
+              public.filename-extension: [md, markdown, mdown, mkd, mkdn]
+              public.mime-type: text/markdown
+        CFBundleURLTypes:
+          - CFBundleURLName: Markdown preview
+            CFBundleURLSchemes: [mdview]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview
+        PRODUCT_MODULE_NAME: MDViewiOS
+        MARKETING_VERSION: '2.0.0'
+        CURRENT_PROJECT_VERSION: 1
+        TARGETED_DEVICE_FAMILY: '1,2'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MACCATALYST: NO
+    dependencies:
+      - package: Apex
+        product: ApexC
+      - package: SwiftSoup
+  MDViewiOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [iOSTests]
+    dependencies:
+      - target: MDViewiOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   MDView:
     build:
@@ -135,5 +210,13 @@ schemes:
         MDView: all
     test:
       targets: [MDViewTests]
+      environmentVariables:
+        MDVIEW_TEST_PREFERENCES: '1'
+  MDViewiOS:
+    build:
+      targets:
+        MDViewiOS: all
+    test:
+      targets: [MDViewiOSTests]
       environmentVariables:
         MDVIEW_TEST_PREFERENCES: '1'
