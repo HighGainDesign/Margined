@@ -184,6 +184,10 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: Markdown preview
             CFBundleURLSchemes: [margined]
+    entitlements:
+      path: iOS/MarginediOS.entitlements
+      properties:
+        com.apple.security.application-groups: [group.design.highgain.margined]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
@@ -196,6 +200,54 @@ targets:
       configs:
         Release:
           PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_IOS_PROFILE)
+    dependencies:
+      - package: Apex
+        product: ApexC
+      - package: SwiftSoup
+      - target: MarginediOSQuickLook
+        embed: true
+  MarginediOSQuickLook:
+    type: app-extension
+    platform: iOS
+    sources:
+      - QuickLook/PreviewProvider.swift
+      - path: LICENSE
+        buildPhase: resources
+      - path: Shared
+        excludes: [Resources]
+      - path: Shared/Resources
+        buildPhase: resources
+      - path: App/Resources
+        buildPhase: resources
+    info:
+      path: iOSQuickLook/Info.plist
+      properties:
+        CFBundleDisplayName: Margined Quick Look
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.preview
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewProvider
+          NSExtensionAttributes:
+            QLSupportedContentTypes: [net.daringfireball.markdown]
+            QLSupportsSearchableItems: false
+            QLIsDataBasedPreview: true
+    entitlements:
+      path: iOSQuickLook/MarginedQuickLook.entitlements
+      properties:
+        com.apple.security.application-groups: [group.design.highgain.margined]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.quicklook
+        MARKETING_VERSION: '2.0.0'
+        CURRENT_PROJECT_VERSION: 1
+        TARGETED_DEVICE_FAMILY: '1,2'
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SUPPORTS_MACCATALYST: NO
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_IOS_QUICKLOOK_PROFILE)
     dependencies:
       - package: Apex
         product: ApexC

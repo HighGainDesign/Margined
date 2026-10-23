@@ -1,8 +1,13 @@
 import Foundation
 
 enum ReaderPreferences {
+    #if os(iOS)
+    // The iOS app and preview extension share a provisioned mobile App Group.
+    static let groupIdentifier = "group.design.highgain.margined"
+    #else
     // Team-prefixed groups need no provisioning profile for Developer ID macOS apps.
     static let groupIdentifier = "UX8BPNLPX5.design.highgain.margined"
+    #endif
     static let appearanceKey = "documentAppearance"
 
     static var defaults: UserDefaults {
