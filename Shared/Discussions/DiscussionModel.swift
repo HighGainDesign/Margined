@@ -56,6 +56,22 @@ struct DiscussionDocument: Sendable {
     let blocks: [DiscussionBlock]
     let diagnostics: [DiscussionDiagnostic]
     var threads: [DiscussionThread] { blocks.compactMap(\.thread) }
+
+    /// Mask parsed comment bytes only for reading. Original ranges/data remain
+    /// available for diagnostics and edits; uncertain wrappers still block a
+    /// Clean Copy. Keeping byte/line positions preserves checklist provenance.
+    var readingSource: String { maskedSource(includeUncertain: false) }
+    var wordCountSource: String { maskedSource(includeUncertain: true) }
+
+    private func maskedSource(includeUncertain: Bool) -> String {
+        let masked = blocks.filter { includeUncertain || $0.hasCertainExtent }
+        guard !masked.isEmpty else { return source }
+        var bytes = Array(source.utf8)
+        for block in masked {
+            for index in block.range where bytes[index] != 10 && bytes[index] != 13 { bytes[index] = 32 }
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
 }
 
 struct MarkdownSourceSplice: Equatable, Sendable {

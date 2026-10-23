@@ -18,6 +18,9 @@ struct RenderedMarkdown: Sendable {
     var tasks: [MarkdownTask] = []
     var taskSource = ""
     var checkboxCount = 0
+    var discussions: DiscussionDocument? = nil
+    var discussionText: DiscussionTextProjection? = nil
+    var discussionActivity = DiscussionActivity()
     var documentLanguage: String? = nil
     var speech: SpeechDocument? = nil
 }
@@ -29,7 +32,7 @@ actor MarkdownRenderer {
     private var stylesheet: String?
     private let mathTypesetter = MathTypesetter()
 
-    func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions()) async throws -> RenderedMarkdown {
+    func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), previousDiscussionProjection: DiscussionTextProjection? = nil, previousDiscussions: DiscussionDocument? = nil) async throws -> RenderedMarkdown {
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
         if stylesheet == nil {
@@ -38,19 +41,28 @@ actor MarkdownRenderer {
             }
             stylesheet = try String(contentsOf: cssURL, encoding: .utf8)
         }
-        let document = try parse(source, loadRemoteImages: loadRemoteImages)
+        let discussions = try DiscussionCodec.parse(source)
+        let proseSource = discussions.readingSource
+        let document = try parse(proseSource, loadRemoteImages: loadRemoteImages)
+        let targets = Dictionary(uniqueKeysWithValues: discussions.threads.map { ($0.id, $0.target) })
+        var discussionText = try DiscussionText.project(document, source: source, targets: targets)
+        discussionText.attachmentVersions = Dictionary(uniqueKeysWithValues: discussions.threads.map { ($0.id, $0.attachmentHistory.count) })
+        discussionText.anchorResults = DiscussionAnchors.resolve(document: discussions, current: discussionText, previous: previousDiscussionProjection)
+        // The semantic body is stable after a note-only update, unlike the full
+        // source hash. Fingerprints still include code/math/image semantics.
+        let speechSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
         let headings = try document.select("h1, h2, h3, h4, h5, h6").array().map { heading in
             MarkdownHeading(id: try heading.attr("id"), title: try heading.text(),
                             level: Int(heading.tagName().dropFirst()) ?? 1)
         }
         let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
-        let speech = prepareSpeech ? try SpeechDocumentBuilder.prepare(document, source: source, language: language, options: speechOptions) : nil
+        let speech = prepareSpeech ? try SpeechDocumentBuilder.prepare(document, source: speechSource, language: language, options: speechOptions) : nil
         var changes = ChangeSummary()
         let comparisonBaseline: [ReadingUnit]?
         if let reviewedUnits {
             comparisonBaseline = reviewedUnits
         } else if let baseline {
-            comparisonBaseline = try DocumentChanges.snapshot(in: parse(baseline, loadRemoteImages: loadRemoteImages))
+            comparisonBaseline = try DocumentChanges.snapshot(in: parse(DiscussionCodec.parse(baseline).readingSource, loadRemoteImages: loadRemoteImages))
         } else {
             comparisonBaseline = nil
         }
@@ -85,7 +97,8 @@ actor MarkdownRenderer {
         // Serialize the sanitized DOM itself, including newly attached task metadata.
         // Source reuse can retain an input tag without its new attributes.
         let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
-        let count = source.split(whereSeparator: \.isWhitespace).count
+        let countSource = discussions.blocks.allSatisfy(\.hasCertainExtent) ? proseSource : discussions.wordCountSource
+        let count = countSource.split(whereSeparator: \.isWhitespace).count
         let languageAttribute = language.map { " lang=\"\($0)\"" } ?? ""
         let html = """
         <!doctype html><html\(languageAttribute) data-appearance="\(appearance.rawValue)"><head><meta charset="utf-8">
@@ -96,7 +109,7 @@ actor MarkdownRenderer {
         <title>\(Self.escapeHTML(title))</title><style>\(stylesheet ?? "")</style></head>
         <body class="\(wide ? "wide" : "")"><main id="document" dir="auto" aria-label="\(Self.escapeHTML(String(localized: "Markdown document")))">\(body)</main></body></html>
         """
-        return RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, documentLanguage: language, speech: speech)
+        return RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
     }
 
     private func parse(_ source: String, loadRemoteImages: Bool) throws -> Document {

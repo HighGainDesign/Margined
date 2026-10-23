@@ -7,6 +7,7 @@ enum DiscussionCodec {
     static func parse(_ source: String) throws -> DiscussionDocument {
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
         try Task.checkCancellation()
+        guard source.contains("<!-- margined:thread") else { return DiscussionDocument(source: source, blocks: [], diagnostics: []) }
         let lines = DiscussionSourceLines(source)
         var input = lines.bytes
         // Frontmatter is not a Markdown discussion, even when its sample text
