@@ -148,12 +148,7 @@ final class MarkdownDocument: NSDocument {
         draftCloseCallbacks.append(completion)
         guard !draftCloseAlertPresented else { return }
         draftCloseAlertPresented = true
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Discard unposted replies?")
-        alert.informativeText = String(localized: "Keep this document open to finish your comments and replies, or discard the unposted text.")
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: String(localized: "Keep Open"))
-        alert.addButton(withTitle: String(localized: "Discard Drafts")).hasDestructiveAction = true
+        let alert = DiscussionDraftAlert.make()
         alert.beginSheetModal(for: window) { [self] response in
             let allowed = response == .alertSecondButtonReturn
             if allowed { reader.discussions.discardDrafts() }

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftSoup
 
-struct DocumentChange: Identifiable, Sendable {
+struct DocumentChange: Identifiable, Equatable, Sendable {
     enum Kind: String, Sendable {
         case added = "Added", edited = "Edited", removed = "Removed"
         var localizedTitle: String {

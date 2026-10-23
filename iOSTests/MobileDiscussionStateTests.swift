@@ -3,6 +3,50 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionStateTests: XCTestCase {
+    func testPreviewOffersACopyWithoutChangingTheSnapshotOrLosingDrafts() async throws {
+        let reader = MobileReaderState()
+        var components = URLComponents(string: "margined://preview")!
+        components.queryItems = [URLQueryItem(name: "text", value: "Passage.")]
+        await reader.openPreview(url: try XCTUnwrap(components.url)); try await settle(reader)
+        let key = DiscussionSession.DraftKey.new(UUID())
+        reader.discussions.displayName = "Reviewer"; reader.discussions.selection = key
+        reader.discussions.setDraft("Keep my snapshot note.", for: key, target: .init(type: "TextQuoteSelector", exact: "Passage.", prefix: "", suffix: "", section: nil))
+        reader.postDiscussion()
+        XCTAssertTrue(reader.discussionCopyOffered)
+        XCTAssertEqual(reader.discussionError, DiscussionSession.Failure.savedCopyRequired.localizedDescription)
+        XCTAssertEqual(reader.source, "Passage.")
+        XCTAssertNil(reader.fileURL)
+        XCTAssertEqual(reader.discussions.drafts[key]?.body, "Keep my snapshot note.")
+        XCTAssertNil(reader.discussions.pending)
+        reader.discussions.discardDrafts(); await reader.close()
+    }
+
+    func testNoteOnlyRefreshKeepsTheSelectedProseChange() async throws {
+        let initial = "# Plan\n\nFirst.\n\nSecond.\n"
+        let changed = "# Plan\n\nFirst changed.\n\nSecond changed.\n"
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        try Data(initial.utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let reader = MobileReaderState()
+        await reader.open(url: file); try await settle(reader)
+        try Data(changed.utf8).write(to: file, options: .atomic)
+        await reader.refresh(); try await settle(reader)
+        XCTAssertEqual(reader.changes.count, 2)
+        reader.selectChange(1)
+        let selected = try XCTUnwrap(reader.selectedChange)
+        let message = DiscussionMessage(id: "m-note", author: "Reviewer", created: "2026-10-23T10:00:00Z", body: "Note only.", inReplyTo: nil)
+        let thread = DiscussionThread(id: "t-note", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "Second changed.", prefix: "First changed.", suffix: "", section: "Plan"),
+            messages: [message], resolvedBy: nil, resolved: nil, attachmentHistory: [])
+        let parsed = try DiscussionCodec.parse(changed)
+        let data = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .newThread(thread), in: parsed), to: Data(changed.utf8), expectedSource: changed)
+        try data.write(to: file, options: .atomic)
+        await reader.refresh(); try await settle(reader)
+        XCTAssertEqual(reader.selectedChange?.id, selected.id)
+        XCTAssertEqual(reader.selectedChange?.after, selected.after)
+        await reader.close()
+    }
+
     func testPostAndConditionalUndoUseTheActiveDocumentLease() async throws {
         let data = Data("Passage.\n".utf8), file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
         try data.write(to: file)

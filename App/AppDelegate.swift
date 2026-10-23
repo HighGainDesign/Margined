@@ -104,12 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private func confirmDiscardDiscussionDrafts() -> Bool {
         let readers = NSDocumentController.shared.documents.compactMap { ($0 as? MarkdownDocument)?.reader }
         guard readers.contains(where: { $0.discussions.hasUnpostedDrafts }) else { return true }
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Discard unposted replies and quit?")
-        alert.informativeText = String(localized: "Keep Margined open to finish your comments and replies, or discard the unposted text and quit.")
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: String(localized: "Keep Open"))
-        alert.addButton(withTitle: String(localized: "Discard Drafts and Quit")).hasDestructiveAction = true
+        let alert = DiscussionDraftAlert.make(quitting: true)
         guard alert.runModal() == .alertSecondButtonReturn else { return false }
         for reader in readers { reader.discussions.discardDrafts() }
         return true

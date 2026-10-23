@@ -12,17 +12,23 @@ final class MobileReaderState {
     let discussions = DiscussionSession()
     private(set) var discussionSaving = false
     var discussionError: String?
+    private(set) var discussionCopyOffered = false
     var fileSaving: Bool { checklistSaving || discussionSaving }
-    var canUndoDiscussion: Bool { canWrite && discussions.canUndo(snapshot: snapshot?.sourceSnapshot) }
-    var canRedoDiscussion: Bool { canWrite && discussions.canRedo(snapshot: snapshot?.sourceSnapshot) }
+    var canUndoDiscussion: Bool { canEditDiscussions && discussions.canUndo(snapshot: snapshot?.sourceSnapshot) }
+    var canRedoDiscussion: Bool { canEditDiscussions && discussions.canRedo(snapshot: snapshot?.sourceSnapshot) }
     func postDiscussion(reopenResolved: Bool = false) {
-        guard canWrite, let document = rendered?.discussions,
+        guard canEditDiscussions, let document = rendered?.discussions,
               document.source.utf8.elementsEqual(source.utf8) else { return }
+        guard fileURL != nil else { offerDiscussionCopy(); return }
+        discussionCopyOffered = false
         do {
             let operation = try discussions.preparePost(in: document, snapshot: snapshot?.sourceSnapshot, reopenResolved: reopenResolved)
             defaults.set(discussions.displayName, forKey: "discussionDisplayName")
             commitDiscussion(operation)
-        } catch { discussionError = error.localizedDescription }
+        } catch {
+            discussionError = error.localizedDescription
+            if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+        }
     }
     func undoDiscussion() {
         guard canUndoDiscussion, let snapshot else { return }
@@ -35,21 +41,32 @@ final class MobileReaderState {
         catch { discussionError = error.localizedDescription }
     }
     func resolveDiscussion(_ threadID: String, choice: DiscussionSession.ResolveChoice) {
-        guard canWrite, let document = rendered?.discussions else { return }
+        guard canEditDiscussions, let document = rendered?.discussions else { return }
+        guard fileURL != nil else { offerDiscussionCopy(); return }
         do {
             if let operation = try discussions.prepareResolve(threadID: threadID, in: document, snapshot: snapshot?.sourceSnapshot, choice: choice) {
                 commitDiscussion(operation)
             }
-        } catch { discussionError = error.localizedDescription }
+        } catch {
+            discussionError = error.localizedDescription
+            if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+        }
+    }
+    private var canEditDiscussions: Bool {
+        !isOpening && !isRendering && !fileSaving && !showChecklistConfirmation && !hasPendingFileUpdate
+    }
+    private func offerDiscussionCopy() {
+        discussionCopyOffered = true
+        discussionError = DiscussionSession.Failure.savedCopyRequired.localizedDescription
     }
     private func commitDiscussion(_ operation: DiscussionSession.Pending) {
-        guard canWrite, let captured = snapshot, captured.sourceSnapshot == operation.expected else {
+        guard canEditDiscussions, let captured = snapshot, captured.sourceSnapshot == operation.expected else {
             discussions.failed(operation, error: SourceFileEdit.Failure.changed)
             discussionError = SourceFileEdit.Failure.changed.localizedDescription
             return
         }
         let generation = openGeneration, revision = externalRevision
-        discussionSaving = true; discussionError = nil
+        discussionSaving = true; discussionError = nil; discussionCopyOffered = false
         saveTask = Task { [weak self, access, discussions] in
             do {
                 let saved = try await access.replace(expected: captured, with: operation.replacement)
@@ -62,7 +79,7 @@ final class MobileReaderState {
             } catch {
                 discussions.failed(operation, error: error)
                 guard let self, generation == openGeneration else { return }
-                discussionSaving = false; discussionError = error.localizedDescription
+                discussionSaving = false; discussionError = error.localizedDescription; discussionCopyOffered = true
                 await refresh()
             }
         }
@@ -130,6 +147,7 @@ final class MobileReaderState {
     private var reviewedSource: String?
     private var reviewedUnits: [ReadingUnit]?
     private var externalRevision = 0
+    private var fileUpdateNeedsReviewReset = false
     private var openGeneration = UUID()
     @ObservationIgnored private var classifyUpdateTask: Task<Void, Never>?
     @ObservationIgnored private var renderTask: Task<Void, Never>?
@@ -227,7 +245,7 @@ final class MobileReaderState {
     private func resetForOpen() {
         playback.documentWillChange(ownerID: id)
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
-        discussions.resetDocument(); discussionSaving = false; discussionError = nil
+        discussions.resetDocument(); discussionSaving = false; discussionError = nil; discussionCopyOffered = false
         pendingTransition = nil; showDraftDiscardConfirmation = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil
         reviewedSource = nil; reviewedUnits = nil; rendered = nil
@@ -241,7 +259,7 @@ final class MobileReaderState {
         navigationTarget = nil; navigationGeneration += 1
         searchText = ""; searchMatch = nil; searchGeneration += 1
         speechStartRequest = nil; speechRequestedFingerprint = nil
-        currentChangeIndex = 0; imageReloadGeneration += 1
+        currentChangeIndex = 0; fileUpdateNeedsReviewReset = false; imageReloadGeneration += 1
     }
 
     func refresh() async {
@@ -308,7 +326,7 @@ final class MobileReaderState {
         guard hasDocument else { return }
         fileURL = value.url; title = value.url.lastPathComponent
         guard !source.utf8.elementsEqual(value.source.utf8) else { return }
-        source = value.source; currentChangeIndex = 0; render()
+        source = value.source; fileUpdateNeedsReviewReset = true; render()
     }
 
     func setFileUpdatesPaused(_ paused: Bool) {
@@ -402,7 +420,10 @@ final class MobileReaderState {
                     reviewedUnits: units, loadRemoteImages: remote, appearance: appearance, mapTasks: mapTasks,
                     prepareSpeech: true, speechOptions: options, previousDiscussionProjection: previousProjection, previousDiscussions: previousDiscussions)
                 guard let self, !Task.isCancelled, generation == openGeneration, source.utf8.elementsEqual(text.utf8) else { return }
+                let sameReview = rendered?.changes.entries == output.changes.entries
                 rendered = output; isRendering = false
+                if fileUpdateNeedsReviewReset && !sameReview { currentChangeIndex = 0 }
+                fileUpdateNeedsReviewReset = false
                 if let projection = output.discussionText { discussions.acceptProjection(projection) }
                 currentChangeIndex = output.changes.count == 0 ? 0 : min(currentChangeIndex, output.changes.count - 1)
             } catch {

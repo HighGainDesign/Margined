@@ -15,18 +15,24 @@ final class ReaderState {
     let discussions = DiscussionSession()
     private(set) var discussionSaving = false
     var discussionError: String?
+    private(set) var discussionCopyOffered = false
     var fileSaving: Bool { checklistSaving || discussionSaving }
     var canUndoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canUndo(snapshot: sourceSnapshot) }
     var canRedoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canRedo(snapshot: sourceSnapshot) }
 
     func postDiscussion(reopenResolved: Bool = false) {
-        guard !fileSaving, !isRendering, !hasPendingFileUpdate, !isStreamingPreview,
+        guard !fileSaving, !isRendering, !hasPendingFileUpdate, !showChecklistConfirmation,
               let document = rendered?.discussions, document.source.utf8.elementsEqual(source.utf8) else { return }
+        guard fileURL != nil, !isStreamingPreview else { offerDiscussionCopy(); return }
+        discussionCopyOffered = false
         do {
             let operation = try discussions.preparePost(in: document, snapshot: sourceSnapshot, reopenResolved: reopenResolved)
             ReaderPreferences.defaults.set(discussions.displayName, forKey: "discussionDisplayName")
             commitDiscussion(operation)
-        } catch { discussionError = error.localizedDescription }
+        } catch {
+            discussionError = error.localizedDescription
+            if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+        }
     }
     func undoDiscussion() {
         guard canUndoDiscussion, let sourceSnapshot else { return }
@@ -39,13 +45,21 @@ final class ReaderState {
         catch { discussionError = error.localizedDescription }
     }
     func resolveDiscussion(_ threadID: String, choice: DiscussionSession.ResolveChoice) {
-        guard !fileSaving, !isRendering, !hasPendingFileUpdate, !isStreamingPreview,
+        guard !fileSaving, !isRendering, !hasPendingFileUpdate, !showChecklistConfirmation,
               let document = rendered?.discussions else { return }
+        guard fileURL != nil, !isStreamingPreview else { offerDiscussionCopy(); return }
         do {
             if let operation = try discussions.prepareResolve(threadID: threadID, in: document, snapshot: sourceSnapshot, choice: choice) {
                 commitDiscussion(operation)
             }
-        } catch { discussionError = error.localizedDescription }
+        } catch {
+            discussionError = error.localizedDescription
+            if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+        }
+    }
+    private func offerDiscussionCopy() {
+        discussionCopyOffered = true
+        discussionError = DiscussionSession.Failure.savedCopyRequired.localizedDescription
     }
     private func commitDiscussion(_ operation: DiscussionSession.Pending) {
         guard !fileSaving, fileURL == operation.expected.url, sourceSnapshot == operation.expected else {
@@ -55,7 +69,7 @@ final class ReaderState {
         }
         let context = sourceContext, revision = externalFileRevision
         let writing = sourceGate.enqueue { try SourceFileEdit.commit(operation.replacement, expected: operation.expected) }
-        discussionSaving = true; discussionError = nil
+        discussionSaving = true; discussionError = nil; discussionCopyOffered = false
         Task { [weak self, discussions] in
             do {
                 let saved = try await writing.value()
@@ -70,7 +84,7 @@ final class ReaderState {
             } catch {
                 discussions.failed(operation, error: error)
                 guard let self, sourceContext == context else { return }
-                discussionSaving = false; discussionError = error.localizedDescription
+                discussionSaving = false; discussionError = error.localizedDescription; discussionCopyOffered = true
                 reload()
             }
         }
@@ -86,6 +100,7 @@ final class ReaderState {
     var existingSpeech: ReaderSpeech? { speechModel }
     var playbackHolding: Bool { speechModel?.isHolding ?? false }
     private var pendingChangesAnnouncement = false
+    private var fileUpdateNeedsReviewReset = false
     private var pendingReviewAnnouncement = false
 
     init(announcements: ReaderAnnouncements = ReaderAnnouncements(),
@@ -102,7 +117,7 @@ final class ReaderState {
             guard fileURL != oldValue else { return }
             speechModel?.close(discardHold: true)
             _ = sourceGate.close(); sourceGate = SourceFileGate()
-            sourceSnapshot = nil; pendingDiskSnapshot = nil
+            sourceSnapshot = nil; pendingDiskSnapshot = nil; discussionCopyOffered = false
             sourceContext = UUID(); renderedContext = nil
             externalFileRevision += 1
             cancelChecklistConfirmation()
@@ -343,6 +358,7 @@ final class ReaderState {
                   !fileUpdatesPaused, source.utf8.elementsEqual(displayed.utf8), same,
                   pendingFileSource?.utf8.elementsEqual(text.utf8) == true || source.utf8.elementsEqual(text.utf8) else { return }
             applyPendingDiskSnapshot(); pendingFileSource = nil
+            announcements.cancel(topic: .updates)
             acceptFileUpdate(text)
         }
     }
@@ -371,7 +387,7 @@ final class ReaderState {
         guard !text.utf8.elementsEqual(source.utf8) else { errorMessage = nil; return }
         if (pendingChecklistSource?.utf8.elementsEqual(text.utf8) != true) { pendingChangesAnnouncement = true }
         source = text
-        currentChangeIndex = -1
+        fileUpdateNeedsReviewReset = true
         render()
     }
 
@@ -515,6 +531,7 @@ final class ReaderState {
                 }
                 let output = try await MarkdownRenderer.shared.render(text, title: title, wide: wide, baseline: baseline, reviewedUnits: units, loadRemoteImages: loadRemoteImages, appearance: appearance, mapTasks: self?.fileURL != nil, documentLanguage: language, prepareSpeech: true, speechOptions: self?.speechModel?.preferences.options ?? SpeechPreferences.shared.options, previousDiscussionProjection: previousProjection, previousDiscussions: previousDiscussions)
                 guard !Task.isCancelled, self?.sourceContext == context else { return }
+                let sameReview = self?.rendered?.changes.entries == output.changes.entries
                 self?.renderedContext = context
                 self?.rendered = output
                 if let projection = output.discussionText { self?.discussions.acceptProjection(projection) }
@@ -524,6 +541,8 @@ final class ReaderState {
                 ViewingBenchmarkSession.current?.didRender(source: text)
                 #endif
                 if let self {
+                    if fileUpdateNeedsReviewReset && !sameReview { currentChangeIndex = -1 }
+                    fileUpdateNeedsReviewReset = false
                     currentChangeIndex = output.changes.count == 0 ? -1 : min(max(0, currentChangeIndex), output.changes.count - 1)
                     if pendingReviewAnnouncement {
                         pendingReviewAnnouncement = false
@@ -531,7 +550,7 @@ final class ReaderState {
                         announceReview()
                     } else if pendingChangesAnnouncement {
                         pendingChangesAnnouncement = false
-                        announcements.schedule(String(localized: "\(output.changes.count) unreviewed changes available."), topic: .changes)
+                        if !sameReview { announcements.schedule(String(localized: "\(output.changes.count) unreviewed changes available."), topic: .changes) }
                     }
                     if advanceAfterReview {
                         advanceAfterReview = false

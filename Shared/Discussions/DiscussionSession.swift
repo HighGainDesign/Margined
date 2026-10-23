@@ -42,6 +42,11 @@ final class DiscussionSession {
         }
     }
 
+    @ObservationIgnored private let historyByteLimit: Int
+    init(historyByteLimit: Int = 32 * 1_024 * 1_024) {
+        self.historyByteLimit = max(1, historyByteLimit)
+    }
+
     var displayName = ""
     var visible = false
     var filter: Filter = .open
@@ -157,7 +162,11 @@ final class DiscussionSession {
         case .post, .state:
             if let historySnapshot, historySnapshot != operation.expected { undo.removeAll() }
             undo.append(History(before: operation.expected.data, after: snapshot.data, threadID: operation.threadID))
-            if undo.count > 100 { undo.removeFirst() }
+            // Keep at least the latest edit; one record is bounded by the
+            // source-size limit. Older snapshots share a finite memory budget.
+            while undo.count > 1 && (undo.count > 100 || undo.reduce(0, { $0 + $1.before.count + $1.after.count }) > historyByteLimit) {
+                undo.removeFirst()
+            }
             redo.removeAll()
             postedThreads[operation.key] = operation.threadID
             failedAttempts[operation.key] = nil

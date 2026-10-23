@@ -53,6 +53,31 @@ final class DiscussionSessionTests: XCTestCase {
         XCTAssertTrue(target.suffix.contains("New end"))
     }
 
+    @MainActor func testEvictedUndoHistoryKeepsTheLatestPostUndoableAndRedoable() throws {
+        let session = DiscussionSession(historyByteLimit: 1)
+        session.displayName = "Reviewer"
+        let url = URL(fileURLWithPath: "/Document.md")
+        var current = SourceFileEdit.Snapshot(url: url, data: Data("body".utf8), identity: .init(device: 1, inode: 1))
+        var beforeLast = current.data
+        for index in 0..<3 {
+            let key = DiscussionSession.DraftKey.new(UUID())
+            session.selection = key
+            session.setDraft("Note \(index)", for: key, target: .init(type: "TextQuoteSelector", exact: "body", prefix: "", suffix: "", section: nil))
+            beforeLast = current.data
+            let post = try session.preparePost(in: DiscussionCodec.parse(try current.source), snapshot: current)
+            current = .init(url: url, data: post.replacement, identity: .init(device: 1, inode: UInt64(index + 2)))
+            try session.saved(post, as: current)
+        }
+        let last = current.data
+        let undo = try session.prepareUndo(snapshot: current)
+        XCTAssertEqual(undo.replacement, beforeLast)
+        current = .init(url: url, data: undo.replacement, identity: .init(device: 1, inode: 10))
+        try session.saved(undo, as: current)
+        XCTAssertFalse(session.canUndo(snapshot: current), "Old large snapshots must be evicted; the most recent edit stays undoable")
+        let redo = try session.prepareRedo(snapshot: current)
+        XCTAssertEqual(redo.replacement, last)
+    }
+
     // Switching inspector/thread must not discard unsent text; only a verified save acknowledges it.
     @MainActor func testDraftSurvivesSwitchAndFailureAndRequiresExplicitRetry() throws {
         let session = DiscussionSession(), key = DiscussionSession.DraftKey.new(UUID())
