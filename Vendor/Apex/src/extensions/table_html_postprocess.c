@@ -721,6 +721,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
     /* Pre-calculated mapping for current row: HTML position -> original column index */
     int row_col_mapping[50];  /* row_col_mapping[html_pos] = original_col_index */
     int row_col_mapping_size = 0;
+    bool table_has_rowspan = false;
 
     /* Track if we should process alignment (only if alignment colons were detected) */
     bool should_process_alignment = has_alignment_colons;
@@ -774,6 +775,15 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
             table_idx++; /* New table */
             row_idx = -1; /* Reset for each new table */
             in_thead = false;
+            /* Attributes are collected before this pass. Without a rowspan in
+             * this table, the previous-row search cannot cover any column. */
+            table_has_rowspan = false;
+            for (cell_attr *a = attrs; a; a = a->next) {
+                if (a->table_index == table_idx && strstr(a->attributes, "rowspan=")) {
+                    table_has_rowspan = true;
+                    break;
+                }
+            }
 
             /* Check if this table has a caption (before fixing spacing so we can add figure tag) */
             table_caption *cap = NULL;
@@ -1128,7 +1138,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                  * If a previous row has a cell with rowspan that's still active (spans to this row),
                  * then this column won't render a new <td> tag in this HTML row. */
                 bool covered_by_rowspan = false;
-                if (renders_new_cell && row_idx > 0) {
+                if (table_has_rowspan && renders_new_cell && row_idx > 0) {
                     /* Check all previous HTML rows to see if any have a rowspan covering this column */
                     for (int prev_html_row = 0; prev_html_row < row_idx; prev_html_row++) {
                         /* Map previous HTML row to AST row */

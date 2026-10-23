@@ -13,7 +13,11 @@ python3 script/benchmark-viewing.py \
   --output dist/benchmarks/first-run --samples 20
 ```
 
-Leave the screen unlocked and app windows unobstructed. Reports retain synthetic
+Leave the screen unlocked and app windows unobstructed. Release all native
+computer-control sessions before timing; an active automation lease can prevent
+macOS from activating the measured app. Run without other builds or native QA,
+and record source/binary hashes and host load alongside each report. Do not
+relax the active-window guard to obtain a result. Reports retain synthetic
 fixtures, source hashes, raw samples, measured viewport/scale, machine/OS/app
 versions and median/p95. Missing math or diagram artwork invalidates a sample. Cold
 means a fresh app process, with OS caches retained; warm opens reuse a process.
@@ -29,3 +33,14 @@ are never summarized as successful.
 
 System Quick Look and iOS timings require separate native runs. Internal HTML
 packaging timings cannot stand in for system preview display.
+
+The CPU-only table regression can run without an unlocked desktop after building
+optimized products:
+
+```sh
+python3 script/tests/test_apex_tables.py
+```
+
+Set `MARGINED_BENCHMARK_PRODUCTS` if the Release products are elsewhere. Its
+2-second conversion guard catches pathological table processing; it is not a
+viewing-speed target or a substitute for native frame benchmarks.
