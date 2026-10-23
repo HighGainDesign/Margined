@@ -238,9 +238,9 @@ private final class MobileDocumentLease: NSObject, NSFilePresenter, @unchecked S
         self.environment = environment
         self.event = event
         wantsPresentation = isPresented
-        ioQueue = DispatchQueue(label: "design.highgain.mdview.document.\(id)", qos: .userInitiated)
+        ioQueue = DispatchQueue(label: "design.highgain.margined.document.\(id)", qos: .userInitiated)
         presentedItemOperationQueue = OperationQueue()
-        presentedItemOperationQueue.name = "design.highgain.mdview.presenter.\(id)"
+        presentedItemOperationQueue.name = "design.highgain.margined.presenter.\(id)"
         presentedItemOperationQueue.maxConcurrentOperationCount = 1
         super.init()
     }

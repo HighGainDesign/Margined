@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 import SwiftSoup
 import WebKit
-@testable import MDView
+@testable import Margined
 
 final class DocumentChangesTests: XCTestCase {
     func testAdditionEditRemovalAndUnchangedBlocks() async throws {
@@ -11,10 +11,10 @@ final class DocumentChangesTests: XCTestCase {
         let output = try await MarkdownRenderer.shared.render(after, baseline: before)
         XCTAssertEqual(output.changes.entries.map(\.kind), [.edited, .removed, .added])
         let document = try SwiftSoup.parse(output.html)
-        XCTAssertEqual(try document.select(".mdview-change").size(), 2)
+        XCTAssertEqual(try document.select(".margined-change").size(), 2)
         XCTAssertEqual(try document.select("strong mark").text(), "new")
         XCTAssertEqual(try document.select("a").first()?.attr("href"), "https://example.com")
-        XCTAssertFalse(try document.select(".mdview-change").text().contains("Keep this paragraph."))
+        XCTAssertFalse(try document.select(".margined-change").text().contains("Keep this paragraph."))
         XCTAssertEqual(output.changes.entries[1].before, "Remove this paragraph.")
         XCTAssertNil(output.changes.entries[1].targetID)
     }
@@ -26,7 +26,7 @@ final class DocumentChangesTests: XCTestCase {
         let document = try SwiftSoup.parse(output.html)
         XCTAssertEqual(output.changes.count, 1)
         XCTAssertEqual(try document.select("table").size(), 1)
-        XCTAssertEqual(try document.select("td.mdview-change mark").text(), "Complete")
+        XCTAssertEqual(try document.select("td.margined-change mark").text(), "Complete")
         XCTAssertEqual(try document.select("td").size(), 4)
     }
 

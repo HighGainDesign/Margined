@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add an iPhone/iPad MVP with Files, change review and Read Aloud.
+- Renamed MDView to Margined.
 
 ## 1.7.0 — 2026-10-22
 

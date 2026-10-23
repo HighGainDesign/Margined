@@ -42,8 +42,8 @@ struct SettingsView: View {
     private var content: some View {
         Form {
             Section("Document content") {
-                PolicyRow(String(localized: "Local images"), value: String(localized: "Automatic"), help: String(localized: "Local images load automatically from relative paths, absolute paths, file URLs and symlinks wherever macOS allows access. MDView does not require image-folder grants. Image formats are handled by WebKit. Quick Look supports embedded data images only."))
-                PolicyRow(String(localized: "Remote images"), value: String(localized: "Off by default"), help: String(localized: "In a document’s Reading options (…) choose Load Remote Images to allow HTTPS images for that window. Hosts can see your IP address and image requests. MDView sends no document referrer. The choice resets on closing; Quick Look never loads remote images."))
+                PolicyRow(String(localized: "Local images"), value: String(localized: "Automatic"), help: String(localized: "Local images load automatically from relative paths, absolute paths, file URLs and symlinks wherever macOS allows access. Margined does not require image-folder grants. Image formats are handled by WebKit. Quick Look supports embedded data images only."))
+                PolicyRow(String(localized: "Remote images"), value: String(localized: "Off by default"), help: String(localized: "In a document’s Reading options (…) choose Load Remote Images to allow HTTPS images for that window. Hosts can see your IP address and image requests. Margined sends no document referrer. The choice resets on closing; Quick Look never loads remote images."))
                 PolicyRow(String(localized: "Embedded HTML"), value: String(localized: "Sanitized formatting"), help: String(localized: "Safe HTML formatting and image width/height are supported. Scripts, interactive controls and embedded websites are blocked. Remote images still require this document’s opt-in."))
             }
         }.formStyle(.grouped)
@@ -59,7 +59,7 @@ struct SettingsView: View {
                 IntegrationHeading(title: String(localized: "Finder Quick Look"), symbol: "doc.viewfinder",
                                    subtitle: String(localized: "Preview Markdown in Finder with the Space bar."))
                 Button("Open Extension Settings…") { integration.openQuickLookSettings() }
-                    .help("Choose By Category → Quick Look, then enable MDView. Another enabled Markdown previewer may take priority.")
+                    .help("Choose By Category → Quick Look, then enable Margined. Another enabled Markdown previewer may take priority.")
             }
             Section("Drafts") {
                 IntegrationHeading(title: String(localized: "Drafts"), symbol: "square.and.pencil",

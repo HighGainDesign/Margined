@@ -1,4 +1,4 @@
-MDView offline rendering dependencies. Generated from Rendering/package-lock.json.
+Margined offline rendering dependencies. Generated from Rendering/package-lock.json.
 
 
 === @antfu/install-pkg 2.1.0 (MIT) ===

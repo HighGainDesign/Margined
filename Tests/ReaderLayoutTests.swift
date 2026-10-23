@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class ReaderLayoutTests: XCTestCase {
@@ -124,7 +124,7 @@ final class ReaderLayoutTests: XCTestCase {
         let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: bitmap)
         let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MDView-1.3-layout-evidence", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Margined-1.3-layout-evidence", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try png.write(to: directory.appendingPathComponent(name + ".png"))
     }

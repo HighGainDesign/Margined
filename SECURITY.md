@@ -1,6 +1,6 @@
 # Security
 
-MDView handles documents as untrusted input. Documents are read-only by default.
+Margined handles documents as untrusted input. Documents are read-only by default.
 After explicit per-document consent, checklist interaction changes only mapped task markers
 in a user-selected Markdown file. Writes validate the displayed source under
 file coordination and refuse stale clicks; Quick Look and streaming cannot
@@ -16,7 +16,7 @@ write; document HTML and scripts cannot access that bridge.
 
 The directly distributed macOS app uses normal filesystem access rather than
 App Sandbox. Local image paths, file URLs and symlinks may refer to any regular
-file macOS permits the app to read; MDView imposes no document-folder boundary
+file macOS permits the app to read; Margined imposes no document-folder boundary
 or additional image-folder grants. Native reads are bounded, and image bytes
 are decoded by WebKit. Hardened Runtime and Developer ID signing remain enabled.
 The Quick Look extension retains its required sandbox and previews text and
@@ -45,7 +45,7 @@ vulnerability** option when available. If private reporting is unavailable,
 open an issue asking for a private contact without publishing exploit details,
 credentials, or private documents.
 
-Include the MDView and macOS versions, the affected surface, reproduction steps,
+Include the Margined and macOS versions, the affected surface, reproduction steps,
 and a minimal sample. Security fixes target the latest release; older preview
 builds are not maintained separately. There is no guaranteed response time or
 bug bounty.

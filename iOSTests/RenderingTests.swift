@@ -1,6 +1,6 @@
 import XCTest
 import SwiftSoup
-@testable import MDViewiOS
+@testable import MarginediOS
 
 final class RenderingTests: XCTestCase {
     #if DEBUG
@@ -27,9 +27,9 @@ final class RenderingTests: XCTestCase {
         let source = "# Mobile reader\n\n> [!NOTE]\n> Read offline.\n\nFraction $\\frac{1}{2}$.\n\n```mermaid\nflowchart LR\nA[Read]-->B[Review]\n```\n\n- [ ] Check $x^2$\n"
         let result = try await MarkdownRenderer.shared.render(source, mapTasks: true, prepareSpeech: true)
         let doc = try SwiftSoup.parse(result.html)
-        XCTAssertEqual(try doc.select("blockquote.mdview-alert-note").size(), 1)
+        XCTAssertEqual(try doc.select("blockquote.margined-alert-note").size(), 1)
         XCTAssertEqual(try doc.select("math mfrac").size(), 1)
-        XCTAssertEqual(try doc.select("figure.mdview-diagram > img").size(), 1)
+        XCTAssertEqual(try doc.select("figure.margined-diagram > img").size(), 1)
         XCTAssertEqual(result.tasks.count, 1)
         XCTAssertFalse(try XCTUnwrap(result.speech).segments.isEmpty)
         XCTAssertEqual(try doc.select("script, iframe").size(), 0)

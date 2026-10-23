@@ -2,7 +2,7 @@ import Foundation
 import SwiftSoup
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class LocalImageTests: XCTestCase {
     func testAbsoluteImagePathsUseNormalFileAccess() throws {
@@ -29,11 +29,11 @@ final class LocalImageTests: XCTestCase {
         let images = try SwiftSoup.parse(result.html).select("img").array()
         XCTAssertEqual(images.count, 3)
         let url = try XCTUnwrap(URLComponents(string: images[0].attr("src")))
-        XCTAssertEqual(url.scheme, "mdview-resource")
+        XCTAssertEqual(url.scheme, "margined-resource")
         XCTAssertEqual(url.host, "local")
         XCTAssertEqual(String(url.percentEncodedPath.dropFirst()).removingPercentEncoding, "/tmp/mockups/figure.png")
         let fileURL = try XCTUnwrap(URLComponents(string: images[1].attr("src")))
-        XCTAssertEqual(fileURL.scheme, "mdview-resource")
+        XCTAssertEqual(fileURL.scheme, "margined-resource")
         XCTAssertFalse(images[2].hasAttr("src"))
     }
 
@@ -65,7 +65,7 @@ final class LocalImageTests: XCTestCase {
         handler.documentURL = file
         handler.loadFailed = { reader.localImageError = $0 }
         let configuration = WKWebViewConfiguration()
-        configuration.setURLSchemeHandler(handler, forURLScheme: "mdview-resource")
+        configuration.setURLSchemeHandler(handler, forURLScheme: "margined-resource")
         let webView = WKWebView(frame: .zero, configuration: configuration)
         let result = try await MarkdownRenderer.shared.render("""
         ![Parent](../figure.png)

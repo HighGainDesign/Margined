@@ -15,7 +15,7 @@ __pycache__/
 *.py[cod]
 *.xcuserstate
 xcuserdata/
-MDView.xcodeproj/
+*.xcodeproj/
 .codex/
 .agents/
 AGENTS.md

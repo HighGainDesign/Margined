@@ -12,7 +12,7 @@ struct SetupView: View {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Make MDView part of your workflow").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Text("Make Margined part of your workflow").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                     Text("Two optional ways to preview your Markdown.").foregroundStyle(.secondary)
                 }
             }
@@ -30,7 +30,7 @@ struct SetupView: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 14) {
                     IntegrationHeading(title: String(localized: "Drafts"), symbol: "square.and.pencil",
-                                       subtitle: String(localized: "Add Preview in MDView to view a draft without changing it."))
+                                       subtitle: String(localized: "Add Preview in Margined to view a draft without changing it."))
                     ViewThatFits(in: .horizontal) {
                         HStack { draftsAction.fixedSize(); Spacer(minLength: 12); draftsNote.fixedSize() }
                         VStack(alignment: .leading, spacing: 8) { draftsAction; draftsNote }
@@ -41,7 +41,7 @@ struct SetupView: View {
                     }
                 }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             }
-            Text("You can return to these options in MDView Settings.")
+            Text("You can return to these options in Margined Settings.")
                 .font(.callout).foregroundStyle(.secondary)
                     Text("Read Aloud controls are in every document’s toolbar.")
                         .font(.callout).foregroundStyle(.secondary)

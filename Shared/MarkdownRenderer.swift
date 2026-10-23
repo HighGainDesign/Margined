@@ -61,15 +61,15 @@ actor MarkdownRenderer {
         let tasks = mapTasks ? try MarkdownTasks.attach(to: document, source: source) : []
         // Typeset after semantic review/speech, so generated artwork never changes
         // comparison identity or duplicates MathML tokens in Read Aloud.
-        for (index, expression) in try document.select("span.mdview-math").array().enumerated() {
+        for (index, expression) in try document.select("span.margined-math").array().enumerated() {
             let tex = try expression.text(trimAndNormaliseWhitespace: false)
-            try expression.attr("data-mdview-math-source", tex)
-            if index < 200, let math = mathTypesetter.render(tex, display: expression.hasClass("mdview-math-display")) {
+            try expression.attr("data-margined-math-source", tex)
+            if index < 200, let math = mathTypesetter.render(tex, display: expression.hasClass("margined-math-display")) {
                 try expression.html(math)
             }
         }
         let diagramDeadline = ContinuousClock.now.advanced(by: .seconds(6))
-        for (index, figure) in try document.select("figure.mdview-diagram").array().enumerated() {
+        for (index, figure) in try document.select("figure.margined-diagram").array().enumerated() {
             try Task.checkCancellation()
             guard index < 20, ContinuousClock.now < diagramDeadline, let code = try figure.select("pre > code.language-mermaid").first(),
                   let pre = code.parent(), let artifact = await DiagramRenderer.shared.render(try code.text(trimAndNormaliseWhitespace: false)) else { continue }
@@ -92,7 +92,7 @@ actor MarkdownRenderer {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="referrer" content="no-referrer">
         <meta name="color-scheme" content="\(appearance.colorScheme)">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src mdview-resource: data:\(loadRemoteImages ? " https:" : ""); base-uri 'none'; form-action 'none'">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src margined-resource: data:\(loadRemoteImages ? " https:" : ""); base-uri 'none'; form-action 'none'">
         <title>\(Self.escapeHTML(title))</title><style>\(stylesheet ?? "")</style></head>
         <body class="\(wide ? "wide" : "")"><main id="document" dir="auto" aria-label="\(Self.escapeHTML(String(localized: "Markdown document")))">\(body)</main></body></html>
         """
@@ -127,7 +127,7 @@ actor MarkdownRenderer {
         options.generate_header_ids = true
         // Normalize parsed image destinations and exclude author-supplied inputs
         // before they can be mistaken for renderer-generated Markdown task controls.
-        guard let imageExtension = cmark_syntax_extension_new("mdview-local-images") else {
+        guard let imageExtension = cmark_syntax_extension_new("margined-local-images") else {
             throw ReaderError.rendererUnavailable
         }
         defer { cmark_syntax_extension_free(cmark_get_default_mem_allocator(), imageExtension) }
@@ -198,7 +198,7 @@ actor MarkdownRenderer {
         for code in try document.select("pre > code.language-mermaid").array() {
             guard let pre = code.parent() else { continue }
             let figure = Element(try Tag.valueOf("figure"), "")
-            try figure.addClass("mdview-diagram")
+            try figure.addClass("margined-diagram")
             if pre.hasAttr("id") { try figure.attr("id", pre.attr("id")); try pre.removeAttr("id") }
             try pre.before(figure)
             try pre.remove()

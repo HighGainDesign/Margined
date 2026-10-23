@@ -6,7 +6,7 @@ from ds_store import DSStore
 
 folder = Path(sys.argv[1])
 with DSStore.open(str(folder / '.DS_Store'), 'w+') as store:
-    store['MDView.app']['Iloc'] = (160, 170)
+    store['Margined.app']['Iloc'] = (160, 170)
     store['Applications']['Iloc'] = (420, 170)
     store['.']['bwsp'] = {
         'ShowStatusBar': False, 'ShowToolbar': False, 'ShowTabView': False,

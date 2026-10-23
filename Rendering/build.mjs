@@ -5,7 +5,7 @@ const out=resolve('../Shared/Resources');
 await build({entryPoints:['mermaid-entry.js'],bundle:true,format:'iife',target:'safari17',minify:true,legalComments:'eof',outfile:out+'/mermaid.min.js'});
 copyFileSync('node_modules/katex/dist/katex.min.js',out+'/katex.min.js');
 const lock=JSON.parse(readFileSync('package-lock.json'));
-let notices='MDView offline rendering dependencies. Generated from Rendering/package-lock.json.\n';
+let notices='Margined offline rendering dependencies. Generated from Rendering/package-lock.json.\n';
 for(const [path,info] of Object.entries(lock.packages).sort()) {
  if(!path)continue;
  const name=info.name??path.split('node_modules/').at(-1);

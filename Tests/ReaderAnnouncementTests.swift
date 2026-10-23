@@ -1,5 +1,5 @@
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class ReaderAnnouncementTests: XCTestCase {

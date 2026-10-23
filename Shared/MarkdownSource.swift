@@ -31,10 +31,10 @@ enum ReaderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .tooLarge: String(localized: "This document exceeds MDView’s 8 MB preview limit.")
+        case .tooLarge: String(localized: "This document exceeds Margined’s 8 MB preview limit.")
         case .invalidEncoding: String(localized: "This file is not UTF-8 or BOM-marked UTF-16 text.")
         case .rendererUnavailable: String(localized: "The bundled Markdown renderer could not be loaded.")
-        case .invalidPreviewURL: String(localized: "Use mdview://preview?text=…&title=… to preview Markdown.")
+        case .invalidPreviewURL: String(localized: "Use margined://preview?text=…&title=… to preview Markdown.")
         }
     }
 }

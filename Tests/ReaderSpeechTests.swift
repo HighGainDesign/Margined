@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class ReaderSpeechTests: XCTestCase {
@@ -186,7 +186,7 @@ final class ReaderSpeechTests: XCTestCase {
     }
 
     private func makeReader() -> ReaderState {
-        let name = "MDViewTests.ReaderSpeech.\(UUID())"
+        let name = "MarginedTests.ReaderSpeech.\(UUID())"
         let defaults = UserDefaults(suiteName: name)!
         addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
         let preferences = SpeechPreferences(defaults: defaults)

@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>MDView</string>
+	<string>Margined</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -40,7 +40,7 @@
 			<string>Markdown preview</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>mdview</string>
+				<string>margined</string>
 			</array>
 		</dict>
 	</array>

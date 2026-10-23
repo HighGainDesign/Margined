@@ -1,5 +1,5 @@
 import XCTest
-@testable import MDViewiOS
+@testable import MarginediOS
 
 final class MobileLocaleTests: XCTestCase {
     func testAllInterfaceLocalesContainMobileStrings() throws {

@@ -1,10 +1,10 @@
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class SpeechProgressTests: XCTestCase {
     func testProgressResumesExactAndInsertedContentWithoutPersistingDocumentText() async throws {
-        let name = "MDViewTests.Progress.\(UUID())"
+        let name = "MarginedTests.Progress.\(UUID())"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
         let store = SpeechProgressStore(defaults: defaults)
@@ -25,7 +25,7 @@ final class SpeechProgressTests: XCTestCase {
     }
 
     func testChangedOrUnrelatedDocumentDoesNotReuseOldPosition() async throws {
-        let defaults = UserDefaults(suiteName: "MDViewTests.Progress.\(UUID())")!
+        let defaults = UserDefaults(suiteName: "MarginedTests.Progress.\(UUID())")!
         let store = SpeechProgressStore(defaults: defaults); defer { store.clear() }
         let url = URL(fileURLWithPath: "/tmp/first.md")
         let first = try await document("Original.")
@@ -36,7 +36,7 @@ final class SpeechProgressTests: XCTestCase {
     }
 
     func testOldestProgressIsEvictedAndCompletedReadingDoesNotOfferResume() async throws {
-        let defaults = UserDefaults(suiteName: "MDViewTests.Progress.\(UUID())")!
+        let defaults = UserDefaults(suiteName: "MarginedTests.Progress.\(UUID())")!
         let store = SpeechProgressStore(defaults: defaults); defer { store.clear() }
         let doc = try await document("A paragraph.")
         for index in 0..<101 {

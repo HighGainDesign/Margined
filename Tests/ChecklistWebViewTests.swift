@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class ChecklistWebViewTests: XCTestCase {
@@ -41,7 +41,7 @@ final class ChecklistWebViewTests: XCTestCase {
         window.makeFirstResponder(webView)
         // Exercise the real isolated-world message handler and reload path.
         // Production change listeners additionally require a trusted user event.
-        let request = "window.webkit.messageHandlers.taskToggle.postMessage({id: 1, checked: true, token: window.mdviewTaskState.token});"
+        let request = "window.webkit.messageHandlers.taskToggle.postMessage({id: 1, checked: true, token: window.marginedTaskState.token});"
         _ = try await webView.callAsyncJavaScript(request, arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld)
         try await waitForDisabled(true, in: controller.view)
         reader.cancelChecklistConfirmation()
@@ -59,7 +59,7 @@ final class ChecklistWebViewTests: XCTestCase {
     private func waitForFocus(_ id: String, in webView: WKWebView) async throws {
         for _ in 0..<150 {
             if !webView.isLoading,
-               let value = try? await webView.evaluateJavaScript("document.activeElement?.dataset.mdviewTask") as? String,
+               let value = try? await webView.evaluateJavaScript("document.activeElement?.dataset.marginedTask") as? String,
                value == id { return }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -82,20 +82,20 @@ final class ChecklistWebViewTests: XCTestCase {
         let webView = try XCTUnwrap(findWebView(controller.view))
         let before = try await webView.callAsyncJavaScript("""
         // Retain the actual document; performance.timeOrigin is a rounded clock, not an identity.
-        window.mdviewTestDocument = document;
-        window.inputBefore = document.querySelector('input[data-mdview-task="25"]');
+        window.marginedTestDocument = document;
+        window.inputBefore = document.querySelector('input[data-margined-task="25"]');
         window.imageBefore = document.querySelector('img');
         window.inputBefore.scrollIntoView({block: 'center', behavior: 'instant'});
         return { y: window.scrollY };
         """, arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld) as! [String: Double]
         XCTAssertGreaterThan(before["y"]!, 1_000)
         _ = try await webView.callAsyncJavaScript("""
-        window.webkit.messageHandlers.taskToggle.postMessage({id: 25, checked: true, token: window.mdviewTaskState.token});
+        window.webkit.messageHandlers.taskToggle.postMessage({id: 25, checked: true, token: window.marginedTaskState.token});
         """, arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld)
         var saved = false
         for _ in 0..<200 {
             if !reader.checklistSaving, !reader.isRendering,
-               let checked = try? await webView.evaluateJavaScript("document.querySelector('input[data-mdview-task=\"25\"]')?.defaultChecked") as? Bool,
+               let checked = try? await webView.evaluateJavaScript("document.querySelector('input[data-margined-task=\"25\"]')?.defaultChecked") as? Bool,
                checked == true { saved = true; break }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -103,11 +103,11 @@ final class ChecklistWebViewTests: XCTestCase {
         let after = try await webView.callAsyncJavaScript("""
         return { y: window.scrollY };
         """, arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld) as! [String: Double]
-        let sameDocument = try await webView.callAsyncJavaScript("return window.mdviewTestDocument === document;",
+        let sameDocument = try await webView.callAsyncJavaScript("return window.marginedTestDocument === document;",
             arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld) as! Bool
         XCTAssertTrue(sameDocument, "A tick must not navigate to a new webpage")
         XCTAssertEqual(after["y"]!, before["y"]!, accuracy: 2)
-        let sameInput = try await webView.callAsyncJavaScript("return document.querySelector('input[data-mdview-task=\"25\"]') === window.inputBefore;",
+        let sameInput = try await webView.callAsyncJavaScript("return document.querySelector('input[data-margined-task=\"25\"]') === window.inputBefore;",
             arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld) as! Bool
         XCTAssertTrue(sameInput, "A tick should retain the original checkbox element")
         let sameImage = try await webView.callAsyncJavaScript("return !!window.imageBefore && document.querySelector('img') === window.imageBefore;",
@@ -126,7 +126,7 @@ final class ChecklistWebViewTests: XCTestCase {
         defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
         try await waitForDisabled(false, in: controller.view)
         let webView = try XCTUnwrap(findWebView(controller.view))
-        _ = try await webView.evaluateJavaScript("window.mdviewTestDocument = document; true")
+        _ = try await webView.evaluateJavaScript("window.marginedTestDocument = document; true")
         reader.loadRemoteImages = true // No image URLs in the sample; no network requests.
         var changed = false
         for _ in 0..<200 {
@@ -135,7 +135,7 @@ final class ChecklistWebViewTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertTrue(changed)
-        let sameDocument = try await webView.evaluateJavaScript("window.mdviewTestDocument === document") as! Bool
+        let sameDocument = try await webView.evaluateJavaScript("window.marginedTestDocument === document") as! Bool
         XCTAssertFalse(sameDocument, "Policy changes must use a fresh navigation")
     }
 

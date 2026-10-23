@@ -1,2 +1,2 @@
 import mermaid from 'mermaid';
-globalThis.mdviewMermaid = mermaid;
+globalThis.marginedMermaid = mermaid;

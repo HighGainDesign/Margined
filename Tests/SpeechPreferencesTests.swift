@@ -1,10 +1,10 @@
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class SpeechPreferencesTests: XCTestCase {
     func testReadingPreferencesPersistAndClampInvalidRates() {
-        let name = "MDViewTests.SpeechPrefs.\(UUID())", defaults: UserDefaults
+        let name = "MarginedTests.SpeechPrefs.\(UUID())", defaults: UserDefaults
         defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
         let first = SpeechPreferences(defaults: defaults)

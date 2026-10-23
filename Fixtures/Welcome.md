@@ -1,6 +1,6 @@
 # A clearer view of Markdown
 
-MDView is a small reader for your notes, plans, and agent output. Edit this file in another app and the preview follows along.
+Margined is a small reader for your notes, plans, and agent output. Edit this file in another app and the preview follows along.
 
 ## At a glance
 
@@ -17,12 +17,12 @@ MDView is a small reader for your notes, plans, and agent output. Edit this file
 - [x] Read tables, **bold**, *italic*, and ~~strikethrough~~
 - [ ] Try the Drafts action
 
-> Keep the writing in the app you like. Use MDView when you want to read it.
+> Keep the writing in the app you like. Use Margined when you want to read it.
 
 ### A command worth keeping
 
 ```sh
-open -a MDView README.md
+open -a Margined README.md
 ```
 
 ### Notes that link together
@@ -30,7 +30,7 @@ open -a MDView README.md
 You can read ordinary lists, nested lists, and reference links:
 
 1. Write or generate a note.
-2. Open it in MDView.
+2. Open it in Margined.
    - Use ⌘F to find a phrase.
    - Use the outline to jump between sections.
 3. Keep the window open while your agent works.

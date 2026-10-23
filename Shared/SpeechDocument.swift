@@ -65,7 +65,7 @@ enum SpeechDocumentBuilder {
         func walk(_ element: Element) throws {
             guard try element.attr("aria-hidden") != "true", !element.hasAttr("hidden") else { return }
             let tag = element.tagName()
-            if tag == "figure", element.hasClass("mdview-diagram") {
+            if tag == "figure", element.hasClass("margined-diagram") {
                 try append([Part(text: label("diagram"))], element: element, kind: .image)
             } else if ["h1", "h2", "h3", "h4", "h5", "h6"].contains(tag) {
                 let title = try inline(element)
@@ -198,11 +198,11 @@ enum SpeechDocumentBuilder {
                 pendingSpace = part.text.last?.isWhitespace == true
             }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            let existingID = try element.attr("data-mdview-speech")
+            let existingID = try element.attr("data-margined-speech")
             let elementID: String
             if existingID.isEmpty { elementID = "speech-\(nextElement)"; nextElement += 1 }
             else { elementID = existingID }
-            try element.attr("data-mdview-speech", elementID)
+            try element.attr("data-margined-speech", elementID)
             let previous = existingID.isEmpty ? [] : segments.filter { $0.elementID == elementID }
             var offset = previous.reduce(0) { $0 + $1.text.utf16.count }
             anchors = anchors.map { SpeechAnchor(sourceRange: $0.sourceRange, sourceText: $0.sourceText,

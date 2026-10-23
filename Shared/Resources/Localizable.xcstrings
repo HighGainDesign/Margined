@@ -901,42 +901,42 @@
         }
       }
     },
-    "About MDView": {
+    "About Margined": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Acerca de MDView"
+            "value": "Acerca de Margined"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "关于 MDView"
+            "value": "关于 Margined"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "關於 MDView"
+            "value": "關於 Margined"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDViewについて"
+            "value": "Marginedについて"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "À propos de MDView"
+            "value": "À propos de Margined"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Über MDView"
+            "value": "Über Margined"
           }
         }
       }
@@ -1021,42 +1021,42 @@
         }
       }
     },
-    "Add Preview in MDView to view a draft without changing it.": {
+    "Add Preview in Margined to view a draft without changing it.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Añade Preview in MDView para ver un borrador sin modificarlo."
+            "value": "Añade Preview in Margined para ver un borrador sin modificarlo."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "添加 Preview in MDView，即可查看草稿而不修改它。"
+            "value": "添加 Preview in Margined，即可查看草稿而不修改它。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "加入 Preview in MDView，即可檢視草稿而不修改它。"
+            "value": "加入 Preview in Margined，即可檢視草稿而不修改它。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Preview in MDViewを追加すると、下書きを変更せずに表示できます。"
+            "value": "Preview in Marginedを追加すると、下書きを変更せずに表示できます。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ajoutez Preview in MDView pour afficher un brouillon sans le modifier."
+            "value": "Ajoutez Preview in Margined pour afficher un brouillon sans le modifier."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Füge Preview in MDView hinzu, um einen Entwurf ohne Änderungen anzusehen."
+            "value": "Füge Preview in Margined hinzu, um einen Entwurf ohne Änderungen anzusehen."
           }
         }
       }
@@ -1833,122 +1833,122 @@
         }
       }
     },
-    "Choose By Category → Quick Look, then enable MDView.": {
+    "Choose By Category → Quick Look, then enable Margined.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Elige Por categoría → Vista Rápida y activa MDView."
+            "value": "Elige Por categoría → Vista Rápida y activa Margined."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择“按类别”→“快速查看”，然后启用 MDView。"
+            "value": "选择“按类别”→“快速查看”，然后启用 Margined。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "選擇「依類別」→「快速查看」，然後啟用 MDView。"
+            "value": "選擇「依類別」→「快速查看」，然後啟用 Margined。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "「カテゴリ別」→「クイックルック」でMDViewを有効にします。"
+            "value": "「カテゴリ別」→「クイックルック」でMarginedを有効にします。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choisissez Par catégorie → Coup d’œil, puis activez MDView."
+            "value": "Choisissez Par catégorie → Coup d’œil, puis activez Margined."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wähle Nach Kategorie → Schnellvorschau und aktiviere MDView."
+            "value": "Wähle Nach Kategorie → Schnellvorschau und aktiviere Margined."
           }
         }
       }
     },
-    "Choose By Category → Quick Look, then enable MDView. Another enabled Markdown previewer may take priority.": {
+    "Choose By Category → Quick Look, then enable Margined. Another enabled Markdown previewer may take priority.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Elige Por categoría → Vista Rápida y activa MDView. Otro visor Markdown activado podría tener prioridad."
+            "value": "Elige Por categoría → Vista Rápida y activa Margined. Otro visor Markdown activado podría tener prioridad."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择“按类别”→“快速查看”，然后启用 MDView。其他已启用的 Markdown 预览器可能优先使用。"
+            "value": "选择“按类别”→“快速查看”，然后启用 Margined。其他已启用的 Markdown 预览器可能优先使用。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "選擇「依類別」→「快速查看」，然後啟用 MDView。其他已啟用的 Markdown 預覽工具可能優先使用。"
+            "value": "選擇「依類別」→「快速查看」，然後啟用 Margined。其他已啟用的 Markdown 預覽工具可能優先使用。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "「カテゴリ別」→「クイックルック」でMDViewを有効にします。他のMarkdownプレビューが優先される場合があります。"
+            "value": "「カテゴリ別」→「クイックルック」でMarginedを有効にします。他のMarkdownプレビューが優先される場合があります。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choisissez Par catégorie → Coup d’œil, puis activez MDView. Un autre aperçu Markdown activé peut être prioritaire."
+            "value": "Choisissez Par catégorie → Coup d’œil, puis activez Margined. Un autre aperçu Markdown activé peut être prioritaire."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wähle Nach Kategorie → Schnellvorschau und aktiviere MDView. Ein anderes aktives Markdown-Vorschauprogramm kann Vorrang haben."
+            "value": "Wähle Nach Kategorie → Schnellvorschau und aktiviere Margined. Ein anderes aktives Markdown-Vorschauprogramm kann Vorrang haben."
           }
         }
       }
     },
-    "Choose Quick Look, then enable MDView.": {
+    "Choose Quick Look, then enable Margined.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Elige Vista Rápida y activa MDView."
+            "value": "Elige Vista Rápida y activa Margined."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择“快速查看”，然后启用 MDView。"
+            "value": "选择“快速查看”，然后启用 Margined。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "選擇「快速查看」，然後啟用 MDView。"
+            "value": "選擇「快速查看」，然後啟用 Margined。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "「クイックルック」でMDViewを有効にします。"
+            "value": "「クイックルック」でMarginedを有効にします。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choisissez Coup d’œil, puis activez MDView."
+            "value": "Choisissez Coup d’œil, puis activez Margined."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wähle Schnellvorschau und aktiviere MDView."
+            "value": "Wähle Schnellvorschau und aktiviere Margined."
           }
         }
       }
@@ -3559,42 +3559,42 @@
         }
       }
     },
-    "Finish importing Preview in MDView in Drafts.": {
+    "Finish importing Preview in Margined in Drafts.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Completa la importación de Preview in MDView en Drafts."
+            "value": "Completa la importación de Preview in Margined en Drafts."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请在 Drafts 中完成 Preview in MDView 的导入。"
+            "value": "请在 Drafts 中完成 Preview in Margined 的导入。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "請在 Drafts 中完成 Preview in MDView 的匯入。"
+            "value": "請在 Drafts 中完成 Preview in Margined 的匯入。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "DraftsでPreview in MDViewの読み込みを完了してください。"
+            "value": "DraftsでPreview in Marginedの読み込みを完了してください。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Terminez l’importation de Preview in MDView dans Drafts."
+            "value": "Terminez l’importation de Preview in Margined dans Drafts."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Schließe den Import von Preview in MDView in Drafts ab."
+            "value": "Schließe den Import von Preview in Margined in Drafts ab."
           }
         }
       }
@@ -4320,42 +4320,42 @@
         }
       }
     },
-    "Hide MDView": {
+    "Hide Margined": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ocultar MDView"
+            "value": "Ocultar Margined"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "隐藏 MDView"
+            "value": "隐藏 Margined"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "隱藏 MDView"
+            "value": "隱藏 Margined"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDViewを隠す"
+            "value": "Marginedを隠す"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Masquer MDView"
+            "value": "Masquer Margined"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView ausblenden"
+            "value": "Margined ausblenden"
           }
         }
       }
@@ -4486,24 +4486,24 @@
         }
       }
     },
-    "In a document’s Reading options (…) choose Load Remote Images to allow HTTPS images for that window. Hosts can see your IP address and image requests. MDView sends no document referrer. The choice resets on closing; Quick Look never loads remote images.": {
+    "In a document’s Reading options (…) choose Load Remote Images to allow HTTPS images for that window. Hosts can see your IP address and image requests. Margined sends no document referrer. The choice resets on closing; Quick Look never loads remote images.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "En Opciones de lectura (…) elige Cargar imágenes remotas para permitir imágenes HTTPS en esa ventana. Los servidores ven tu IP y las solicitudes. MDView no envía la dirección del documento. Se restablece al cerrar; Vista Rápida nunca carga imágenes remotas."
+            "value": "En Opciones de lectura (…) elige Cargar imágenes remotas para permitir imágenes HTTPS en esa ventana. Los servidores ven tu IP y las solicitudes. Margined no envía la dirección del documento. Se restablece al cerrar; Vista Rápida nunca carga imágenes remotas."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在文档的“阅读选项”(…) 中选择“载入远程图片”，即可允许此窗口显示 HTTPS 图片。服务器可看到 IP 地址和图片请求。MDView 不发送文档来源信息。关闭后重置；快速查看从不载入远程图片。"
+            "value": "在文档的“阅读选项”(…) 中选择“载入远程图片”，即可允许此窗口显示 HTTPS 图片。服务器可看到 IP 地址和图片请求。Margined 不发送文档来源信息。关闭后重置；快速查看从不载入远程图片。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在文件的「閱讀選項」(…) 中選擇「載入遠端圖片」，即可允許此視窗顯示 HTTPS 圖片。伺服器可看到 IP 位址和圖片請求。MDView 不傳送文件來源資訊。關閉後重設；快速查看從不載入遠端圖片。"
+            "value": "在文件的「閱讀選項」(…) 中選擇「載入遠端圖片」，即可允許此視窗顯示 HTTPS 圖片。伺服器可看到 IP 位址和圖片請求。Margined 不傳送文件來源資訊。關閉後重設；快速查看從不載入遠端圖片。"
           }
         },
         "ja": {
@@ -4566,42 +4566,42 @@
         }
       }
     },
-    "Install Drafts before importing the MDView preview action.": {
+    "Install Drafts before importing the Margined preview action.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Instala Drafts antes de importar la acción de vista previa de MDView."
+            "value": "Instala Drafts antes de importar la acción de vista previa de Margined."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请先安装 Drafts，再导入 MDView 预览动作。"
+            "value": "请先安装 Drafts，再导入 Margined 预览动作。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "請先安裝 Drafts，再匯入 MDView 預覽動作。"
+            "value": "請先安裝 Drafts，再匯入 Margined 預覽動作。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDViewのプレビューアクションを読み込む前にDraftsをインストールしてください。"
+            "value": "Marginedのプレビューアクションを読み込む前にDraftsをインストールしてください。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Installez Drafts avant d’importer l’action d’aperçu MDView."
+            "value": "Installez Drafts avant d’importer l’action d’aperçu Margined."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Installiere Drafts, bevor du die MDView-Vorschauaktion importierst."
+            "value": "Installiere Drafts, bevor du die Margined-Vorschauaktion importierst."
           }
         }
       }
@@ -5172,24 +5172,24 @@
         }
       }
     },
-    "Local images load automatically from relative paths, absolute paths, file URLs and symlinks wherever macOS allows access. MDView does not require image-folder grants. Image formats are handled by WebKit. Quick Look supports embedded data images only.": {
+    "Local images load automatically from relative paths, absolute paths, file URLs and symlinks wherever macOS allows access. Margined does not require image-folder grants. Image formats are handled by WebKit. Quick Look supports embedded data images only.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Las imágenes locales se cargan automáticamente desde rutas relativas o absolutas, URL de archivo y enlaces simbólicos donde macOS permita el acceso. MDView no requiere permisos por carpeta. WebKit gestiona los formatos. Vista Rápida solo admite imágenes de datos incrustadas."
+            "value": "Las imágenes locales se cargan automáticamente desde rutas relativas o absolutas, URL de archivo y enlaces simbólicos donde macOS permita el acceso. Margined no requiere permisos por carpeta. WebKit gestiona los formatos. Vista Rápida solo admite imágenes de datos incrustadas."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "只要 macOS 允许访问，本地图片就会自动从相对路径、绝对路径、文件 URL 和符号链接载入。MDView 不要求授予图片文件夹权限。图片格式由 WebKit 处理。快速查看仅支持内嵌数据图片。"
+            "value": "只要 macOS 允许访问，本地图片就会自动从相对路径、绝对路径、文件 URL 和符号链接载入。Margined 不要求授予图片文件夹权限。图片格式由 WebKit 处理。快速查看仅支持内嵌数据图片。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "只要 macOS 允許存取，本機圖片就會自動從相對路徑、絕對路徑、檔案 URL 和符號連結載入。MDView 不要求授予圖片資料夾權限。圖片格式由 WebKit 處理。快速查看僅支援內嵌資料圖片。"
+            "value": "只要 macOS 允許存取，本機圖片就會自動從相對路徑、絕對路徑、檔案 URL 和符號連結載入。Margined 不要求授予圖片資料夾權限。圖片格式由 WebKit 處理。快速查看僅支援內嵌資料圖片。"
           }
         },
         "ja": {
@@ -5212,202 +5212,202 @@
         }
       }
     },
-    "MDView": {
+    "Margined": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView"
+            "value": "Margined"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView"
+            "value": "Margined"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView"
+            "value": "Margined"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView"
+            "value": "Margined"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView"
+            "value": "Margined"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView"
+            "value": "Margined"
           }
         }
       }
     },
-    "MDView Settings": {
+    "Margined Settings": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ajustes de MDView"
+            "value": "Ajustes de Margined"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 设置"
+            "value": "Margined 设置"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 設定"
+            "value": "Margined 設定"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView設定"
+            "value": "Margined設定"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Réglages de MDView"
+            "value": "Réglages de Margined"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView-Einstellungen"
+            "value": "Margined-Einstellungen"
           }
         }
       }
     },
-    "MDView Setup": {
+    "Margined Setup": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Configurar MDView"
+            "value": "Configurar Margined"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 初始设置"
+            "value": "Margined 初始设置"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 初始設定"
+            "value": "Margined 初始設定"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDViewのセットアップ"
+            "value": "Marginedのセットアップ"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Configuration de MDView"
+            "value": "Configuration de Margined"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView einrichten"
+            "value": "Margined einrichten"
           }
         }
       }
     },
-    "MDView remembers positions in saved files using content hashes and offsets. It does not save document text or live streams in reading history.": {
+    "Margined remembers positions in saved files using content hashes and offsets. It does not save document text or live streams in reading history.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView recuerda la posición en archivos guardados mediante hashes de contenido y desplazamientos. No guarda texto ni transmisiones en el historial."
+            "value": "Margined recuerda la posición en archivos guardados mediante hashes de contenido y desplazamientos. No guarda texto ni transmisiones en el historial."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 使用内容哈希和偏移量记住已保存文件中的位置。朗读记录不保存文档文字或实时流。"
+            "value": "Margined 使用内容哈希和偏移量记住已保存文件中的位置。朗读记录不保存文档文字或实时流。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 使用內容雜湊和位移量記住已儲存檔案中的位置。朗讀記錄不儲存文件文字或即時串流。"
+            "value": "Margined 使用內容雜湊和位移量記住已儲存檔案中的位置。朗讀記錄不儲存文件文字或即時串流。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDViewは内容のハッシュと位置情報で保存済みファイルの再生位置を記憶します。履歴に書類のテキストやライブストリームは保存しません。"
+            "value": "Marginedは内容のハッシュと位置情報で保存済みファイルの再生位置を記憶します。履歴に書類のテキストやライブストリームは保存しません。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView mémorise les positions des fichiers enregistrés par empreintes et décalages. L’historique ne contient ni texte des documents ni flux en direct."
+            "value": "Margined mémorise les positions des fichiers enregistrés par empreintes et décalages. L’historique ne contient ni texte des documents ni flux en direct."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView merkt sich Positionen in gespeicherten Dateien anhand von Inhalts-Hashes und Versätzen. Der Leseverlauf speichert weder Dokumenttext noch Live-Streams."
+            "value": "Margined merkt sich Positionen in gespeicherten Dateien anhand von Inhalts-Hashes und Versätzen. Der Leseverlauf speichert weder Dokumenttext noch Live-Streams."
           }
         }
       }
     },
-    "Make MDView part of your workflow": {
+    "Make Margined part of your workflow": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Integra MDView en tu flujo de trabajo"
+            "value": "Integra Margined en tu flujo de trabajo"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将 MDView 融入工作流程"
+            "value": "将 Margined 融入工作流程"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "將 MDView 融入工作流程"
+            "value": "將 Margined 融入工作流程"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDViewをワークフローに追加"
+            "value": "Marginedをワークフローに追加"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Intégrez MDView à votre travail"
+            "value": "Intégrez Margined à votre travail"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView in deinen Arbeitsablauf einbinden"
+            "value": "Margined in deinen Arbeitsablauf einbinden"
           }
         }
       }
@@ -7380,42 +7380,42 @@
         }
       }
     },
-    "Quit MDView": {
+    "Quit Margined": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Salir de MDView"
+            "value": "Salir de Margined"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出 MDView"
+            "value": "退出 Margined"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "結束 MDView"
+            "value": "結束 Margined"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDViewを終了"
+            "value": "Marginedを終了"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quitter MDView"
+            "value": "Quitter Margined"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView beenden"
+            "value": "Margined beenden"
           }
         }
       }
@@ -10317,42 +10317,42 @@
         }
       }
     },
-    "The Drafts action is missing from this MDView build.": {
+    "The Drafts action is missing from this Margined build.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esta versión de MDView no incluye la acción de Drafts."
+            "value": "Esta versión de Margined no incluye la acción de Drafts."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此 MDView 构建缺少 Drafts 动作。"
+            "value": "此 Margined 构建缺少 Drafts 动作。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "此 MDView 版本缺少 Drafts 動作。"
+            "value": "此 Margined 版本缺少 Drafts 動作。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このMDViewにはDraftsアクションがありません。"
+            "value": "このMarginedにはDraftsアクションがありません。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’action Drafts est absente de cette version de MDView."
+            "value": "L’action Drafts est absente de cette version de Margined."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "In diesem MDView-Build fehlt die Drafts-Aktion."
+            "value": "In diesem Margined-Build fehlt die Drafts-Aktion."
           }
         }
       }
@@ -10444,42 +10444,42 @@
         }
       }
     },
-    "The file changed before the checkbox could be saved. MDView refreshed it; please try again.": {
+    "The file changed before the checkbox could be saved. Margined refreshed it; please try again.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "El archivo cambió antes de guardar la casilla. MDView lo ha actualizado; inténtalo de nuevo."
+            "value": "El archivo cambió antes de guardar la casilla. Margined lo ha actualizado; inténtalo de nuevo."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "保存勾选前文件已更改。MDView 已刷新文件，请重试。"
+            "value": "保存勾选前文件已更改。Margined 已刷新文件，请重试。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "儲存勾選前檔案已變更。MDView 已重新整理檔案，請再試一次。"
+            "value": "儲存勾選前檔案已變更。Margined 已重新整理檔案，請再試一次。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "チェックの保存前にファイルが変わりました。MDViewが更新したので、もう一度お試しください。"
+            "value": "チェックの保存前にファイルが変わりました。Marginedが更新したので、もう一度お試しください。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le fichier a changé avant l’enregistrement de la coche. MDView l’a actualisé ; réessayez."
+            "value": "Le fichier a changé avant l’enregistrement de la coche. Margined l’a actualisé ; réessayez."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Die Datei wurde vor dem Speichern des Häkchens geändert. MDView hat sie aktualisiert; versuche es erneut."
+            "value": "Die Datei wurde vor dem Speichern des Häkchens geändert. Margined hat sie aktualisiert; versuche es erneut."
           }
         }
       }
@@ -10684,42 +10684,42 @@
         }
       }
     },
-    "This document exceeds MDView’s 8 MB preview limit.": {
+    "This document exceeds Margined’s 8 MB preview limit.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Este documento supera el límite de vista previa de 8 MB de MDView."
+            "value": "Este documento supera el límite de vista previa de 8 MB de Margined."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此文档超过 MDView 的 8 MB 预览限制。"
+            "value": "此文档超过 Margined 的 8 MB 预览限制。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "此文件超過 MDView 的 8 MB 預覽限制。"
+            "value": "此文件超過 Margined 的 8 MB 預覽限制。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "この書類はMDViewのプレビュー上限8 MBを超えています。"
+            "value": "この書類はMarginedのプレビュー上限8 MBを超えています。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce document dépasse la limite d’aperçu de 8 Mo de MDView."
+            "value": "Ce document dépasse la limite d’aperçu de 8 Mo de Margined."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dieses Dokument überschreitet MDViews Vorschaugrenze von 8 MB."
+            "value": "Dieses Dokument überschreitet Margineds Vorschaugrenze von 8 MB."
           }
         }
       }
@@ -11284,42 +11284,42 @@
         }
       }
     },
-    "Use mdview://preview?text=…&title=… to preview Markdown.": {
+    "Use margined://preview?text=…&title=… to preview Markdown.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Usa mdview://preview?text=…&title=… para ver Markdown."
+            "value": "Usa margined://preview?text=…&title=… para ver Markdown."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 mdview://preview?text=…&title=… 预览 Markdown。"
+            "value": "使用 margined://preview?text=…&title=… 预览 Markdown。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 mdview://preview?text=…&title=… 預覽 Markdown。"
+            "value": "使用 margined://preview?text=…&title=… 預覽 Markdown。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "mdview://preview?text=…&title=…でMarkdownをプレビューできます。"
+            "value": "margined://preview?text=…&title=…でMarkdownをプレビューできます。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Utilisez mdview://preview?text=…&title=… pour prévisualiser du Markdown."
+            "value": "Utilisez margined://preview?text=…&title=… pour prévisualiser du Markdown."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verwende mdview://preview?text=…&title=… zur Markdown-Vorschau."
+            "value": "Verwende margined://preview?text=…&title=… zur Markdown-Vorschau."
           }
         }
       }
@@ -11684,42 +11684,42 @@
         }
       }
     },
-    "You can return to these options in MDView Settings.": {
+    "You can return to these options in Margined Settings.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Puedes volver a estas opciones en los ajustes de MDView."
+            "value": "Puedes volver a estas opciones en los ajustes de Margined."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可随时在 MDView 设置中返回这些选项。"
+            "value": "可随时在 Margined 设置中返回这些选项。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "可隨時在 MDView 設定中返回這些選項。"
+            "value": "可隨時在 Margined 設定中返回這些選項。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "これらのオプションはMDView設定でいつでも変更できます。"
+            "value": "これらのオプションはMargined設定でいつでも変更できます。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retrouvez ces options dans les réglages de MDView."
+            "value": "Retrouvez ces options dans les réglages de Margined."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Diese Optionen findest du jederzeit in den MDView-Einstellungen."
+            "value": "Diese Optionen findest du jederzeit in den Margined-Einstellungen."
           }
         }
       }
@@ -12966,42 +12966,42 @@
         }
       }
     },
-    "MDView 2.0 · iOS development build": {
+    "Margined 2.0 · iOS development build": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 2.0 · Compilación de desarrollo para iOS"
+            "value": "Margined 2.0 · Compilación de desarrollo para iOS"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 2.0 · iOS 开发版本"
+            "value": "Margined 2.0 · iOS 开发版本"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 2.0 · iOS 開發版本"
+            "value": "Margined 2.0 · iOS 開發版本"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 2.0 · iOS 開発ビルド"
+            "value": "Margined 2.0 · iOS 開発ビルド"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 2.0 · Version de développement iOS"
+            "value": "Margined 2.0 · Version de développement iOS"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MDView 2.0 · iOS-Entwicklungsbuild"
+            "value": "Margined 2.0 · iOS-Entwicklungsbuild"
           }
         }
       }

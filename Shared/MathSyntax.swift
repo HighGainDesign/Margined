@@ -84,7 +84,7 @@ enum MathSyntax {
 
     static func placeholder(_ tex: String, display: Bool, block: Bool = false) -> String {
         let escaped = tex.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
-        let span = "<span class=\"mdview-math \(display ? "mdview-math-display" : "mdview-math-inline")\">\(escaped)</span>"
-        return block ? "<p class=\"mdview-math-block\">\(span)</p>" : span
+        let span = "<span class=\"margined-math \(display ? "margined-math-display" : "margined-math-inline")\">\(escaped)</span>"
+        return block ? "<p class=\"margined-math-block\">\(span)</p>" : span
     }
 }

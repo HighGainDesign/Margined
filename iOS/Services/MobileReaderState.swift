@@ -11,7 +11,7 @@ final class MobileReaderState {
     let access: MobileDocumentAccess
     @ObservationIgnored private let defaults: UserDefaults
     private(set) var source = ""
-    private(set) var title = "MDView"
+    private(set) var title = "Margined"
     private(set) var fileURL: URL?
     private(set) var rendered: RenderedMarkdown?
     private(set) var hasDocument = false
@@ -133,7 +133,7 @@ final class MobileReaderState {
         renderTask?.cancel(); isRendering = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil
         reviewedSource = nil; reviewedUnits = nil; rendered = nil
-        source = ""; title = "MDView"; hasDocument = false; isOpening = false
+        source = ""; title = "Margined"; hasDocument = false; isOpening = false
         wide = defaults.object(forKey: "fullWidthByDefault") as? Bool ?? true
         appearance = ReaderPreferences.appearance(in: defaults)
         checklistMode = false; checklistSaving = false; pendingConsent = nil

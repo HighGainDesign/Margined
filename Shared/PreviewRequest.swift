@@ -5,7 +5,7 @@ struct PreviewRequest: Equatable, Sendable {
     let title: String
 
     init(url: URL) throws {
-        guard url.scheme?.lowercased() == "mdview", url.host == "preview",
+        guard url.scheme?.lowercased() == "margined", url.host == "preview",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let text = components.queryItems?.first(where: { $0.name == "text" })?.value else {
             throw ReaderError.invalidPreviewURL

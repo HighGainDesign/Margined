@@ -11,7 +11,7 @@ enum DraftsIntegration {
         guard let application = NSWorkspace.shared.urlForApplication(withBundleIdentifier: applicationID) else {
             throw InstallError.draftsNotInstalled
         }
-        guard let action = Bundle.main.url(forResource: "Preview in MDView", withExtension: "draftsAction") else {
+        guard let action = Bundle.main.url(forResource: "Preview in Margined", withExtension: "draftsAction") else {
             throw InstallError.actionNotBundled
         }
         let configuration = NSWorkspace.OpenConfiguration()
@@ -23,8 +23,8 @@ enum DraftsIntegration {
         case draftsNotInstalled, actionNotBundled
         var errorDescription: String? {
             switch self {
-            case .draftsNotInstalled: String(localized: "Install Drafts before importing the MDView preview action.")
-            case .actionNotBundled: String(localized: "The Drafts action is missing from this MDView build.")
+            case .draftsNotInstalled: String(localized: "Install Drafts before importing the Margined preview action.")
+            case .actionNotBundled: String(localized: "The Drafts action is missing from this Margined build.")
             }
         }
     }

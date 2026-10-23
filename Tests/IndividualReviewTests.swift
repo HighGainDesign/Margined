@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 import SwiftSoup
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class IndividualReviewTests: XCTestCase {
@@ -14,7 +14,7 @@ final class IndividualReviewTests: XCTestCase {
         try await settle(reader)
         XCTAssertEqual(reader.changes.count, 1)
         XCTAssertEqual(reader.selectedChange?.after, "New second.")
-        XCTAssertEqual(try SwiftSoup.parse(reader.rendered!.html).select(".mdview-change").size(), 1)
+        XCTAssertEqual(try SwiftSoup.parse(reader.rendered!.html).select(".margined-change").size(), 1)
         reader.wide.toggle()
         reader.render()
         try await settle(reader)

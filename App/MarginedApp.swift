@@ -1,7 +1,7 @@
 import AppKit
 
 @main
-enum MDViewApp {
+enum MarginedApp {
     @MainActor
     static func main() {
         let application = NSApplication.shared

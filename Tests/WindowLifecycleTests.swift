@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class WindowLifecycleTests: XCTestCase {
     @MainActor
@@ -8,10 +8,10 @@ final class WindowLifecycleTests: XCTestCase {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
         XCTAssertTrue(NSDocumentController.shared.documents.isEmpty)
         XCTAssertFalse(app.applicationShouldOpenUntitledFile(NSApp))
-        let welcome = try XCTUnwrap(NSApp.windows.first { $0.title == "MDView" && $0.isVisible })
+        let welcome = try XCTUnwrap(NSApp.windows.first { $0.title == "Margined" && $0.isVisible })
         defer { welcome.close() }
 
-        let request = try PreviewRequest(url: XCTUnwrap(URL(string: "mdview://preview?text=%23%20Window%20check&title=Reader%20check")))
+        let request = try PreviewRequest(url: XCTUnwrap(URL(string: "margined://preview?text=%23%20Window%20check&title=Reader%20check")))
         let document = MarkdownDocument(preview: request)
         NSDocumentController.shared.addDocument(document)
         defer { document.close() }

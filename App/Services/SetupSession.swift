@@ -29,7 +29,7 @@ final class SetupSession {
         defer { installingDrafts = false }
         do {
             try await importDrafts()
-            draftsStatus = String(localized: "Finish importing Preview in MDView in Drafts.")
+            draftsStatus = String(localized: "Finish importing Preview in Margined in Drafts.")
         } catch {
             draftsStatus = error.localizedDescription
         }

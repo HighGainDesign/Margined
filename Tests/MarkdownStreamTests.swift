@@ -1,11 +1,11 @@
 import AppKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class MarkdownStreamTests: XCTestCase {
     @MainActor
     func testOptionalSourceMetadataAndChannelIsNotModified() throws {
-        let board = NSPasteboard(name: NSPasteboard.Name("MDViewTests.Stream.\(UUID())"))
+        let board = NSPasteboard(name: NSPasteboard.Name("MarginedTests.Stream.\(UUID())"))
         defer { board.releaseGlobally() }
         let stream = MarkdownStream(pasteboard: board)
         XCTAssertEqual(try stream.read(after: nil)?.update, .waiting)
@@ -26,7 +26,7 @@ final class MarkdownStreamTests: XCTestCase {
 
     @MainActor
     func testOrdinaryCommentsAndInvalidSourceMetadataRemainMarkdown() throws {
-        let board = NSPasteboard(name: NSPasteboard.Name("MDViewTests.Stream.\(UUID())"))
+        let board = NSPasteboard(name: NSPasteboard.Name("MarginedTests.Stream.\(UUID())"))
         defer { board.releaseGlobally() }
         let stream = MarkdownStream(pasteboard: board)
         for text in ["<!-- a normal comment -->\n# Text", "<!--\nsource: \n-->\n# Text",
@@ -40,7 +40,7 @@ final class MarkdownStreamTests: XCTestCase {
 
     @MainActor
     func testSourceChangesEvenWhenMarkdownStaysTheSame() async throws {
-        let board = NSPasteboard(name: NSPasteboard.Name("MDViewTests.Stream.\(UUID())"))
+        let board = NSPasteboard(name: NSPasteboard.Name("MarginedTests.Stream.\(UUID())"))
         defer { board.releaseGlobally() }
         let reader = ReaderState()
         reader.isStreamingPreview = true
@@ -62,7 +62,7 @@ final class MarkdownStreamTests: XCTestCase {
 
     @MainActor
     func testOversizeAndInvalidUTF8AreRejected() throws {
-        let board = NSPasteboard(name: NSPasteboard.Name("MDViewTests.Stream.\(UUID())"))
+        let board = NSPasteboard(name: NSPasteboard.Name("MarginedTests.Stream.\(UUID())"))
         defer { board.releaseGlobally() }
         let stream = MarkdownStream(pasteboard: board)
         board.clearContents()
@@ -75,7 +75,7 @@ final class MarkdownStreamTests: XCTestCase {
 
     @MainActor
     func testReceiverPausesResumesClearsAndStopsWithoutWriting() async throws {
-        let board = NSPasteboard(name: NSPasteboard.Name("MDViewTests.Stream.\(UUID())"))
+        let board = NSPasteboard(name: NSPasteboard.Name("MarginedTests.Stream.\(UUID())"))
         defer { board.releaseGlobally() }
         let reader = ReaderState()
         reader.isStreamingPreview = true
@@ -104,7 +104,7 @@ final class MarkdownStreamTests: XCTestCase {
 
     @MainActor
     func testInvalidStreamRetainsLastPreviewAndRecovers() async throws {
-        let board = NSPasteboard(name: NSPasteboard.Name("MDViewTests.Stream.\(UUID())"))
+        let board = NSPasteboard(name: NSPasteboard.Name("MarginedTests.Stream.\(UUID())"))
         defer { board.releaseGlobally() }
         let reader = ReaderState()
         reader.isStreamingPreview = true

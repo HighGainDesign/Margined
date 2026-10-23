@@ -19,7 +19,7 @@ struct MarkdownWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "mdview-resource")
+        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "margined-resource")
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.taskWorld, name: "taskToggle")
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -59,7 +59,7 @@ struct MarkdownWebView: NSViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-        static let taskWorld = WKContentWorld.world(name: "MDViewChecklist")
+        static let taskWorld = WKContentWorld.world(name: "MarginedChecklist")
         let reader: ReaderState
         let images = ImageSchemeHandler()
         weak var webView: WKWebView?
@@ -216,33 +216,33 @@ struct MarkdownWebView: NSViewRepresentable {
                     // Restore DOM focus only while WebKit still owns the native
                     // responder. Ordinary Tab/click moves must win over this save.
                     _ = try await webView.callAsyncJavaScript("""
-                    if (!window.mdviewTaskFocusListener) {
-                        window.mdviewTaskFocusListener = true;
+                    if (!window.marginedTaskFocusListener) {
+                        window.marginedTaskFocusListener = true;
                         document.addEventListener('focusin', event => {
-                            const pending = window.mdviewPendingTaskFocus;
+                            const pending = window.marginedPendingTaskFocus;
                             if (pending && event.target !== pending.node) pending.moved = true;
                         });
                     }
-                    if (!enabled && !window.mdviewPendingTaskFocus) {
+                    if (!enabled && !window.marginedPendingTaskFocus) {
                         const selection = getSelection();
-                        window.mdviewPendingTaskFocus = {node:document.activeElement, intent:focusIntent, moved:false,
+                        window.marginedPendingTaskFocus = {node:document.activeElement, intent:focusIntent, moved:false,
                             selection:selection?.rangeCount ? {anchor:selection.anchorNode, anchorOffset:selection.anchorOffset,
                                 focus:selection.focusNode, focusOffset:selection.focusOffset} : null};
                     }
-                    window.mdviewTaskState = { enabled, canSave, token };
-                    for (const input of document.querySelectorAll('input[data-mdview-task]')) {
+                    window.marginedTaskState = { enabled, canSave, token };
+                    for (const input of document.querySelectorAll('input[data-margined-task]')) {
                         input.disabled = !enabled;
                         if (!saving && !rendering) input.checked = input.defaultChecked;
                         input.title = holding ? holdingTitle : (canSave ? saveTitle : consentTitle);
                     }
                     if (enabled) {
-                        const pendingFocus = window.mdviewPendingTaskFocus;
+                        const pendingFocus = window.marginedPendingTaskFocus;
                         const mayRestore = restoreFocus && !pendingFocus?.moved &&
                             (document.activeElement === document.body || document.activeElement === pendingFocus?.node);
                         if (focusID >= 0 && mayRestore) {
-                            document.querySelector(`input[data-mdview-task="${focusID}"]`)?.focus({preventScroll: true});
-                        } else if (mayRestore && window.mdviewPendingTaskFocus?.intent === focusIntent && window.mdviewPendingTaskFocus.node.isConnected) {
-                            const pending = window.mdviewPendingTaskFocus;
+                            document.querySelector(`input[data-margined-task="${focusID}"]`)?.focus({preventScroll: true});
+                        } else if (mayRestore && window.marginedPendingTaskFocus?.intent === focusIntent && window.marginedPendingTaskFocus.node.isConnected) {
+                            const pending = window.marginedPendingTaskFocus;
                             pending.node.focus({preventScroll:true});
                             const selection = pending.selection;
                             if (selection?.anchor?.isConnected && selection?.focus?.isConnected) {
@@ -251,18 +251,18 @@ struct MarkdownWebView: NSViewRepresentable {
                                     selection.focus, Math.min(selection.focusOffset,limit(selection.focus)));
                             }
                         }
-                        window.mdviewPendingTaskFocus = null;
+                        window.marginedPendingTaskFocus = null;
                     }
-                    if (!window.mdviewTaskListener) {
-                        window.mdviewTaskListener = true;
+                    if (!window.marginedTaskListener) {
+                        window.marginedTaskListener = true;
                         document.addEventListener('change', event => {
                             const input = event.target;
-                            const state = window.mdviewTaskState;
-                            if (!event.isTrusted || !state.enabled || !(input instanceof HTMLInputElement) || !input.hasAttribute('data-mdview-task')) return;
+                            const state = window.marginedTaskState;
+                            if (!event.isTrusted || !state.enabled || !(input instanceof HTMLInputElement) || !input.hasAttribute('data-margined-task')) return;
                             const checked = input.checked;
                             if (!state.canSave) input.checked = input.defaultChecked;
-                            for (const box of document.querySelectorAll('input[data-mdview-task]')) box.disabled = true;
-                            window.webkit.messageHandlers.taskToggle.postMessage({id: Number(input.dataset.mdviewTask), checked, token: state.token});
+                            for (const box of document.querySelectorAll('input[data-margined-task]')) box.disabled = true;
+                            window.webkit.messageHandlers.taskToggle.postMessage({id: Number(input.dataset.marginedTask), checked, token: state.token});
                         });
                     }
                     """, arguments: ["holding": reader.playbackHolding, "holdingTitle": String(localized: "Stop Read Aloud before saving checkmarks."), "enabled": enabled, "canSave": canSave, "token": token, "saving": reader.checklistSaving, "rendering": reader.isRendering, "focusID": focusID, "focusIntent": focusIntent, "restoreFocus": Self.hasDocumentFocus(webView), "saveTitle": String(localized: "Save this checkbox change to the Markdown file"), "consentTitle": String(localized: "Click to save checkmarks in this file")], in: nil, contentWorld: Self.taskWorld)

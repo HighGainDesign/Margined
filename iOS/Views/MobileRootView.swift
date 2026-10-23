@@ -21,7 +21,7 @@ struct MobileRootView: View {
                         closeFile: { Task { await reader.close() } }, settings: { showSettings = true })
                 } else { libraryView }
             }
-            .navigationTitle(reader.hasDocument ? reader.title : "MDView")
+            .navigationTitle(reader.hasDocument ? reader.title : "Margined")
             .navigationBarTitleDisplayMode(.inline)
             .overlay { if reader.isOpening { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         }
@@ -99,7 +99,7 @@ struct MobileRootView: View {
     private func openSample() async {
         do {
             let folder = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let sampleFolder = folder.appendingPathComponent("MDView Sample", isDirectory: true)
+            let sampleFolder = folder.appendingPathComponent("Margined Sample", isDirectory: true)
             try FileManager.default.createDirectory(at: sampleFolder, withIntermediateDirectories: true)
             let image = sampleFolder.appendingPathComponent("sample.svg")
             if !FileManager.default.fileExists(atPath: image.path), let sample = Bundle.main.url(forResource: "sample", withExtension: "svg") {

@@ -1,5 +1,5 @@
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class ChangeDescriptionTests: XCTestCase {
     func testCheckboxOnlyChangeDescribesBothStates() async throws {

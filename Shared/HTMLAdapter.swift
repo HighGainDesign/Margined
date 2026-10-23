@@ -52,7 +52,7 @@ enum HTMLAdapter {
             }
             if element.hasAttr("id") {
                 let original = try element.attr("id")
-                let base = "mdview-" + original
+                let base = "margined-" + original
                 var candidate = base
                 var suffix = nextSuffix[base, default: 1]
                 while ids.contains(candidate) {
@@ -65,7 +65,7 @@ enum HTMLAdapter {
             }
             if element.hasAttr("href") {
                 let href = try element.attr("href")
-                if href.hasPrefix("#") { try element.attr("href", "#mdview-" + String(href.dropFirst())) }
+                if href.hasPrefix("#") { try element.attr("href", "#margined-" + String(href.dropFirst())) }
                 else {
                     // Browsers discard control characters in URL schemes.
                     // Validate the same normalized form so encoded tabs/newlines
@@ -101,10 +101,10 @@ enum HTMLAdapter {
                 let src = try element.attr("src")
                 // Private comparison metadata preserves the Markdown image URL
                 // without loading it when remote resources are disabled.
-                try element.attr("data-mdview-image-source", src)
+                try element.attr("data-margined-image-source", src)
                 if LocalImage.isLocalReference(src),
                    let encoded = src.addingPercentEncoding(withAllowedCharacters: .alphanumerics) {
-                    try element.attr("src", "mdview-resource://local/" + encoded)
+                    try element.attr("src", "margined-resource://local/" + encoded)
                 } else if loadRemoteImages, let remote = URLComponents(string: src),
                           remote.scheme?.lowercased() == "https", remote.host?.isEmpty == false,
                           remote.user == nil, remote.password == nil {

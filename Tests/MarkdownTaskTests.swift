@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 import SwiftSoup
-@testable import MDView
+@testable import Margined
 
 final class MarkdownTaskTests: XCTestCase {
     func testMapsOnlyActualTasksIncludingNestedQuotedOrderedAndUnicode() async throws {
@@ -28,13 +28,13 @@ final class MarkdownTaskTests: XCTestCase {
             XCTAssertEqual(zip(oldBytes, newBytes).filter { $0 != $1 }.count, 1)
             XCTAssertEqual(newBytes[task.utf8Offset], task.checked ? 32 : 120)
         }
-        XCTAssertTrue(result.html.contains("data-mdview-task"), result.html)
+        XCTAssertTrue(result.html.contains("data-margined-task"), result.html)
         let inputs = try SwiftSoup.parse(result.html).select("input")
         XCTAssertEqual(inputs.size(), 4)
         for input in inputs.array() {
             let html = try input.outerHtml()
             XCTAssertTrue(input.hasAttr("disabled"), html)
-            XCTAssertTrue(input.hasAttr("data-mdview-task"), html)
+            XCTAssertTrue(input.hasAttr("data-margined-task"), html)
         }
     }
 

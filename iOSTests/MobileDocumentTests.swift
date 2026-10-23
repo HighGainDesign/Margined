@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import MDViewiOS
+@testable import MarginediOS
 
 @MainActor
 final class MobileDocumentTests: XCTestCase {
@@ -338,7 +338,7 @@ final class MobileDocumentTests: XCTestCase {
     }
 
     func testRecentBookmarksPersistResolveAndRemoveWithoutClosingTheDocument() async throws {
-        let suite = "MDView-mobile-library-" + UUID().uuidString
+        let suite = "Margined-mobile-library-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let file = try fixture(Data("Remembered document\n".utf8))
@@ -361,7 +361,7 @@ final class MobileDocumentTests: XCTestCase {
     }
 
     func testRecentListIsBoundedAndReopeningKeepsStableIdentity() async throws {
-        let suite = "MDView-mobile-library-" + UUID().uuidString
+        let suite = "Margined-mobile-library-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let library = MobileDocumentLibrary(defaults: defaults)
@@ -485,7 +485,7 @@ final class MobileDocumentTests: XCTestCase {
     }
 
     private func fixture(_ data: Data) throws -> URL {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("MDView-mobile-\(UUID()).md")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("Margined-mobile-\(UUID()).md")
         try data.write(to: file)
         return file
     }

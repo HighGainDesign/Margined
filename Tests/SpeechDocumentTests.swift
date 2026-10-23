@@ -1,6 +1,6 @@
 import XCTest
 import SwiftSoup
-@testable import MDView
+@testable import Margined
 
 final class SpeechDocumentTests: XCTestCase {
     func testNestedTasksAreSpokenOnceInOrderWithTheirStates() async throws {
@@ -10,7 +10,7 @@ final class SpeechDocumentTests: XCTestCase {
         XCTAssertEqual(speech.sections.map(\.title), ["Plan"])
         let dom = try SwiftSoup.parse(output.html)
         for segment in speech.segments {
-            XCTAssertEqual(try dom.select("[data-mdview-speech='\(segment.elementID)']").size(), 1)
+            XCTAssertEqual(try dom.select("[data-margined-speech='\(segment.elementID)']").size(), 1)
         }
     }
 

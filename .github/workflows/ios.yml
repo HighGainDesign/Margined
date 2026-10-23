@@ -30,14 +30,14 @@ jobs:
       - name: Test on iPhone
         run: |
           device_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if "iPhone" in d["name"]))')
-          xcodebuild -project MDView.xcodeproj -scheme MDViewiOS \
+          xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
             -destination "platform=iOS Simulator,id=$device_id" \
-            -derivedDataPath "$RUNNER_TEMP/MDView-ios" CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath "$RUNNER_TEMP/Margined-ios" CODE_SIGNING_ALLOWED=NO \
             -parallel-testing-enabled NO test > "$RUNNER_TEMP/ios-tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-tests.log"; exit 1; }
       - name: Build for iPad and iPhone devices
         run: |
-          xcodebuild -project MDView.xcodeproj -scheme MDViewiOS \
-            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/MDView-device" \
+          xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/Margined-device" \
             CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/ios-device.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-device.log"; exit 1; }
       - name: Preserve test failure details
         if: failure()
@@ -47,5 +47,5 @@ jobs:
           path: |
             ${{ runner.temp }}/ios-tests.log
             ${{ runner.temp }}/ios-device.log
-            ${{ runner.temp }}/MDView-ios/Logs/Test
+            ${{ runner.temp }}/Margined-ios/Logs/Test
           retention-days: 7

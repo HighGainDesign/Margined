@@ -2,7 +2,7 @@ import Foundation
 import SwiftSoup
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class GitHubCompatibilityTests: XCTestCase {
     func testAuthoredImageDimensionsArePreservedWithoutActiveAttributes() async throws {
@@ -12,7 +12,7 @@ final class GitHubCompatibilityTests: XCTestCase {
         let image = try XCTUnwrap(try SwiftSoup.parse(result.html).select("img").first())
         XCTAssertEqual(try image.attr("width"), "320")
         XCTAssertEqual(try image.attr("height"), "180")
-        XCTAssertTrue(try image.attr("src").hasPrefix("mdview-resource://local/"))
+        XCTAssertTrue(try image.attr("src").hasPrefix("margined-resource://local/"))
         XCTAssertFalse(image.hasAttr("onerror"))
         XCTAssertFalse(image.hasAttr("srcset"))
         XCTAssertEqual(try image.attr("style"), "aspect-ratio: 320 / 180; height: auto")
@@ -67,7 +67,7 @@ final class GitHubCompatibilityTests: XCTestCase {
         """, mapTasks: true)
         XCTAssertEqual(result.checkboxCount, 1)
         XCTAssertEqual(result.tasks.map(\.label), ["A real Markdown task"])
-        XCTAssertEqual(try SwiftSoup.parse(result.html).select("input[data-mdview-task]").size(), 1)
+        XCTAssertEqual(try SwiftSoup.parse(result.html).select("input[data-margined-task]").size(), 1)
     }
 
     func testHTMLHeadingsHaveUniqueOutlineTargetsAndCommonFormattingSurvives() async throws {

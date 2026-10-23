@@ -1,11 +1,11 @@
 name: Bug report
-description: Report a reproducible problem in MDView.
+description: Report a reproducible problem in Margined.
 body:
   - type: input
     id: versions
     attributes:
       label: Versions
-      description: Include your macOS and MDView versions.
+      description: Include your macOS and Margined versions.
     validations:
       required: true
   - type: dropdown

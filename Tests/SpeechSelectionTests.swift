@@ -1,6 +1,6 @@
 import XCTest
 import SwiftSoup
-@testable import MDView
+@testable import Margined
 
 final class SpeechSelectionTests: XCTestCase {
     func testSelectionMapsPastTaskStateAndInlineFormatting() async throws {
@@ -37,11 +37,11 @@ final class SpeechSelectionTests: XCTestCase {
                              options: SpeechOptions = SpeechOptions(), baseline: String? = nil) async throws {
         let output = try await MarkdownRenderer.shared.render(source, baseline: baseline, prepareSpeech: true, speechOptions: options)
         let speech = try XCTUnwrap(output.speech), dom = try SwiftSoup.parse(output.html)
-        let elements = try dom.select("[data-mdview-speech]").array()
+        let elements = try dom.select("[data-margined-speech]").array()
         let element = try XCTUnwrap(try elements.first(where: { try rawText($0).contains(selected) }))
         let raw = rawText(element) as NSString
         let location = raw.range(of: selected, options: last ? .backwards : []).location
-        let position = try XCTUnwrap(speech.position(elementID: try element.attr("data-mdview-speech"), sourceOffset: location))
+        let position = try XCTUnwrap(speech.position(elementID: try element.attr("data-margined-speech"), sourceOffset: location))
         let text = speech.segments[position.index].text as NSString
         XCTAssertEqual(text.substring(from: position.offset), expected)
     }

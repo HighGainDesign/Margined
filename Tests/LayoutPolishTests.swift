@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class LayoutPolishTests: XCTestCase {
     func testSetupFitsACompactWindowWithoutHorizontalOverflow() async throws {
-        let name = "MDViewTests.SetupLayout.\(UUID())"
+        let name = "MarginedTests.SetupLayout.\(UUID())"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
         let session = SetupSession(defaults: defaults, draftsAvailable: true, openExtensions: {}, importDrafts: {})
@@ -23,7 +23,7 @@ final class LayoutPolishTests: XCTestCase {
     func testTranslatedSetupAndSettingsUseTheirAllocatedWindowBounds() async throws {
         let original = SettingsNavigation.shared.page
         defer { SettingsNavigation.shared.page = original }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MDView-1.5-layout", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Margined-1.5-layout", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for language in ["en", "es", "zh-Hans", "zh-Hant", "ja", "fr", "de"] {
             let session = SetupSession(draftsAvailable: true, openExtensions: {}, importDrafts: {})

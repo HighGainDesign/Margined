@@ -1,12 +1,12 @@
 import AppKit
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class SetupTests: XCTestCase {
     @MainActor
     func testIntegrationActionsKeepGuideOpenAndDoNotSuppressIt() async throws {
-        let suite = "MDViewTests.Setup.\(UUID().uuidString)"
+        let suite = "MarginedTests.Setup.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         var openedSettings = 0
@@ -32,7 +32,7 @@ final class SetupTests: XCTestCase {
 
     @MainActor
     func testGuideCanBeClosedWithoutSuppressingAndImportFailureAllowsRetry() async throws {
-        let suite = "MDViewTests.SetupRetry.\(UUID().uuidString)"
+        let suite = "MarginedTests.SetupRetry.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         enum Failure: Error { case cancelled }
@@ -69,7 +69,7 @@ final class SetupTests: XCTestCase {
                 try await Task.sleep(for: .milliseconds(50))
             }
             let paper = try await view.evaluateJavaScript("getComputedStyle(document.body).backgroundColor") as? String
-            let highlight = try await view.evaluateJavaScript("getComputedStyle(document.querySelector('.mdview-word-change')).backgroundColor") as? String
+            let highlight = try await view.evaluateJavaScript("getComputedStyle(document.querySelector('.margined-word-change')).backgroundColor") as? String
             XCTAssertEqual(paper, expectedPaper)
             XCTAssertEqual(highlight, expectedHighlight)
         }

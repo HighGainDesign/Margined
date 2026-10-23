@@ -3,7 +3,7 @@ import PDFKit
 import WebKit
 import XCTest
 import os
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class PrintingTests: XCTestCase {
@@ -52,7 +52,7 @@ final class PrintingTests: XCTestCase {
         End of the printed document.
         """
         var components = URLComponents()
-        components.scheme = "mdview"; components.host = "preview"
+        components.scheme = "margined"; components.host = "preview"
         components.queryItems = [.init(name: "title", value: "Printing test"), .init(name: "text", value: source)]
         let document = try MarkdownDocument(preview: PreviewRequest(url: XCTUnwrap(components.url)))
         defer { document.close() }
@@ -68,9 +68,9 @@ final class PrintingTests: XCTestCase {
         }
         let webView = try XCTUnwrap(web)
         // Printing a dark, zoomed reader must still produce legible paper output.
-        _ = try await webView.evaluateJavaScript("document.documentElement.dataset.appearance = 'dark'; document.querySelector('p').classList.add('mdview-speaking', 'mdview-change'); true")
+        _ = try await webView.evaluateJavaScript("document.documentElement.dataset.appearance = 'dark'; document.querySelector('p').classList.add('margined-speaking', 'margined-change'); true")
         webView.pageZoom = 1.5
-        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("MDView-print-\(UUID()).pdf")
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("Margined-print-\(UUID()).pdf")
         defer { try? FileManager.default.removeItem(at: destination) }
         let operation = try XCTUnwrap(document.printOperation(withSettings: [
             .jobDisposition: NSPrintInfo.JobDisposition.save,

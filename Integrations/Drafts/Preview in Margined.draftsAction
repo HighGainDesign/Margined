@@ -4,7 +4,7 @@
     "controlKey": false,
     "type": "action",
     "shiftKey": false,
-    "discoverabilityTitle": "Preview in MDView",
+    "discoverabilityTitle": "Preview in Margined",
     "commandKey": false,
     "input": "",
     "optionKey": false
@@ -18,20 +18,20 @@
   "assignTags": [],
   "backingAssignFlag": 0,
   "shortName": "",
-  "actionDescription": "Preview the current draft in MDView on macOS. Re-run to refresh the preview. The draft stays in memory; no file is written.",
+  "actionDescription": "Preview the current draft in Margined on macOS. Re-run to refresh the preview. The draft stays in memory; no file is written.",
   "tintColor": "blue",
   "backingActionType": "action",
   "uuid": "F28C49BC-B21E-4220-BD17-441726D38D45",
   "shouldRequirePro": false,
   "visibility": 1408,
   "backingPlatforms": 3,
-  "name": "Preview in MDView",
+  "name": "Preview in Margined",
   "notificationType": 1,
   "steps": [
     {
       "isEnabled": true,
       "data": {
-        "template": "mdview://preview?text=[[draft]]&title=[[title]]",
+        "template": "margined://preview?text=[[draft]]&title=[[title]]",
         "templateType": "legacy",
         "encodeTags": "true",
         "useSafari": "false"

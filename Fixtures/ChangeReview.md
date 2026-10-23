@@ -1,6 +1,6 @@
 # Reviewing an agent’s update
 
-Keep this file open while another app changes it. MDView refreshes the preview and keeps changes highlighted until you mark them reviewed.
+Keep this file open while another app changes it. Margined refreshes the preview and keeps changes highlighted until you mark them reviewed.
 
 ## Rollout sequence
 

@@ -8,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var setup: SetupWindowController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        ReaderPreferences.migrateAppearance(from: .standard, to: ReaderPreferences.defaults)
         buildMenus()
         _ = NSDocumentController.shared
     }
@@ -44,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                     else { self?.welcome?.close() }
                 }
             } else {
-                if url.scheme?.lowercased() == "mdview", url.host == "stream" {
+                if url.scheme?.lowercased() == "margined", url.host == "stream" {
                     showLiveStreamingPreview()
                     continue
                 }
@@ -70,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             let view = WelcomeView(open: { NSDocumentController.shared.openDocument(nil) },
                                    liveStreaming: { [weak self] in self?.showLiveStreamingPreview() })
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-            window.title = String(localized: "MDView")
+            window.title = String(localized: "Margined")
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.contentMinSize = NSSize(width: 480, height: 380)
             window.setContentSize(NSSize(width: 520, height: 440))
@@ -116,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     @objc private func showSettings(_ sender: Any?) {
         if settings == nil {
             let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
-            window.title = String(localized: "MDView Settings")
+            window.title = String(localized: "Margined Settings")
             window.styleMask = [.titled, .closable, .resizable]
             window.minSize = NSSize(width: 600, height: 540)
             window.setContentSize(NSSize(width: 600, height: 680))
@@ -226,8 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     private func buildMenus() {
         let bar = NSMenu()
-        let app = NSMenu(title: String(localized: "MDView"))
-        add(String(localized: "About MDView"), to: app, action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+        let app = NSMenu(title: String(localized: "Margined"))
+        add(String(localized: "About Margined"), to: app, action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
         app.addItem(.separator())
         add(String(localized: "Settings…"), to: app, action: #selector(showSettings(_:)), key: ",", target: self)
         app.addItem(.separator())
@@ -237,11 +236,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         app.addItem(serviceItem)
         NSApp.servicesMenu = services
         app.addItem(.separator())
-        add(String(localized: "Hide MDView"), to: app, action: #selector(NSApplication.hide(_:)), key: "h")
+        add(String(localized: "Hide Margined"), to: app, action: #selector(NSApplication.hide(_:)), key: "h")
         add(String(localized: "Hide Others"), to: app, action: #selector(NSApplication.hideOtherApplications(_:)), key: "h", modifiers: [.command, .option])
         add(String(localized: "Show All"), to: app, action: #selector(NSApplication.unhideAllApplications(_:)))
         app.addItem(.separator())
-        add(String(localized: "Quit MDView"), to: app, action: #selector(NSApplication.terminate(_:)), key: "q")
+        add(String(localized: "Quit Margined"), to: app, action: #selector(NSApplication.terminate(_:)), key: "q")
         attach(app, to: bar)
 
         let file = NSMenu(title: String(localized: "File"))

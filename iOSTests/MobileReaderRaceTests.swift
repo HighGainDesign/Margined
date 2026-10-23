@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import MDViewiOS
+@testable import MarginediOS
 
 /// Integration boundaries between displayed text, asynchronous document saves,
 /// and playback ownership. Real coordinated files are used only where ordering
@@ -207,7 +207,7 @@ final class MobileReaderRaceTests: XCTestCase {
     }
 
     private func preview(_ source: String) -> URL {
-        var parts = URLComponents(string: "mdview://preview")!
+        var parts = URLComponents(string: "margined://preview")!
         parts.queryItems = [.init(name: "text", value: source), .init(name: "title", value: "Reader test")]
         return parts.url!
     }

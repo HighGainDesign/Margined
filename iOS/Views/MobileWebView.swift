@@ -85,7 +85,7 @@ struct MobileWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = Self.configuration()
-        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "mdview-resource")
+        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "margined-resource")
         configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.contentWorld, name: "taskToggle")
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -112,7 +112,7 @@ struct MobileWebView: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-        static let contentWorld = WKContentWorld.world(name: "MDViewMobileDocument")
+        static let contentWorld = WKContentWorld.world(name: "MarginedMobileDocument")
         let reader: MobileReaderState
         let images = MobileImageSchemeHandler()
         weak var webView: WKWebView?
@@ -237,7 +237,7 @@ struct MobileWebView: UIViewRepresentable {
                 guard valid(expectedGeneration) else { return }
                 var page = html
                 if let opening = page.range(of: "<html", options: .caseInsensitive) {
-                    page.replaceSubrange(opening, with: "<html data-mdview-mobile-token=\"\(currentToken)\"")
+                    page.replaceSubrange(opening, with: "<html data-margined-mobile-token=\"\(currentToken)\"")
                 }
                 activeNavigation = webView.loadHTMLString(page, baseURL: loadedFile?.deletingLastPathComponent())
             }
@@ -305,29 +305,29 @@ struct MobileWebView: UIViewRepresentable {
             Task { [weak self] in
                 guard let self, valid(expectedGeneration), taskKey == key else { return }
                 _ = try? await webView.callAsyncJavaScript("""
-                if (document.documentElement.getAttribute('data-mdview-mobile-token') !== token) return false;
-                window.mdviewTaskState = {enabled, canSave, token};
-                for (const input of document.querySelectorAll('input[data-mdview-task]')) {
-                    if (!enabled && document.activeElement === input) window.mdviewPendingTaskFocus = input;
+                if (document.documentElement.getAttribute('data-margined-mobile-token') !== token) return false;
+                window.marginedTaskState = {enabled, canSave, token};
+                for (const input of document.querySelectorAll('input[data-margined-task]')) {
+                    if (!enabled && document.activeElement === input) window.marginedPendingTaskFocus = input;
                     input.disabled = !enabled;
                     if (!saving && !rendering) input.checked = input.defaultChecked;
                     input.title = holding ? holdingTitle : (canSave ? saveTitle : consentTitle);
                 }
                 if (enabled) {
-                    const pending = window.mdviewPendingTaskFocus;
+                    const pending = window.marginedPendingTaskFocus;
                     if (restoreFocus && pending?.isConnected && (document.activeElement === document.body || document.activeElement === pending)) pending.focus({preventScroll:true});
-                    window.mdviewPendingTaskFocus = null;
+                    window.marginedPendingTaskFocus = null;
                 }
-                if (!window.mdviewTaskListener) {
-                    window.mdviewTaskListener = true;
+                if (!window.marginedTaskListener) {
+                    window.marginedTaskListener = true;
                     document.addEventListener('change', event => {
-                        const input = event.target, state = window.mdviewTaskState;
-                        if (!event.isTrusted || !state?.enabled || !(input instanceof HTMLInputElement) || !input.hasAttribute('data-mdview-task')) return;
+                        const input = event.target, state = window.marginedTaskState;
+                        if (!event.isTrusted || !state?.enabled || !(input instanceof HTMLInputElement) || !input.hasAttribute('data-margined-task')) return;
                         const checked = input.checked;
-                        window.mdviewPendingTaskFocus = input;
+                        window.marginedPendingTaskFocus = input;
                         if (!state.canSave) input.checked = input.defaultChecked;
-                        for (const box of document.querySelectorAll('input[data-mdview-task]')) box.disabled = true;
-                        window.webkit.messageHandlers.taskToggle.postMessage({id:Number(input.dataset.mdviewTask), checked, token:state.token});
+                        for (const box of document.querySelectorAll('input[data-margined-task]')) box.disabled = true;
+                        window.webkit.messageHandlers.taskToggle.postMessage({id:Number(input.dataset.marginedTask), checked, token:state.token});
                     });
                 }
                 return true;
@@ -353,7 +353,7 @@ struct MobileWebView: UIViewRepresentable {
 
         private static func guarded(_ script: String) -> String {
             """
-            if (document.documentElement.getAttribute('data-mdview-mobile-token') !== documentToken) return null;
+            if (document.documentElement.getAttribute('data-margined-mobile-token') !== documentToken) return null;
             \(script)
             """
         }
@@ -468,14 +468,14 @@ enum MobileTaskBridge {
 /// tree. A new file or explicit folder reload cannot reuse another file's cache.
 enum MobileWebResources {
     static func authorizes(_ url: URL, token: String) -> Bool {
-        guard url.scheme == "mdview-resource", url.host == "local",
+        guard url.scheme == "margined-resource", url.host == "local",
               let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         let generations = parts.queryItems?.filter { $0.name == "generation" } ?? []
         return generations.count == 1 && generations[0].value == token
     }
 
     static func html(_ html: String, token: String) -> String {
-        html.replacingOccurrences(of: #"(<img\b[^>]*\ssrc=")(mdview-resource://local/[^"]*)(")"#,
+        html.replacingOccurrences(of: #"(<img\b[^>]*\ssrc=")(margined-resource://local/[^"]*)(")"#,
             with: "$1$2?generation=\(token)$3", options: .regularExpression)
     }
 }
@@ -513,7 +513,7 @@ enum MobileWebTypography {
     }
 
     static let reconcileScript = """
-    if (typeof expectedToken !== 'undefined' && document.documentElement.getAttribute('data-mdview-mobile-token') !== expectedToken) return false;
+    if (typeof expectedToken !== 'undefined' && document.documentElement.getAttribute('data-margined-mobile-token') !== expectedToken) return false;
     function documentOperation(operation, position) {
     \(MobileWebScripts.document)
     }
@@ -522,7 +522,7 @@ enum MobileWebTypography {
     if (updated) {
         document.body.style.fontSize = `${fontSize}px`;
         document.body.style.webkitTextSizeAdjust = '100%';
-        if (typeof nextToken !== 'undefined') document.documentElement.setAttribute('data-mdview-mobile-token', nextToken);
+        if (typeof nextToken !== 'undefined') document.documentElement.setAttribute('data-margined-mobile-token', nextToken);
         documentOperation('restore', saved);
     }
     return updated;
@@ -532,7 +532,7 @@ enum MobileWebTypography {
         // A body style leaves the renderer's head unchanged, so the next task
         // tick can reconcile in place. Font scaling never changes authored images.
         _ = try await webView.callAsyncJavaScript("""
-        if (expectedToken && document.documentElement.getAttribute('data-mdview-mobile-token') !== expectedToken) return false;
+        if (expectedToken && document.documentElement.getAttribute('data-margined-mobile-token') !== expectedToken) return false;
         function documentOperation(operation, position, restoreFocus) {
         \(MobileWebScripts.document)
         }

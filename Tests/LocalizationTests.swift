@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class LocalizationTests: XCTestCase {
     func testEnglishWordCountUsesSingularAndPluralCatalogForms() {

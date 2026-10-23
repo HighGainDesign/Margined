@@ -1,6 +1,6 @@
-# MDView demo assets
+# Margined demo assets
 
-The video, basic viewer and outline assets show MDView 1.1.0/build13.
+The video, basic viewer and outline assets show Margined 1.1.0/build13.
 The change-review screenshot shows the docked sidebar in 1.2.0/build22; its
 layout is also used in the final 1.2 release.
 
@@ -19,7 +19,7 @@ captures use an original, disposable sample document;
 no personal files, draft lists, or actions appear. No UI was fabricated.
 
 The video uses simultaneous, continuous recordings of the actual Drafts and
-MDView windows through Apple ScreenCaptureKit. Idle intervals were trimmed;
+Margined windows through Apple ScreenCaptureKit. Idle intervals were trimmed;
 window crops and explanatory labels were added. It demonstrates typing,
 Markdown table rendering, Pause while writing, and Resume catching up. Timing
 is illustrative rather than a latency benchmark. The pointer and audio are
@@ -30,16 +30,16 @@ edited-still demo.
 Drafts is the tested streaming integration. Other publishers using the public
 Marked-compatible channel are accepted but have not been manually verified.
 Drafts may require Marked to be installed to enable streaming; Marked can stay
-closed. MDView is not affiliated with Marked or Drafts.
+closed. Margined is not affiliated with Marked or Drafts.
 
 ## Suggested launch copy
 
-> I made MDView: a small Markdown viewer for macOS, read-only by default. Keep it beside
+> I made Margined: a small Markdown viewer for macOS, read-only by default. Keep it beside
 > Drafts for live streaming, open documents from your coding agent, or press Space
 > in Finder for Quick Look. Saved files refresh automatically, with highlights
 > and a comparison panel. Review changes individually or all at once without
 > modifying the Markdown file.
 >
-> Free and open source: https://github.com/HighGainDesign/MDView
+> Free and open source: https://github.com/HighGainDesign/Margined
 
 No posts, uploads, or messages have been sent to social channels.

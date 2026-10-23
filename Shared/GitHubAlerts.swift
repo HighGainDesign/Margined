@@ -13,10 +13,10 @@ enum GitHubAlerts {
                   let label = names[type] else { continue }
             first.text(String(raw.dropFirst(type.count + 3)).trimmingCharacters(in: .newlines))
             if try paragraph.text().isEmpty { try paragraph.remove() }
-            try quote.addClass("mdview-alert")
-            try quote.addClass("mdview-alert-" + type.lowercased())
+            try quote.addClass("margined-alert")
+            try quote.addClass("margined-alert-" + type.lowercased())
             let title = Element(try Tag.valueOf("p"), "")
-            try title.addClass("mdview-alert-title")
+            try title.addClass("margined-alert-title")
             try title.text(label)
             try quote.prependChild(title)
             try quote.attr("role", "note")

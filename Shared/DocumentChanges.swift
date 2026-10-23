@@ -37,7 +37,7 @@ struct ReadingUnit: Hashable, Sendable {
         tag = element.tagName()
         alignment = try element.attr("align")
         html = try element.html()
-        guard html.contains("data-mdview-image-source") || html.contains("data-mdview-speech") else {
+        guard html.contains("data-margined-image-source") || html.contains("data-margined-speech") else {
             comparisonHTML = html
             return
         }
@@ -45,13 +45,13 @@ struct ReadingUnit: Hashable, Sendable {
         comparisonDocument.outputSettings().prettyPrint(pretty: false)
         let comparison = try comparisonDocument.body()!.appendElement(tag)
         try comparison.html(html)
-        for marker in try comparison.select("[data-mdview-speech]").array() {
-            try marker.removeAttr("data-mdview-speech")
+        for marker in try comparison.select("[data-margined-speech]").array() {
+            try marker.removeAttr("data-margined-speech")
         }
         for image in try comparison.select("img").array() {
-            if image.hasAttr("data-mdview-image-source") {
-                try image.attr("src", image.attr("data-mdview-image-source"))
-                try image.removeAttr("data-mdview-image-source")
+            if image.hasAttr("data-margined-image-source") {
+                try image.attr("src", image.attr("data-margined-image-source"))
+                try image.removeAttr("data-margined-image-source")
                 try image.removeAttr("referrerpolicy")
                 let attributes = (image.getAttributes()?.asList() ?? []).map { ($0.getKey(), $0.getValue()) }
                 for (key, _) in attributes { try image.removeAttr(key) }
@@ -143,11 +143,11 @@ enum DocumentChanges {
                     let index = summary.entries.count
                     var target: String?
                     if let updated {
-                        try updated.addClass("mdview-change")
-                        try updated.addClass(kind == .added ? "mdview-added" : "mdview-edited")
+                        try updated.addClass("margined-change")
+                        try updated.addClass(kind == .added ? "margined-added" : "margined-edited")
                         target = try updated.attr("id")
                         if target?.isEmpty != false {
-                            target = "mdview-change-\(index)"
+                            target = "margined-change-\(index)"
                             try updated.attr("id", target!)
                         }
                         try updated.attr("aria-description", String(localized: "\(kind.localizedTitle) since last review"))
@@ -185,7 +185,7 @@ enum DocumentChanges {
         }
         for image in try element.select("img").array() {
             let label = try image.attr("alt")
-            let source = try image.attr("data-mdview-image-source")
+            let source = try image.attr("data-margined-image-source")
             details.append(String(localized: "Image \(label): \(source)"))
         }
         if checkboxes.count == 1, details.count == 1, text == (try checkboxes[0].attr("aria-label")) {
@@ -207,7 +207,7 @@ enum DocumentChanges {
 
     private static func textNodes(in node: Node) -> [TextNode] {
         if let text = node as? TextNode { return [text] }
-        if let element = node as? Element, element.hasClass("mdview-math") { return [] }
+        if let element = node as? Element, element.hasClass("margined-math") { return [] }
         return node.getChildNodes().flatMap { textNodes(in: $0) }
     }
 
@@ -241,7 +241,7 @@ enum DocumentChanges {
                     try node.before(TextNode(text.substring(with: NSRange(location: cursor, length: local.location - cursor)), ""))
                 }
                 let mark = Element(try Tag.valueOf("mark"), "")
-                try mark.addClass("mdview-word-change")
+                try mark.addClass("margined-word-change")
                 try mark.text(text.substring(with: local))
                 try node.before(mark)
                 cursor = local.location + local.length

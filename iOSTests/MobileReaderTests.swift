@@ -1,5 +1,5 @@
 import XCTest
-@testable import MDViewiOS
+@testable import MarginediOS
 
 @MainActor
 final class MobileReaderTests: XCTestCase {
@@ -52,7 +52,7 @@ final class MobileReaderTests: XCTestCase {
 
     func testSnapshotCannotSaveAndExplicitOpenResetsConsent() async throws {
         let reader = MobileReaderState()
-        var parts = URLComponents(string: "mdview://preview")!
+        var parts = URLComponents(string: "margined://preview")!
         parts.queryItems = [.init(name: "text", value: "- [ ] Snapshot"), .init(name: "title", value: "Draft")]
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
         XCTAssertNil(reader.fileURL)
@@ -78,7 +78,7 @@ final class MobileReaderTests: XCTestCase {
 
     func testOpeningAnotherDocumentClearsNavigationAndSearchIntent() async throws {
         let reader = MobileReaderState()
-        var parts = URLComponents(string: "mdview://preview")!
+        var parts = URLComponents(string: "margined://preview")!
         parts.queryItems = [.init(name: "text", value: "# Top\n\n## Later\n")]
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
         reader.navigate(to: "later")

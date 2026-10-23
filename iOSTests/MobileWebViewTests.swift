@@ -2,7 +2,7 @@ import UIKit
 import SwiftUI
 import WebKit
 import XCTest
-@testable import MDViewiOS
+@testable import MarginediOS
 
 @MainActor
 final class MobileWebViewTests: XCTestCase {
@@ -73,22 +73,22 @@ final class MobileWebViewTests: XCTestCase {
     }
 
     func testResourceNamespaceLeavesRemoteDataAndCodeUntouched() {
-        let html = #"<img alt="local" src="mdview-resource://local/pic%2Epng"><img src="https://example.com/pic.png"><img src="data:image/png;base64,abc"><code>src="mdview-resource://local/example"</code>"#
+        let html = #"<img alt="local" src="margined-resource://local/pic%2Epng"><img src="https://example.com/pic.png"><img src="data:image/png;base64,abc"><code>src="margined-resource://local/example"</code>"#
         let first = MobileWebResources.html(html, token: "first")
         let second = MobileWebResources.html(html, token: "second")
         XCTAssertNotEqual(first, second)
-        XCTAssertTrue(first.contains(#"src="mdview-resource://local/pic%2Epng?generation=first""#))
+        XCTAssertTrue(first.contains(#"src="margined-resource://local/pic%2Epng?generation=first""#))
         XCTAssertTrue(first.contains(#"src="https://example.com/pic.png""#))
         XCTAssertTrue(first.contains(#"src="data:image/png;base64,abc""#))
-        XCTAssertTrue(first.contains(#"<code>src="mdview-resource://local/example"</code>"#))
+        XCTAssertTrue(first.contains(#"<code>src="margined-resource://local/example"</code>"#))
     }
 
     func testAnOldImageRequestCannotResolveAgainstANewDocumentsFolder() {
-        let old = URL(string: "mdview-resource://local/image%2Epng?generation=old")!
-        let current = URL(string: "mdview-resource://local/image%2Epng?generation=current")!
+        let old = URL(string: "margined-resource://local/image%2Epng?generation=old")!
+        let current = URL(string: "margined-resource://local/image%2Epng?generation=current")!
         XCTAssertFalse(MobileWebResources.authorizes(old, token: "current"))
         XCTAssertTrue(MobileWebResources.authorizes(current, token: "current"))
-        XCTAssertFalse(MobileWebResources.authorizes(URL(string: "mdview-resource://local/image.png")!, token: "current"))
+        XCTAssertFalse(MobileWebResources.authorizes(URL(string: "margined-resource://local/image.png")!, token: "current"))
         XCTAssertFalse(MobileWebResources.authorizes(URL(string: "https://example.com/?generation=current")!, token: "current"))
     }
 
@@ -100,7 +100,7 @@ final class MobileWebViewTests: XCTestCase {
 
     func testOpeningAnotherSnapshotStartsAtTopAndRejectsOldPageTypography() async throws {
         let reader = MobileReaderState()
-        var parts = URLComponents(string: "mdview://preview")!
+        var parts = URLComponents(string: "margined://preview")!
         parts.queryItems = [.init(name: "text", value: "# Snapshot\n\n" + (0..<100).map { "Paragraph \($0)." }.joined(separator: "\n\n"))]
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
         let coordinator = MobileWebView.Coordinator(reader: reader)
@@ -109,7 +109,7 @@ final class MobileWebViewTests: XCTestCase {
         web.navigationDelegate = coordinator
         coordinator.update(category: .large)
         try await waitForToken(web)
-        let oldTokenValue = try await web.callAsyncJavaScript("window.identity='old'; scrollTo({top:800,behavior:'instant'}); return document.documentElement.getAttribute('data-mdview-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        let oldTokenValue = try await web.callAsyncJavaScript("window.identity='old'; scrollTo({top:800,behavior:'instant'}); return document.documentElement.getAttribute('data-margined-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
         let oldToken = try XCTUnwrap(oldTokenValue as? String)
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
         coordinator.update(category: .large)
@@ -130,7 +130,7 @@ final class MobileWebViewTests: XCTestCase {
         let reader = MobileReaderState()
         let coordinator = MobileWebView.Coordinator(reader: reader)
         let configuration = MobileWebView.configuration()
-        configuration.setURLSchemeHandler(coordinator.images, forURLScheme: "mdview-resource")
+        configuration.setURLSchemeHandler(coordinator.images, forURLScheme: "margined-resource")
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 650), configuration: configuration)
         coordinator.webView = web; web.navigationDelegate = coordinator
         var previousToken: String?, previousImage: String?
@@ -157,7 +157,7 @@ final class MobileWebViewTests: XCTestCase {
             let src = try await web.callAsyncJavaScript("return document.querySelector('img').src;", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String
             XCTAssertNotEqual(src, previousImage)
             previousImage = src
-            previousToken = try await web.callAsyncJavaScript("return document.documentElement.getAttribute('data-mdview-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String
+            previousToken = try await web.callAsyncJavaScript("return document.documentElement.getAttribute('data-margined-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String
         }
         reader.imageReloadGeneration += 1
         coordinator.update(category: .large)
@@ -177,7 +177,7 @@ final class MobileWebViewTests: XCTestCase {
             nowPlaying: HostedWebNowPlaying(), preferences: SpeechPreferences(defaults: defaults),
             progressStore: SpeechProgressStore(defaults: defaults))
         let reader = MobileReaderState(playback: playback, defaults: defaults)
-        var parts = URLComponents(string: "mdview://preview")!
+        var parts = URLComponents(string: "margined://preview")!
         let text = "# Beginning\n\n" + (0..<50).map { "Paragraph \($0) to make a long native reader." }.joined(separator: "\n\n") + "\n\n## Target\n\nFindneedle at the end."
         parts.queryItems = [.init(name: "text", value: text)]
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
@@ -205,14 +205,14 @@ final class MobileWebViewTests: XCTestCase {
         if started {
             let initial = try XCTUnwrap(session.currentSegment?.elementID)
             let highlighted = try await eventually {
-                (try await web.callAsyncJavaScript("return document.querySelector('.mdview-speaking')?.dataset.mdviewSpeech;", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String) == initial
+                (try await web.callAsyncJavaScript("return document.querySelector('.margined-speaking')?.dataset.marginedSpeech;", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String) == initial
             }
             XCTAssertTrue(highlighted)
             driver.finish()
             let next = try XCTUnwrap(session.currentSegment?.elementID)
             XCTAssertNotEqual(next, initial)
             let advanced = try await eventually {
-                (try await web.callAsyncJavaScript("return document.querySelector('.mdview-speaking')?.dataset.mdviewSpeech;", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String) == next
+                (try await web.callAsyncJavaScript("return document.querySelector('.margined-speaking')?.dataset.marginedSpeech;", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String) == next
             }
             XCTAssertTrue(advanced, "Speech progress must update the DOM without another user intent")
         }
@@ -247,7 +247,7 @@ final class MobileWebViewTests: XCTestCase {
     private func waitForToken(_ web: WKWebView, excluding previous: String? = nil) async throws {
         for _ in 0..<200 {
             if !web.isLoading,
-               let token = try? await web.callAsyncJavaScript("return document.documentElement.getAttribute('data-mdview-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String,
+               let token = try? await web.callAsyncJavaScript("return document.documentElement.getAttribute('data-margined-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String,
                token != previous { return }
             try await Task.sleep(for: .milliseconds(25))
         }

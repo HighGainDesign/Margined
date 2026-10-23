@@ -1,6 +1,6 @@
 import AVFAudio
 import XCTest
-@testable import MDViewiOS
+@testable import MarginediOS
 
 @MainActor
 final class MobileSpeechTests: XCTestCase {

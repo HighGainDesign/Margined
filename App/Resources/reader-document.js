@@ -1,4 +1,4 @@
-// App-owned code, evaluated only in MDView's isolated WKContentWorld.
+// App-owned code, evaluated only in Margined's isolated WKContentWorld.
 // Document-supplied JavaScript remains disabled.
 const main = document.getElementById('document');
 const selector = 'h1,h2,h3,h4,h5,h6,p,li,pre,tr,dt,dd,figure';
@@ -59,19 +59,19 @@ if (operation === 'navigate') {
     let target;
     if (kind === 'element') {
         target = document.getElementById(id);
-        window.mdviewLastTask = null;
+        window.marginedLastTask = null;
     } else if (kind === 'unchecked') {
         const tasks = Array.from(main?.querySelectorAll('input[type="checkbox"]') ?? []).filter(node => !node.defaultChecked);
         if (!tasks.length) return false;
         const active = document.activeElement;
         let index = tasks.findIndex(node => node === active || node.closest('li') === active);
-        if (index < 0) index = tasks.indexOf(window.mdviewLastTask);
+        if (index < 0) index = tasks.indexOf(window.marginedLastTask);
         if (index >= 0) index = (index + (backwards ? -1 : 1) + tasks.length) % tasks.length;
         else {
             const next = tasks.findIndex(node => node.getBoundingClientRect().top >= 0);
             index = backwards ? (next < 0 ? tasks.length-1 : (next-1+tasks.length)%tasks.length) : (next < 0 ? 0 : next);
         }
-        window.mdviewLastTask = tasks[index];
+        window.marginedLastTask = tasks[index];
         target = tasks[index].disabled ? tasks[index].closest('li') ?? tasks[index].parentElement : tasks[index];
     } else if (kind === 'reading') {
         target = visibleAnchor()?.candidates[0] ?? main;
@@ -99,7 +99,7 @@ const active = document.activeElement;
 function identity(node) {
     if (node.nodeType !== Node.ELEMENT_NODE) return `${node.nodeType}:${node.nodeValue}`;
     const content = node.tagName === 'INPUT' ? node.getAttribute('aria-label') ?? '' :
-        node.tagName === 'IMG' ? node.getAttribute('data-mdview-image-source') ?? node.getAttribute('src') ?? '' : node.textContent;
+        node.tagName === 'IMG' ? node.getAttribute('data-margined-image-source') ?? node.getAttribute('src') ?? '' : node.textContent;
     // Generated review IDs and task offsets are not stable identities. Bound
     // keys on large nested blocks; reconciliation still checks all their text.
     return `${node.tagName}:${content.length}:${content.slice(0,256)}:${content.slice(-128)}`;

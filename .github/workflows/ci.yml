@@ -29,16 +29,16 @@ jobs:
           xcodegen generate
       - name: Run isolated macOS tests
         run: |
-          xcodebuild -project MDView.xcodeproj -scheme MDView -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/MDView-tests" \
+          xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
             CODE_SIGN_IDENTITY=- test > "$RUNNER_TEMP/tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/tests.log"; exit 1; }
 
       - name: Check each interface language in a fresh process
         run: |
-          xcodebuild -project MDView.xcodeproj -scheme MDView -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/MDView-tests" \
+          xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
             CODE_SIGN_IDENTITY=- build-for-testing > "$RUNNER_TEMP/locale-build.log" 2>&1 || { tail -60 "$RUNNER_TEMP/locale-build.log"; exit 1; }
-          python3 script/test-localizations.py "$RUNNER_TEMP/MDView-tests"
+          python3 script/test-localizations.py "$RUNNER_TEMP/Margined-tests"
 
       - name: Preserve test failure details
         if: failure()
@@ -47,5 +47,5 @@ jobs:
           name: test-failure-details
           path: |
             ${{ runner.temp }}/tests.log
-            ${{ runner.temp }}/MDView-tests/Logs/Test
+            ${{ runner.temp }}/Margined-tests/Logs/Test
           retention-days: 7

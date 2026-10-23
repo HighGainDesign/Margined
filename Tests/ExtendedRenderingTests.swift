@@ -1,14 +1,14 @@
 import SwiftSoup
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class ExtendedRenderingTests: XCTestCase {
     func testAllFiveGitHubAlertsKeepTypeAndNestedContent() async throws {
         for type in ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"] {
             let result = try await MarkdownRenderer.shared.render("> [!\(type)]\n> Keep **this** and [the link](https://example.com).\n>\n> - Nested list")
             let body = try SwiftSoup.parse(result.html)
-            let alert = try XCTUnwrap(body.select("blockquote.mdview-alert-\(type.lowercased())").first())
+            let alert = try XCTUnwrap(body.select("blockquote.margined-alert-\(type.lowercased())").first())
             XCTAssertFalse(try alert.text().contains("[!"))
             XCTAssertEqual(try alert.select("strong").text(), "this")
             XCTAssertEqual(try alert.select("li").text(), "Nested list")
@@ -55,7 +55,7 @@ final class ExtendedRenderingTests: XCTestCase {
             XCTAssertEqual(try doc.select("[id=\(try XCTUnwrap(change.targetID))]").size(), 1)
         }
         for segment in try XCTUnwrap(result.speech).segments {
-            XCTAssertEqual(try doc.select("[data-mdview-speech=\(segment.elementID)]").size(), 1)
+            XCTAssertEqual(try doc.select("[data-margined-speech=\(segment.elementID)]").size(), 1)
         }
     }
 
@@ -86,7 +86,7 @@ final class ExtendedRenderingTests: XCTestCase {
         """
         let result = try await MarkdownRenderer.shared.render(source)
         let doc = try SwiftSoup.parse(result.html)
-        let image = try XCTUnwrap(doc.select("figure.mdview-diagram img").first())
+        let image = try XCTUnwrap(doc.select("figure.margined-diagram img").first())
         XCTAssertTrue(try image.attr("src").hasPrefix("data:image/svg+xml;base64,"))
         XCTAssertTrue(try image.attr("alt").contains("Build pipeline"))
         let svgData = try XCTUnwrap(Data(base64Encoded: try image.attr("src").components(separatedBy: ",").last!))
@@ -120,8 +120,8 @@ final class ExtendedRenderingTests: XCTestCase {
         let artwork = try await MarkdownRenderer.shared.render(math + "\n\n" + diagrams)
         let doc = try SwiftSoup.parse(artwork.html)
         XCTAssertEqual(try doc.select("math").size(), 200)
-        XCTAssertEqual(try doc.select("figure.mdview-diagram > img").size(), 20)
-        XCTAssertEqual(try doc.select("figure.mdview-diagram > pre").size(), 1)
+        XCTAssertEqual(try doc.select("figure.margined-diagram > img").size(), 20)
+        XCTAssertEqual(try doc.select("figure.margined-diagram > pre").size(), 1)
         XCTAssertTrue(try doc.text().contains("x_{200}"))
         let evidence = XCTAttachment(string: "Ordinary 2,000 paragraphs: \(ordinaryTime). Artwork 201 equations/21 diagrams: \(diagramStart.duration(to: .now)).")
         evidence.name = "Representative rendering latency"
@@ -145,7 +145,7 @@ final class ExtendedRenderingTests: XCTestCase {
     func testMermaidClassNamesPreserveSafePalette() async throws {
         let source = "flowchart LR\nA:::curl --> B:::expression\nclassDef curl fill:#ff0000\nclassDef expression fill:#00ff00"
         let result = try await MarkdownRenderer.shared.render("```mermaid\n" + source + "\n```")
-        let image = try XCTUnwrap(SwiftSoup.parse(result.html).select("figure.mdview-diagram img").first())
+        let image = try XCTUnwrap(SwiftSoup.parse(result.html).select("figure.margined-diagram img").first())
         let svg = String(decoding: try XCTUnwrap(Data(base64Encoded: try image.attr("src").components(separatedBy: ",").last!)), as: UTF8.self)
         XCTAssertTrue(svg.contains(".curl"))
         XCTAssertTrue(svg.contains(".expression"))
@@ -163,7 +163,7 @@ final class ExtendedRenderingTests: XCTestCase {
         ]
         for source in sources {
             let result = try await MarkdownRenderer.shared.render("```mermaid\n" + source + "\n```")
-            XCTAssertEqual(try SwiftSoup.parse(result.html).select("figure.mdview-diagram > img").size(), 1, source)
+            XCTAssertEqual(try SwiftSoup.parse(result.html).select("figure.margined-diagram > img").size(), 1, source)
         }
     }
 
@@ -182,7 +182,7 @@ final class ExtendedRenderingTests: XCTestCase {
         """#)
         let doc = try SwiftSoup.parse(result.html)
         XCTAssertEqual(try doc.select("script, iframe, [onerror], img[src^=https]").size(), 0)
-        if let image = try doc.select("figure.mdview-diagram img").first() {
+        if let image = try doc.select("figure.margined-diagram img").first() {
             let encoded = try image.attr("src").split(separator: ",", maxSplits: 1).last.map(String.init) ?? ""
             let data = try XCTUnwrap(Data(base64Encoded: encoded))
             let svg = try SwiftSoup.parse(String(decoding: data, as: UTF8.self), "", Parser.xmlParser())
@@ -191,7 +191,7 @@ final class ExtendedRenderingTests: XCTestCase {
         }
         let large = try await MarkdownRenderer.shared.render("```mermaid\n" + String(repeating: "A-->B\n", count: 4_000) + "```")
         let fallback = try SwiftSoup.parse(large.html)
-        XCTAssertEqual(try fallback.select("figure.mdview-diagram > img").size(), 0)
+        XCTAssertEqual(try fallback.select("figure.margined-diagram > img").size(), 0)
         XCTAssertTrue(try fallback.select("code.language-mermaid").text().contains("A-->B"))
     }
 

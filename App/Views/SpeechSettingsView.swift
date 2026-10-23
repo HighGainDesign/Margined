@@ -44,7 +44,7 @@ struct SpeechSettingsView: View {
                 }.help("Remove saved listening positions. Markdown files stay unchanged.")
                 if historyCleared { Label("Reading history cleared", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
             } header: { Text("Saved positions") }
-            footer: { Text("MDView remembers positions in saved files using content hashes and offsets. It does not save document text or live streams in reading history.") }
+            footer: { Text("Margined remembers positions in saved files using content hashes and offsets. It does not save document text or live streams in reading history.") }
         }
         .formStyle(.grouped)
         .task { voices = SystemSpeechDriver.availableVoices() }

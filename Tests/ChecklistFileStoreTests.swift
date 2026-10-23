@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import MDView
+@testable import Margined
 
 final class ChecklistFileStoreTests: XCTestCase {
     func testWritesOnlyMarkerAndKeepsPermissionsAndLaterAgentEdit() async throws {

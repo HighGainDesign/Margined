@@ -1,4 +1,4 @@
-# Welcome to MDView
+# Welcome to Margined
 
 Read Markdown from Files, follow changes, and listen with installed system voices.
 

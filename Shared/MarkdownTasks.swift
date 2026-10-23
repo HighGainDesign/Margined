@@ -21,7 +21,7 @@ enum MarkdownTasks {
         let starts = [0] + bytes.indices.filter { bytes[$0] == 10 }.map { $0 + 1 }
         // Use the same cmark math grammar as display rendering. Exact source
         // positions and marker-byte checks still gate every checklist write.
-        guard let parser = cmark_parser_new(0), let ext = cmark_syntax_extension_new("mdview-task-math") else { return [] }
+        guard let parser = cmark_parser_new(0), let ext = cmark_syntax_extension_new("margined-task-math") else { return [] }
         defer {
             cmark_parser_free(parser)
             cmark_syntax_extension_free(cmark_get_default_mem_allocator(), ext)
@@ -77,7 +77,7 @@ enum MarkdownTasks {
         }
         // Attach only after every mapping has been validated.
         for (index, input) in inputs.enumerated() {
-            try input.attr("data-mdview-task", String(index))
+            try input.attr("data-margined-task", String(index))
             try input.attr("title", String(localized: "Click to save checkmarks in this file"))
         }
         return tasks
@@ -117,7 +117,7 @@ enum ChecklistError: LocalizedError {
     case changed
     var errorDescription: String? {
         switch self {
-        case .changed: String(localized: "The file changed before the checkbox could be saved. MDView refreshed it; please try again.")
+        case .changed: String(localized: "The file changed before the checkbox could be saved. Margined refreshed it; please try again.")
         }
     }
 }

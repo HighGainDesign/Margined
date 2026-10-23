@@ -1,13 +1,13 @@
-# Contributing to MDView
+# Contributing to Margined
 
-MDView is a small Markdown viewer, read-only by default. Explicit checklist saves
+Margined is a small Markdown viewer, read-only by default. Explicit checklist saves
 are the exception and change only task markers. Changes should make reading faster
 or clearer while keeping the app simple. Version 1.x supports macOS; version 2.0
 is planned for macOS and iOS. See [ROADMAP.md](ROADMAP.md).
 
 ## Issues and proposals
 
-For a bug, include your macOS version, MDView version, expected behavior, actual
+For a bug, include your macOS version, Margined version, expected behavior, actual
 behavior, and a small Markdown example. Explain whether the problem occurs in
 the app, Finder Quick Look, or the Drafts action. Replace private content with a
 minimal example before sharing it.
@@ -22,7 +22,7 @@ Use Xcode 26 or later, its command-line tools, and XcodeGen 2.44 or later. The a
 supports macOS 14 and later. See the README for build and test commands.
 
 `project.yml` is the authoritative project definition; the generated
-`MDView.xcodeproj` is ignored. Dependency versions are pinned there. Tests run
+`Margined.xcodeproj` is ignored. Dependency versions are pinned there. Tests run
 with isolated preferences so an ad-hoc test host does not request access to the
 signed app's shared settings container.
 
@@ -98,9 +98,9 @@ DMG with its checksum. Versions below 1.0 are marked as previews. Contributions
 do not need access to release credentials.
 
 Local packaging defaults to the Keychain profile selected by
-`MDVIEW_NOTARY_PROFILE` (default: `Notarize`). Alternatively, supply an existing
-App Store Connect API key file through `MDVIEW_NOTARY_API_KEY_PATH`, with
-`MDVIEW_NOTARY_API_KEY_ID` and `MDVIEW_NOTARY_ISSUER_ID`. Keep private key files
+`MARGINED_NOTARY_PROFILE` (default: `Notarize`). Alternatively, supply an existing
+App Store Connect API key file through `MARGINED_NOTARY_API_KEY_PATH`, with
+`MARGINED_NOTARY_API_KEY_ID` and `MARGINED_NOTARY_ISSUER_ID`. Keep private key files
 outside the repository. This option uses the key directly without creating a
 new Keychain profile.
 
@@ -109,7 +109,7 @@ MIT license. Retain third-party license notices when changing dependencies.
 
 ### iOS
 
-After `xcodegen generate`, build or test the `MDViewiOS` scheme on an iPhone or
+After `xcodegen generate`, build or test the `MarginediOS` scheme on an iPhone or
 iPad Simulator. Device builds need your own signing configuration. Keep shared
 rendering behavior consistent with macOS; test Files lifecycle and audio on a real
 device before shipping.

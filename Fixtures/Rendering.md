@@ -1,6 +1,6 @@
 # Alerts, math and diagrams
 
-Open this file in MDView or Finder Quick Look. Print it to check PDF output.
+Open this file in Margined or Finder Quick Look. Print it to check PDF output.
 
 ## GitHub alerts
 
@@ -46,8 +46,8 @@ flowchart LR
 sequenceDiagram
     accTitle: Live updates
     Agent->>File: Save Markdown
-    File->>MDView: Refresh
-    MDView->>Reader: Show changes
+    File->>Margined: Refresh
+    Margined->>Reader: Show changes
 ```
 
 ## Checklists and tables

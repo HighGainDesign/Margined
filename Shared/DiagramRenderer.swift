@@ -58,7 +58,7 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
     private var budgetStarted = ContinuousClock.now
     private var startupTask: Task<Void, Never>?
     #endif
-    private static let world = WKContentWorld.world(name: "MDViewDiagramRenderer")
+    private static let world = WKContentWorld.world(name: "MarginedDiagramRenderer")
     private static let script: String? = {
         guard let url = Bundle(for: DiagramWorker.self).url(forResource: "mermaid.min", withExtension: "js") else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
@@ -152,12 +152,12 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
     }
 
     private static let initializationScript = """
-            const m = globalThis.mdviewMermaid;
+            const m = globalThis.marginedMermaid;
             const secure = [...new Set([...Object.keys(m.mermaidAPI.defaultConfig), 'secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'htmlLabels', 'themeCSS', 'fontFamily'])];
             m.initialize({startOnLoad:false, securityLevel:'strict', secure,
                 maxTextSize:20000, maxEdges:200, suppressErrorRendering:true,
                 htmlLabels:false, flowchart:{htmlLabels:false}, theme:'default',
-                fontFamily:'Arial', deterministicIds:true, deterministicIDSeed:'mdview'});
+                fontFamily:'Arial', deterministicIds:true, deterministicIDSeed:'margined'});
             """
 
     #if os(iOS)
@@ -190,8 +190,8 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
     #endif
 
     private func renderDiagram(in webView: WKWebView, initialize: Bool = true) {
-        let script = (initialize ? Self.initializationScript : "const m = globalThis.mdviewMermaid;") + """
-            const {svg} = await m.render('mdviewDiagram', source);
+        let script = (initialize ? Self.initializationScript : "const m = globalThis.marginedMermaid;") + """
+            const {svg} = await m.render('marginedDiagram', source);
             // Mermaid includes animation @keyframes even for static diagrams.
             // Let the browser parse CSS, retaining ordinary style rules only.
             // Native sanitation still rejects resource URLs and active elements.

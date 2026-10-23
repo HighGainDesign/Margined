@@ -32,9 +32,9 @@ jobs:
           set -euo pipefail
           python3 script/validate-localizations.py
           xcodegen generate
-          xcodebuild -project MDView.xcodeproj -scheme MDView -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/MDView-tests" \
-            -resultBundlePath "$RUNNER_TEMP/MDView-tests.xcresult" \
+          xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
+            -resultBundlePath "$RUNNER_TEMP/Margined-tests.xcresult" \
             CODE_SIGN_IDENTITY=- test > "$RUNNER_TEMP/tests.log" 2>&1 || {
               python3 - <<'PY'
           import os
@@ -50,10 +50,10 @@ jobs:
 
       - name: Check each interface language in a fresh process
         run: |
-          xcodebuild -project MDView.xcodeproj -scheme MDView -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/MDView-tests" \
+          xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
             CODE_SIGN_IDENTITY=- build-for-testing > "$RUNNER_TEMP/locale-build.log" 2>&1 || { tail -60 "$RUNNER_TEMP/locale-build.log"; exit 1; }
-          python3 script/test-localizations.py "$RUNNER_TEMP/MDView-tests"
+          python3 script/test-localizations.py "$RUNNER_TEMP/Margined-tests"
 
       - name: Preserve test diagnostics
         if: always()
@@ -62,5 +62,5 @@ jobs:
           name: macos-test-diagnostics
           path: |
             ${{ runner.temp }}/tests.log
-            ${{ runner.temp }}/MDView-tests.xcresult
+            ${{ runner.temp }}/Margined-tests.xcresult
           retention-days: 7

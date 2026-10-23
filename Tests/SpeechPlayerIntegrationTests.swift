@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 import XCTest
-@testable import MDView
+@testable import Margined
 
 @MainActor
 final class SpeechPlayerIntegrationTests: XCTestCase {
@@ -62,7 +62,7 @@ final class SpeechPlayerIntegrationTests: XCTestCase {
         fixture.reader.speech.start(at: 3)
         var highlighted = false
         for _ in 0..<150 {
-            highlighted = (try? await fixture.web.evaluateJavaScript("!!document.querySelector('.mdview-speaking')")) as? Bool == true
+            highlighted = (try? await fixture.web.evaluateJavaScript("!!document.querySelector('.margined-speaking')")) as? Bool == true
             if highlighted { break }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -76,7 +76,7 @@ final class SpeechPlayerIntegrationTests: XCTestCase {
         fixture.reader.speech.session.seek(1)
         var moved = false
         for _ in 0..<100 {
-            moved = (try? await fixture.web.evaluateJavaScript("document.querySelector('p').classList.contains('mdview-speaking')")) as? Bool == true
+            moved = (try? await fixture.web.evaluateJavaScript("document.querySelector('p').classList.contains('margined-speaking')")) as? Bool == true
             if moved { break }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -89,7 +89,7 @@ final class SpeechPlayerIntegrationTests: XCTestCase {
         func close() { reader.stop(); window.close(); try? FileManager.default.removeItem(at: file) }
     }
     private func makeFixture() async throws -> Fixture {
-        let name = "MDViewTests.SpeechPlayer.\(UUID())"
+        let name = "MarginedTests.SpeechPlayer.\(UUID())"
         let defaults = UserDefaults(suiteName: name)!
         addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
         let driver = RecordingSpeechDriver(), preferences = SpeechPreferences(defaults: defaults)

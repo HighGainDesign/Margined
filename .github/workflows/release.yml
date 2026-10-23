@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'HighGainDesign/MDView'
+    if: github.repository == 'HighGainDesign/Margined'
     runs-on: macos-26
     timeout-minutes: 180
     # Configure this environment to allow only protected v* release tags.
@@ -54,8 +54,8 @@ jobs:
           python3 script/verify-vendor.py
           python3 script/validate-localizations.py
           xcodegen generate
-          xcodebuild -project MDView.xcodeproj -scheme MDView -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/MDView-tests" \
+          xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
             CODE_SIGN_IDENTITY=- test > "$RUNNER_TEMP/tests.log" 2>&1 || {
               grep -n -E 'error:|failed|Failing tests:' "$RUNNER_TEMP/tests.log" || true
               tail -80 "$RUNNER_TEMP/tests.log"
@@ -71,10 +71,10 @@ jobs:
 
       - name: Check each interface language in a fresh process
         run: |
-          xcodebuild -project MDView.xcodeproj -scheme MDView -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/MDView-tests" \
+          xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
             CODE_SIGN_IDENTITY=- build-for-testing > "$RUNNER_TEMP/locale-build.log" 2>&1 || { tail -60 "$RUNNER_TEMP/locale-build.log"; exit 1; }
-          python3 script/test-localizations.py "$RUNNER_TEMP/MDView-tests"
+          python3 script/test-localizations.py "$RUNNER_TEMP/Margined-tests"
 
       - name: Preserve test failure details
         if: failure()
@@ -83,7 +83,7 @@ jobs:
           name: test-failure-details
           path: |
             ${{ runner.temp }}/tests.log
-            ${{ runner.temp }}/MDView-tests/Logs/Test
+            ${{ runner.temp }}/Margined-tests/Logs/Test
           retention-days: 7
 
       - name: Install temporary signing and notarization credentials
@@ -101,7 +101,7 @@ jobs:
           done
           certificate="$RUNNER_TEMP/developer-id.p12"
           api_key="$RUNNER_TEMP/notary-api.p8"
-          keychain="$RUNNER_TEMP/mdview-signing.keychain-db"
+          keychain="$RUNNER_TEMP/margined-signing.keychain-db"
           printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$certificate"
           printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$api_key"
           keychain_password=$(openssl rand -hex 32)
@@ -114,25 +114,25 @@ jobs:
           security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
           identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ { print $2; exit }')
           [[ -n "$identity" ]] || { echo 'A Developer ID Application certificate with its private key is required.' >&2; exit 1; }
-          xcrun notarytool store-credentials MDView-CI --keychain "$keychain" \
+          xcrun notarytool store-credentials Margined-CI --keychain "$keychain" \
             --key "$api_key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
           rm -f "$certificate" "$api_key"
-          echo "MDVIEW_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
-          echo "MDVIEW_NOTARY_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "MARGINED_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "MARGINED_NOTARY_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
       - name: Build, sign, notarize, and staple app and DMG
         env:
-          MDVIEW_TEAM_ID: UX8BPNLPX5
-          MDVIEW_RELEASE_DIR: ${{ runner.temp }}/MDView-release
-          MDVIEW_DMG_PYTHON: ${{ runner.temp }}/dmg-env/bin/python
-          MDVIEW_NOTARY_PROFILE: MDView-CI
-          MDVIEW_NOTARY_TIMEOUT: 60m
+          MARGINED_TEAM_ID: UX8BPNLPX5
+          MARGINED_RELEASE_DIR: ${{ runner.temp }}/Margined-release
+          MARGINED_DMG_PYTHON: ${{ runner.temp }}/dmg-env/bin/python
+          MARGINED_NOTARY_PROFILE: Margined-CI
+          MARGINED_NOTARY_TIMEOUT: 60m
         run: ./script/release.sh
 
       - name: Remove credentials
         if: always()
         run: |
-          security delete-keychain "$RUNNER_TEMP/mdview-signing.keychain-db" || true
+          security delete-keychain "$RUNNER_TEMP/margined-signing.keychain-db" || true
           rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary-api.p8"
 
       - name: Preserve only completed release files
@@ -140,8 +140,8 @@ jobs:
         with:
           name: signed-dmg
           path: |
-            dist/MDView-${{ steps.version.outputs.version }}.dmg
-            dist/MDView-${{ steps.version.outputs.version }}.dmg.sha256
+            dist/Margined-${{ steps.version.outputs.version }}.dmg
+            dist/Margined-${{ steps.version.outputs.version }}.dmg.sha256
             dist/release-notes.md
           if-no-files-found: error
           retention-days: 7
@@ -167,7 +167,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
-          (cd dist; sha256sum -c "MDView-$RELEASE_VERSION.dmg.sha256")
+          (cd dist; sha256sum -c "Margined-$RELEASE_VERSION.dmg.sha256")
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             echo 'This release already exists; refusing to replace published files.' >&2
             exit 1
@@ -179,5 +179,5 @@ jobs:
             release_flags+=(--latest)
           fi
           gh release create "$RELEASE_TAG" \
-            "dist/MDView-$RELEASE_VERSION.dmg" "dist/MDView-$RELEASE_VERSION.dmg.sha256" \
-            --verify-tag --title "MDView $RELEASE_VERSION" --notes-file dist/release-notes.md "${release_flags[@]}"
+            "dist/Margined-$RELEASE_VERSION.dmg" "dist/Margined-$RELEASE_VERSION.dmg.sha256" \
+            --verify-tag --title "Margined $RELEASE_VERSION" --notes-file dist/release-notes.md "${release_flags[@]}"

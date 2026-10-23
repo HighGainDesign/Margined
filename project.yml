@@ -1,4 +1,4 @@
-name: MDView
+name: Margined
 options:
   bundleIdPrefix: design.highgain
   minimumXcodeGenVersion: 2.44.0
@@ -23,7 +23,7 @@ packages:
     url: https://github.com/scinfu/SwiftSoup.git
     exactVersion: 2.13.9
 targets:
-  MDView:
+  Margined:
     type: application
     platform: macOS
     sources:
@@ -33,7 +33,7 @@ targets:
         buildPhase: resources
       - path: LICENSE
         buildPhase: resources
-      - path: Integrations/Drafts/Preview in MDView.draftsAction
+      - path: Integrations/Drafts/Preview in Margined.draftsAction
         buildPhase: resources
       - path: Shared
         excludes: [Resources]
@@ -42,7 +42,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: MDView
+        CFBundleDisplayName: Margined
         ITSAppUsesNonExemptEncryption: false
         NSHumanReadableCopyright: Copyright © 2026 HighGainDesign
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -64,23 +64,23 @@ targets:
               public.mime-type: text/markdown
         CFBundleURLTypes:
           - CFBundleURLName: Markdown preview
-            CFBundleURLSchemes: [mdview]
+            CFBundleURLSchemes: [margined]
     entitlements:
-      path: App/MDView.entitlements
+      path: App/Margined.entitlements
       properties:
-        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.mdview]
+        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.margined]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
     dependencies:
       - package: Apex
         product: ApexC
       - package: SwiftSoup
-      - target: MDViewQuickLook
+      - target: MarginedQuickLook
         embed: true
-  MDViewQuickLook:
+  MarginedQuickLook:
     type: app-extension
     platform: macOS
     sources:
@@ -94,7 +94,7 @@ targets:
     info:
       path: QuickLook/Info.plist
       properties:
-        CFBundleDisplayName: MDView Quick Look
+        CFBundleDisplayName: Margined Quick Look
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -110,10 +110,10 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-only: true
         com.apple.security.network.client: true
-        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.mdview]
+        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.margined]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview.quicklook
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.quicklook
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
         ENABLE_HARDENED_RUNTIME: YES
@@ -121,17 +121,17 @@ targets:
       - package: Apex
         product: ApexC
       - package: SwiftSoup
-  MDViewTests:
+  MarginedTests:
     type: bundle.unit-test
     platform: macOS
     sources: [Tests]
     dependencies:
-      - target: MDView
+      - target: Margined
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview.tests
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.tests
         GENERATE_INFOPLIST_FILE: YES
-  MDViewiOS:
+  MarginediOS:
     type: application
     platform: iOS
     sources:
@@ -158,7 +158,7 @@ targets:
     info:
       path: iOS/Info.plist
       properties:
-        CFBundleDisplayName: MDView
+        CFBundleDisplayName: Margined
         ITSAppUsesNonExemptEncryption: false
         NSHumanReadableCopyright: Copyright © 2026 HighGainDesign
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -183,11 +183,11 @@ targets:
               public.mime-type: text/markdown
         CFBundleURLTypes:
           - CFBundleURLName: Markdown preview
-            CFBundleURLSchemes: [mdview]
+            CFBundleURLSchemes: [margined]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview
-        PRODUCT_MODULE_NAME: MDViewiOS
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
+        PRODUCT_MODULE_NAME: MarginediOS
         MARKETING_VERSION: '2.0.0'
         CURRENT_PROJECT_VERSION: 1
         TARGETED_DEVICE_FAMILY: '1,2'
@@ -195,35 +195,35 @@ targets:
         SUPPORTS_MACCATALYST: NO
       configs:
         Release:
-          PROVISIONING_PROFILE_SPECIFIER: $(MDVIEW_IOS_PROFILE)
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_IOS_PROFILE)
     dependencies:
       - package: Apex
         product: ApexC
       - package: SwiftSoup
-  MDViewiOSTests:
+  MarginediOSTests:
     type: bundle.unit-test
     platform: iOS
     sources: [iOSTests]
     dependencies:
-      - target: MDViewiOS
+      - target: MarginediOS
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.mdview.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.ios.tests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
-  MDView:
+  Margined:
     build:
       targets:
-        MDView: all
+        Margined: all
     test:
-      targets: [MDViewTests]
+      targets: [MarginedTests]
       environmentVariables:
-        MDVIEW_TEST_PREFERENCES: '1'
-  MDViewiOS:
+        MARGINED_TEST_PREFERENCES: '1'
+  MarginediOS:
     build:
       targets:
-        MDViewiOS: all
+        MarginediOS: all
     test:
-      targets: [MDViewiOSTests]
+      targets: [MarginediOSTests]
       environmentVariables:
-        MDVIEW_TEST_PREFERENCES: '1'
+        MARGINED_TEST_PREFERENCES: '1'

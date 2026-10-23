@@ -1,6 +1,6 @@
 import XCTest
 import SwiftSoup
-@testable import MDView
+@testable import Margined
 
 final class DocumentLanguageTests: XCTestCase {
     func testSelectedLanguageIsValidatedAndIndependentOfContentLanguage() async throws {
