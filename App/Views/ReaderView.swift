@@ -102,12 +102,8 @@ struct ReaderView: View {
             }
             ReaderStatusBar(reader: reader)
         }
-        .alert("Save checkmarks to this file?", isPresented: $reader.showChecklistConfirmation, presenting: reader.pendingChecklistConfirmation) { _ in
-            Button("Save Checkmarks") { reader.confirmChecklistSaving() }
-            Button("Cancel", role: .cancel) { reader.cancelChecklistConfirmation() }
-        } message: { pending in
-            Text("Checkmarks in “\(pending.fileURL.lastPathComponent)” save automatically. Other text stays unchanged, and you can undo each change.")
-        }
+        .background(ReaderChecklistConsent(reader: reader, confirmation: reader.showChecklistConfirmation ? reader.pendingChecklistConfirmation : nil)
+            .frame(width: 0, height: 0).accessibilityHidden(true))
         .background(ReaderWindowContext(reader: reader).frame(width: 0, height: 0).accessibilityHidden(true))
         .frame(minWidth: 480, minHeight: 300)
         .preferredColorScheme(documentAppearance == .system ? nil : (documentAppearance == .dark ? .dark : .light))

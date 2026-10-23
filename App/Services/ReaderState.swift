@@ -268,6 +268,7 @@ final class ReaderState {
     }
 
     struct ChecklistConfirmation {
+        let id = UUID()
         let fileURL: URL
         let source: String
         let task: MarkdownTask

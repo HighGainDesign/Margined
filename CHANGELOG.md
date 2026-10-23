@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Renamed MDView to Margined.
+- Fix a crash when dismissing checklist save permission.
 
 ## 1.7.0 — 2026-10-22
 
