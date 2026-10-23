@@ -493,6 +493,9 @@ final class ReaderState {
     }
 
     func reload() {
+        #if MARGINED_APP_STORE
+        SandboxImageFolders.shared.refresh()
+        #endif
         localImageError = nil
         imageReloadGeneration += 1
         guard let fileURL else { render(); return }

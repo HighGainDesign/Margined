@@ -14285,6 +14285,211 @@
           }
         }
       }
+    },
+    "Allow Image Folder…": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permitir carpeta de imágenes…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许图像文件夹…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許影像檔案夾…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画像フォルダへのアクセスを許可…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autoriser un dossier d’images…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bildordner freigeben…"
+          }
+        }
+      }
+    },
+    "Allow Folder": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permitir carpeta"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许文件夹"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許檔案夾"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダを許可"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autoriser le dossier"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ordner freigeben"
+          }
+        }
+      }
+    },
+    "Choose a folder containing this document’s images. Margined remembers access on this Mac.": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elige una carpeta que contenga las imágenes de este documento. Margined recordará el acceso en este Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择包含此文稿图像的文件夹。Margined 会在这台 Mac 上记住访问权限。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇包含此文件影像的檔案夾。Margined 會在這部 Mac 上記住存取權限。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この書類の画像が含まれるフォルダを選択してください。MarginedはこのMacでアクセス権を記憶します。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez un dossier contenant les images de ce document. Margined mémorise l’accès sur ce Mac."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle einen Ordner mit den Bildern dieses Dokuments. Margined merkt sich den Zugriff auf diesem Mac."
+          }
+        }
+      }
+    },
+    "Folder access": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acceso a carpetas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件夹访问权限"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檔案夾存取權限"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダへのアクセス"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accès aux dossiers"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ordnerzugriff"
+          }
+        }
+      }
+    },
+    "Choose image folders in a document’s Reading options when macOS blocks access. Margined remembers the folders you select. Finder Quick Look has separate file access.": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Si macOS bloquea el acceso, elige las carpetas de imágenes en las opciones de lectura del documento. Margined recuerda las carpetas seleccionadas. Vista Rápida del Finder tiene su propio acceso a los archivos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如果 macOS 阻止访问，请在文稿的阅读选项中选择图像文件夹。Margined 会记住所选文件夹。访达的快速查看使用单独的文件访问权限。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如果 macOS 阻止存取，請在文件的閱讀選項中選擇影像檔案夾。Margined 會記住所選檔案夾。Finder 的快速查看使用獨立的檔案存取權限。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOSによってアクセスが制限される場合は、書類の読み取りオプションで画像フォルダを選択してください。Marginedは選択したフォルダを記憶します。Finderのクイックルックでは、ファイルへのアクセス権が別に管理されます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Si macOS bloque l’accès, choisissez les dossiers d’images dans les options de lecture du document. Margined mémorise les dossiers sélectionnés. Coup d’œil du Finder dispose de son propre accès aux fichiers."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn macOS den Zugriff blockiert, wähle die Bildordner in den Leseoptionen des Dokuments. Margined merkt sich die ausgewählten Ordner. Die Übersicht im Finder hat einen eigenen Dateizugriff."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

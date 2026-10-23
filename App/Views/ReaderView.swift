@@ -64,6 +64,9 @@ struct ReaderView: View {
                     Image(systemName: "photo")
                     Text(message).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     Spacer()
+                    #if MARGINED_APP_STORE
+                    Button("Allow Image Folder…") { reader.allowImageFolder() }
+                    #endif
                     Button("Retry") { reader.reload() }
                 }.font(.callout).padding(12).background(.quaternary)
                 Divider()

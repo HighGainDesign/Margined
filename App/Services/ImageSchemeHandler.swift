@@ -3,6 +3,9 @@ import WebKit
 
 @MainActor
 final class ImageSchemeHandler: NSObject, WKURLSchemeHandler {
+    #if os(macOS) && MARGINED_APP_STORE
+    private let folderAccess = SandboxImageFolders.shared
+    #endif
     var documentURL: URL?
     var loadFailed: ((String) -> Void)?
 

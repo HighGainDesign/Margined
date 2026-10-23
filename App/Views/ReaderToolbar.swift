@@ -128,6 +128,9 @@ struct ReaderToolbar: View {
                     }
                 }
                 .help("For this document only. Automatic detects its language on this Mac when enough text is available; choose a language to control pronunciation. Interface language is separate.")
+                #if MARGINED_APP_STORE
+                Button("Allow Image Folder…") { reader.allowImageFolder() }
+                #endif
                 Toggle("Load Remote Images", isOn: $reader.loadRemoteImages)
                     .help("For this document only. HTTPS image hosts can see your IP address and that you opened their image. Off each time a document is opened.")
                 Divider()

@@ -5,7 +5,19 @@ options:
   deploymentTarget:
     macOS: '14.0'
     iOS: '17.0'
+configs:
+  Debug: debug
+  Release: release
+  AppStoreDebug: debug
+  AppStoreRelease: release
 settings:
+  configs:
+    AppStoreDebug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) DEBUG MARGINED_APP_STORE
+    AppStoreRelease:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) MARGINED_APP_STORE
+      MARKETING_VERSION: '2.0.0'
+      CURRENT_PROJECT_VERSION: 1
   base:
     SWIFT_VERSION: '6.0'
     SWIFT_STRICT_CONCURRENCY: complete
@@ -47,6 +59,7 @@ targets:
         NSHumanReadableCopyright: Copyright © 2026 HighGainDesign
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
         NSPrincipalClass: NSApplication
         NSHighResolutionCapable: true
         CFBundleDocumentTypes:
@@ -65,15 +78,18 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: Markdown preview
             CFBundleURLSchemes: [margined]
-    entitlements:
-      path: App/Margined.entitlements
-      properties:
-        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.margined]
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: App/Margined.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        AppStoreDebug:
+          CODE_SIGN_ENTITLEMENTS: App/MarginedAppStore.entitlements
+        AppStoreRelease:
+          CODE_SIGN_ENTITLEMENTS: App/MarginedAppStore.entitlements
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_MAC_PROFILE)
     dependencies:
       - package: Apex
         product: ApexC
@@ -117,6 +133,9 @@ targets:
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
         ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        AppStoreRelease:
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_MAC_QUICKLOOK_PROFILE)
     dependencies:
       - package: Apex
         product: ApexC
@@ -273,6 +292,21 @@ schemes:
       targets: [MarginedTests]
       environmentVariables:
         MARGINED_TEST_PREFERENCES: '1'
+  MarginedAppStore:
+    build:
+      targets:
+        Margined: all
+    run:
+      config: AppStoreDebug
+    test:
+      config: AppStoreDebug
+      targets: [MarginedTests]
+      environmentVariables:
+        MARGINED_TEST_PREFERENCES: '1'
+    archive:
+      config: AppStoreRelease
+    profile:
+      config: AppStoreRelease
   MarginediOS:
     build:
       targets:
