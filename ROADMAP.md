@@ -55,10 +55,10 @@ established cold-launch target or a measured Margined result.
 
 ### Delivery
 
-The iOS reader MVP exists locally; share/Quick Look integration, collaboration and
-performance acceptance remain 2.0 work. Prepare Mac and iOS test builds and verify
-real File Providers, background audio, accessibility and file handoff. A roadmap
-entry or Simulator build alone is not release acceptance.
+The iPhone/iPad reader is in internal TestFlight; the native Mac beta is in
+preparation. System Quick Look checks, collaboration approval and performance
+acceptance remain open. Verify real File Providers, background audio,
+accessibility and file handoff before release.
 
 ## Released foundation
 
