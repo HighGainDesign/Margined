@@ -14,13 +14,16 @@ python3 script/benchmark-viewing.py \
 ```
 
 Leave the screen unlocked and app windows unobstructed. Reports retain synthetic
-fixtures, source hashes, raw samples, machine/OS/app versions and median/p95. Cold
+fixtures, source hashes, raw samples, measured viewport/scale, machine/OS/app
+versions and median/p95. Missing math or diagram artwork invalidates a sample. Cold
 means a fresh app process, with OS caches retained; warm opens reuse a process.
 Refresh includes the actual file watcher. All diagrams finish before the renderer
 publishes its output; their cost is included in render-ready time.
 
 Frame time ends after correct DOM, two animation frames and a WebKit snapshot in
-an unoccluded window. It includes verification overhead: an upper bound to a
+a window reported visible in the active app. This check allows partial occlusion;
+keep windows unobstructed for native acceptance. Timing includes verification
+overhead: an upper bound to a
 verified rendered frame, not exact display scan-out. Failed or incomplete cohorts
 are never summarized as successful.
 

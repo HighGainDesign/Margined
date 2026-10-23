@@ -388,6 +388,9 @@ final class ReaderState {
                 self?.rendered = output
                 self?.errorMessage = nil
                 self?.isRendering = false
+                #if MARGINED_BENCHMARK
+                ViewingBenchmarkSession.current?.didRender(source: text)
+                #endif
                 if let self {
                     currentChangeIndex = output.changes.count == 0 ? -1 : min(max(0, currentChangeIndex), output.changes.count - 1)
                     if pendingReviewAnnouncement {

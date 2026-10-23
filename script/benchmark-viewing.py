@@ -37,8 +37,14 @@ def summarize(rows, expected_count, kind):
     if (len(rows) != expected_count or any(type(r.get("index")) is not int for r in rows)
             or [r.get("index") for r in rows] != list(range(expected_count))):
         raise ValueError("incomplete or duplicate sample cohort")
-    render, frame, pids = [], [], []
+    render, frame, pids, geometries = [], [], [], []
     for row in rows:
+        geometry = row.get("geometry", {})
+        geometry_keys = ("windowWidth", "windowHeight", "viewportWidth", "viewportHeight", "backingScale", "imageWidth", "imageHeight")
+        dimensions = [geometry.get(key) for key in geometry_keys]
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0 for value in dimensions):
+            raise ValueError("missing or invalid measured window/viewport geometry")
+        geometries.append(dimensions)
         values = [row.get(k) for k in ("pid", "request_ns", "render_ready_ns", "frame_ns")]
         if any(type(value) is not int or value <= 0 for value in values):
             raise ValueError("invalid sample timestamps or process identity")
@@ -48,11 +54,13 @@ def summarize(rows, expected_count, kind):
         pids.append(pid)
         render.append((ready-start)/1_000_000)
         frame.append((end-start)/1_000_000)
+    if any(value != geometries[0] for value in geometries):
+        raise ValueError("viewport geometry changed within the cohort")
     if len(set(pids)) != (expected_count if kind == "cold" else 1):
         raise ValueError("cold/warm process reuse contract violated")
     def stats(values):
         return {"median": statistics.median(values), "p95": sorted(values)[math.ceil(len(values)*.95)-1]}
-    return {"samples": len(rows), "render_ms": stats(render), "frame_ms": stats(frame)}
+    return {"samples": len(rows), "render_ms": stats(render), "frame_ms": stats(frame), "geometry": rows[0]["geometry"]}
 
 
 def read_result(payload, kind, count):
@@ -77,15 +85,16 @@ def monotonic_ns():
     return library.mach_absolute_time() * timebase.numer // timebase.denom
 
 
-def run_session(executable, directory, text, kind, count):
+def run_session(executable, directory, text, kind, count, expected_math=0, expected_diagrams=0):
     directory.mkdir()
     source = directory / "fixture.md"
     source.write_text(text, encoding="utf-8")
     request = {"version": 1, "kind": kind, "sourceFile": source.name,
-               "expectedMarker": text.splitlines()[0][2:], "sampleCount": count}
+               "expectedMarker": text.splitlines()[0][2:], "sampleCount": count,
+               "expectedMath": expected_math, "expectedDiagrams": expected_diagrams}
     manifest = directory / "request.json"
     manifest.write_text(json.dumps(request), encoding="utf-8")
-    environment = dict(os.environ, MARGINED_BENCHMARK_REQUEST=str(manifest))
+    environment = dict(os.environ, MARGINED_BENCHMARK_REQUEST=str(manifest), MARGINED_TEST_PREFERENCES="1")
     with (directory / "process.log").open("wb") as log:
         environment["MARGINED_BENCHMARK_START_NS"] = str(monotonic_ns())
         process = subprocess.Popen([str(executable)], env=environment, stdout=log, stderr=log)
@@ -129,7 +138,7 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     report = {"schema": 1, "status": "incomplete", "boundary": "verified-frame-v1",
-              "boundary_description": "Request to correct DOM, two animation frames and verified WebKit snapshot in an unoccluded window; includes verification overhead. Not scan-out timing.",
+              "boundary_description": "Request to correct DOM, two animation frames and verified WebKit snapshot in a visible window of the active app; includes verification overhead. Not scan-out timing.",
               "hardware": {"machine": platform.machine(), "model": subprocess.check_output(["sysctl", "-n", "hw.model"], text=True).strip(), "os": platform.mac_ver()[0]},
               "app": {key: info.get(key) for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion")},
               "cohorts": []}
@@ -140,7 +149,8 @@ def main():
                 rows, children = [], []
                 for session in range(args.samples if kind == "cold" else 1):
                     child = run_session(executable, output / f"{name}-{kind}-{session:03}", text, kind,
-                                        1 if kind == "cold" else args.samples)
+                                        1 if kind == "cold" else args.samples,
+                                        expected_math=24 if name == "math" else 0, expected_diagrams=3 if name == "mermaid" else 0)
                     children.append(child)
                     for row in child["samples"]:
                         rows.append(dict(row, index=len(rows)))

@@ -12,6 +12,7 @@ class ViewingBenchmarkTests(unittest.TestCase):
     def rows(self, kind="warm", count=20):
         return [{"index": i, "pid": 123 if kind != "cold" else 123+i,
                  "request_ns": 1_000_000_000,
+                 "geometry": {"windowWidth": 920, "windowHeight": 760, "viewportWidth": 920, "viewportHeight": 700, "backingScale": 2, "imageWidth": 1840, "imageHeight": 1400},
                  "render_ready_ns": 1_000_000_000 + (i+1)*500_000,
                  "frame_ns": 1_000_000_000 + (i+1)*1_000_000}
                 for i in range(count)]
@@ -33,6 +34,18 @@ class ViewingBenchmarkTests(unittest.TestCase):
         for rows in cases:
             with self.subTest(rows=rows[:1]), self.assertRaises(ValueError):
                 benchmark.summarize(rows, 20, "warm")
+
+    def test_incomplete_or_changed_geometry_cannot_be_aggregated(self):
+        for geometry in ({}, {"windowWidth": 0}, dict(self.rows()[0]["geometry"], viewportWidth=0),
+                         dict(self.rows()[0]["geometry"], backingScale=float("nan"))):
+            rows = self.rows()
+            rows[0] = dict(rows[0], geometry=geometry)
+            with self.subTest(geometry=geometry), self.assertRaises(ValueError):
+                benchmark.summarize(rows, 20, "warm")
+        rows = self.rows()
+        rows[0] = dict(rows[0], geometry=dict(rows[0]["geometry"], viewportWidth=800))
+        with self.assertRaises(ValueError):
+            benchmark.summarize(rows, 20, "warm")
 
     def test_cold_requires_separate_processes_and_warm_reuses_one(self):
         self.assertEqual(benchmark.summarize(self.rows("cold"), 20, "cold")["samples"], 20)

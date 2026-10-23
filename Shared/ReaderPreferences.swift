@@ -11,7 +11,7 @@ enum ReaderPreferences {
     static let appearanceKey = "documentAppearance"
 
     static var defaults: UserDefaults {
-        #if DEBUG
+        #if DEBUG || MARGINED_BENCHMARK
         // Ad-hoc XCTest hosts have no team identity. Keep tests out of the user's
         // group container; signed Finder integration is verified separately.
         if ProcessInfo.processInfo.environment["MARGINED_TEST_PREFERENCES"] == "1" {

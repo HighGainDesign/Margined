@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: true)
+        #if MARGINED_BENCHMARK
+        if ViewingBenchmarkSession.startIfRequested() { return }
+        #endif
         Task { @MainActor in
             await Task.yield()
             showStartupTips()
@@ -22,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         // AppKit calls this when launching without a document to open.
+        #if MARGINED_BENCHMARK
+        if ProcessInfo.processInfo.environment["MARGINED_BENCHMARK_REQUEST"] != nil { return false }
+        #endif
         showWelcome()
         return false
     }
