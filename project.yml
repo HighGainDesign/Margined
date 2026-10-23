@@ -203,7 +203,9 @@ targets:
   MarginediOSTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [iOSTests]
+    sources:
+      - iOSTests
+      - Tests/PreviewDocumentTests.swift
     dependencies:
       - target: MarginediOS
     settings:
