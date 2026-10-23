@@ -20,6 +20,53 @@ final class ReaderState {
     var canUndoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canUndo(snapshot: sourceSnapshot) }
     var canRedoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canRedo(snapshot: sourceSnapshot) }
 
+    private(set) var discussionImportPreview: DiscussionImportPreview?
+    private(set) var discussionImportLoading = false
+    @ObservationIgnored private var discussionImportSnapshot: SourceFileEdit.Snapshot?
+    @ObservationIgnored private var discussionImportRequest = UUID()
+
+    func reviewDiscussionCopy(_ url: URL) async {
+        guard !fileSaving && !isRendering && !hasPendingFileUpdate && !showChecklistConfirmation,
+              let document = rendered?.discussions, document.source.utf8.elementsEqual(source.utf8) else { return }
+        guard fileURL != nil, !isStreamingPreview, let captured = sourceSnapshot else { offerDiscussionCopy(); return }
+        discardDiscussionImport()
+        let request = discussionImportRequest, context = sourceContext
+        discussionImportLoading = true; discussionError = nil
+        defer { if discussionImportRequest == request { discussionImportLoading = false } }
+        do {
+            let incoming = try await DiscussionCopy.read(url)
+            guard discussionImportRequest == request, sourceContext == context else { return }
+            guard sourceSnapshot == captured, source.utf8.elementsEqual(document.source.utf8) else {
+                throw DiscussionReconciliation.Failure.staleSource
+            }
+            discussionImportPreview = DiscussionReconciliation.preview(current: document, incoming: incoming)
+            discussionImportSnapshot = captured
+        } catch is CancellationError {
+        } catch {
+            guard discussionImportRequest == request, sourceContext == context else { return }
+            discussionError = error.localizedDescription
+        }
+    }
+    func importDiscussions(choices: [String: DiscussionReconciliation.Choice] = [:]) {
+        guard !fileSaving && !isRendering && !hasPendingFileUpdate && !showChecklistConfirmation, !discussionImportLoading,
+              let preview = discussionImportPreview else { return }
+        do {
+            guard let captured = discussionImportSnapshot, sourceSnapshot == captured,
+                  source.utf8.elementsEqual(preview.current.source.utf8) else {
+                throw DiscussionReconciliation.Failure.staleSource
+            }
+            if let operation = try discussions.prepareImport(preview, snapshot: captured, choices: choices) {
+                commitDiscussion(operation)
+            } else {
+                discardDiscussionImport()
+            }
+        } catch { discussionError = error.localizedDescription }
+    }
+    func discardDiscussionImport() {
+        discussionImportRequest = UUID()
+        discussionImportPreview = nil; discussionImportSnapshot = nil; discussionImportLoading = false
+    }
+
     func postDiscussion(reopenResolved: Bool = false) {
         guard !fileSaving, !isRendering, !hasPendingFileUpdate, !showChecklistConfirmation,
               let document = rendered?.discussions, document.source.utf8.elementsEqual(source.utf8) else { return }
@@ -78,6 +125,7 @@ final class ReaderState {
                 }
                 guard revision == externalFileRevision else { throw SourceFileEdit.Failure.changed }
                 try discussions.saved(operation, as: saved)
+                if operation.kind == .importDiscussions { discardDiscussionImport() }
                 sourceSnapshot = saved
                 discussionSaving = false
                 acceptFileUpdate(try saved.source)
@@ -117,6 +165,7 @@ final class ReaderState {
             guard fileURL != oldValue else { return }
             speechModel?.close(discardHold: true)
             _ = sourceGate.close(); sourceGate = SourceFileGate()
+            discardDiscussionImport()
             sourceSnapshot = nil; pendingDiskSnapshot = nil; discussionCopyOffered = false
             sourceContext = UUID(); renderedContext = nil
             externalFileRevision += 1
@@ -671,6 +720,7 @@ final class ReaderState {
     func changeZoom(by amount: Double) { zoom = min(2.0, max(0.6, zoom + amount)) }
 
     func stop() {
+        discardDiscussionImport()
         classifyUpdateTask?.cancel()
         sourceContext = UUID()
         _ = sourceGate.close()

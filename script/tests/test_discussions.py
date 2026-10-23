@@ -22,7 +22,7 @@ class DiscussionTests(unittest.TestCase):
                 command += ["-Xcc", "-fmodule-map-file=" + str(MAPS / (name + ".modulemap")), str(PRODUCTS / (name + ".o"))]
             command += [str(ROOT / "Shared/MarkdownSource.swift"), str(ROOT / "Shared/MarkdownSourceEdits.swift"), str(ROOT / "Shared/SourceFileEdit.swift"), str(ROOT / "Shared/SourceFileGate.swift"), str(ROOT / "Shared/MathSyntax.swift")]
             command += [str(p) for p in sorted((ROOT / "Shared/Discussions").glob("*.swift"))]
-            command += [str(ROOT / "Tests/MarkdownSourceEditsTests.swift"), str(ROOT / "Tests/SourceFileEditTests.swift"), str(ROOT / "Tests/SourceFileGateTests.swift"), str(ROOT / "Tests/DiscussionSessionTests.swift"), str(ROOT / "Tests/DiscussionCodecTests.swift"), str(ROOT / "Tests/DiscussionAnchorTests.swift"), str(ROOT / "script/tests/DiscussionProbe.swift"), "-o", str(runner)]
+            command += [str(ROOT / "Tests/MarkdownSourceEditsTests.swift"), str(ROOT / "Tests/SourceFileEditTests.swift"), str(ROOT / "Tests/SourceFileGateTests.swift"), str(ROOT / "Tests/DiscussionSessionTests.swift"), str(ROOT / "Tests/DiscussionCodecTests.swift"), str(ROOT / "Tests/DiscussionReconciliationTests.swift"), str(ROOT / "Tests/DiscussionAnchorTests.swift"), str(ROOT / "script/tests/DiscussionProbe.swift"), "-o", str(runner)]
             build = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             result = subprocess.run([str(runner)], capture_output=True, text=True, timeout=30)

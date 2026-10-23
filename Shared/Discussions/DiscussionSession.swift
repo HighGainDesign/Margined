@@ -15,7 +15,7 @@ final class DiscussionSession {
         let revision: UUID
     }
     struct Pending: Sendable {
-        enum Kind: Sendable { case post, state, undo, redo }
+        enum Kind: Sendable { case post, state, importDiscussions, undo, redo }
         let kind: Kind
         let id: UUID
         let key: DraftKey
@@ -159,7 +159,7 @@ final class DiscussionSession {
         guard pending?.id == operation.id, snapshot.url == operation.expected.url,
               snapshot.data == operation.replacement else { throw Failure.staleSource }
         switch operation.kind {
-        case .post, .state:
+        case .post, .state, .importDiscussions:
             if let historySnapshot, historySnapshot != operation.expected { undo.removeAll() }
             undo.append(History(before: operation.expected.data, after: snapshot.data, threadID: operation.threadID))
             // Keep at least the latest edit; one record is bounded by the
@@ -168,10 +168,12 @@ final class DiscussionSession {
                 undo.removeFirst()
             }
             redo.removeAll()
-            postedThreads[operation.key] = operation.threadID
-            failedAttempts[operation.key] = nil
-            origins[operation.key] = nil
-            if drafts[operation.key]?.revision == operation.revision { drafts[operation.key] = nil }
+            if operation.kind != .importDiscussions {
+                postedThreads[operation.key] = operation.threadID
+                failedAttempts[operation.key] = nil
+                origins[operation.key] = nil
+                if drafts[operation.key]?.revision == operation.revision { drafts[operation.key] = nil }
+            }
         case .undo:
             guard let item = undo.popLast() else { throw Failure.staleSource }; redo.append(item)
         case .redo:
@@ -232,6 +234,20 @@ final class DiscussionSession {
         let operation = DiscussionOperation.resolve(threadID: threadID, author: author, created: ISO8601DateFormatter().string(from: Date()))
         let replacement = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: operation, in: document), to: snapshot.data, expectedSource: document.source)
         let value = Pending(kind: .state, id: UUID(), key: key, revision: draft?.revision ?? UUID(), expected: snapshot, replacement: replacement, threadID: threadID, messageID: nil)
+        pending = value; saveError = nil
+        return value
+    }
+    func prepareImport(_ preview: DiscussionImportPreview, snapshot: SourceFileEdit.Snapshot?,
+                       choices: [String: DiscussionReconciliation.Choice] = [:]) throws -> Pending? {
+        guard pending == nil else { throw Failure.busy }
+        guard let snapshot else { throw Failure.savedCopyRequired }
+        guard try snapshot.source.utf8.elementsEqual(preview.current.source.utf8) else { throw Failure.staleSource }
+        let edits = try DiscussionReconciliation.splices(for: preview, in: preview.current, choices: choices)
+        guard !edits.isEmpty else { saveError = nil; return nil }
+        let replacement = try MarkdownSourceEdits.apply(edits, to: snapshot.data, expectedSource: preview.current.source)
+        let threadID = preview.items.first { $0.kind != .duplicate && choices[$0.id] != .keepCurrent }?.id ?? "import"
+        let value = Pending(kind: .importDiscussions, id: UUID(), key: .new(UUID()), revision: UUID(), expected: snapshot,
+                            replacement: replacement, threadID: threadID, messageID: nil)
         pending = value; saveError = nil
         return value
     }

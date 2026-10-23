@@ -16,6 +16,53 @@ final class MobileReaderState {
     var fileSaving: Bool { checklistSaving || discussionSaving }
     var canUndoDiscussion: Bool { canEditDiscussions && discussions.canUndo(snapshot: snapshot?.sourceSnapshot) }
     var canRedoDiscussion: Bool { canEditDiscussions && discussions.canRedo(snapshot: snapshot?.sourceSnapshot) }
+    private(set) var discussionImportPreview: DiscussionImportPreview?
+    private(set) var discussionImportLoading = false
+    @ObservationIgnored private var discussionImportSnapshot: SourceFileEdit.Snapshot?
+    @ObservationIgnored private var discussionImportRequest = UUID()
+
+    func reviewDiscussionCopy(_ url: URL) async {
+        guard canEditDiscussions,
+              let document = rendered?.discussions, document.source.utf8.elementsEqual(source.utf8) else { return }
+        guard fileURL != nil, let captured = snapshot?.sourceSnapshot else { offerDiscussionCopy(); return }
+        discardDiscussionImport()
+        let request = discussionImportRequest, context = openGeneration
+        discussionImportLoading = true; discussionError = nil
+        defer { if discussionImportRequest == request { discussionImportLoading = false } }
+        do {
+            let incoming = try await DiscussionCopy.read(url)
+            guard discussionImportRequest == request, openGeneration == context else { return }
+            guard snapshot?.sourceSnapshot == captured, source.utf8.elementsEqual(document.source.utf8) else {
+                throw DiscussionReconciliation.Failure.staleSource
+            }
+            discussionImportPreview = DiscussionReconciliation.preview(current: document, incoming: incoming)
+            discussionImportSnapshot = captured
+        } catch is CancellationError {
+        } catch {
+            guard discussionImportRequest == request, openGeneration == context else { return }
+            discussionError = error.localizedDescription
+        }
+    }
+    func importDiscussions(choices: [String: DiscussionReconciliation.Choice] = [:]) {
+        guard canEditDiscussions, !discussionImportLoading,
+              let preview = discussionImportPreview else { return }
+        do {
+            guard let captured = discussionImportSnapshot, snapshot?.sourceSnapshot == captured,
+                  source.utf8.elementsEqual(preview.current.source.utf8) else {
+                throw DiscussionReconciliation.Failure.staleSource
+            }
+            if let operation = try discussions.prepareImport(preview, snapshot: captured, choices: choices) {
+                commitDiscussion(operation)
+            } else {
+                discardDiscussionImport()
+            }
+        } catch { discussionError = error.localizedDescription }
+    }
+    func discardDiscussionImport() {
+        discussionImportRequest = UUID()
+        discussionImportPreview = nil; discussionImportSnapshot = nil; discussionImportLoading = false
+    }
+
     func postDiscussion(reopenResolved: Bool = false) {
         guard canEditDiscussions, let document = rendered?.discussions,
               document.source.utf8.elementsEqual(source.utf8) else { return }
@@ -75,6 +122,7 @@ final class MobileReaderState {
                 }
                 guard revision == externalRevision, access.snapshot == saved else { throw SourceFileEdit.Failure.changed }
                 try discussions.saved(operation, as: saved.sourceSnapshot)
+                if operation.kind == .importDiscussions { discardDiscussionImport() }
                 discussionSaving = false; apply(saved)
             } catch {
                 discussions.failed(operation, error: error)
@@ -245,6 +293,7 @@ final class MobileReaderState {
     private func resetForOpen() {
         playback.documentWillChange(ownerID: id)
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
+        discardDiscussionImport()
         discussions.resetDocument(); discussionSaving = false; discussionError = nil; discussionCopyOffered = false
         pendingTransition = nil; showDraftDiscardConfirmation = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil

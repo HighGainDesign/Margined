@@ -9,6 +9,7 @@ struct DiscussionProbe {
         suite.addTest(SourceFileGateTests.defaultTestSuite)
         suite.addTest(DiscussionSessionTests.defaultTestSuite)
         suite.addTest(DiscussionCodecTests.defaultTestSuite)
+        suite.addTest(DiscussionReconciliationTests.defaultTestSuite)
         suite.addTest(DiscussionAnchorTests.defaultTestSuite)
         guard suite.testCaseCount > 0 else { exit(2) }
         suite.run()

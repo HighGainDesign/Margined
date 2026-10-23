@@ -282,6 +282,7 @@ targets:
       - Tests/SourceFileGateTests.swift
       - Tests/DiscussionSessionTests.swift
       - Tests/DiscussionCodecTests.swift
+      - Tests/DiscussionReconciliationTests.swift
       - Tests/DiscussionAnchorTests.swift
       - Tests/DiscussionWebTests.swift
       - Tests/DiscussionRenderingTests.swift
