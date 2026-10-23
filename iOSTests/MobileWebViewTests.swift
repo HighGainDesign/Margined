@@ -37,14 +37,15 @@ final class MobileWebViewTests: XCTestCase {
         let window = UIWindow(windowScene: scene); window.rootViewController = controller
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil }
+        let finished = expectation(description: "Captioned table document finished navigation")
+        let navigation = TestWebNavigation(finished: finished)
+        web.navigationDelegate = navigation
         web.loadHTMLString(output.html, baseURL: nil)
-        let loaded = try await eventually {
-            guard !web.isLoading else { return false }
-            let count = try await web.callAsyncJavaScript("return document.querySelectorAll('table').length;",
-                arguments: [:], in: nil, contentWorld: .defaultClient) as? Int
-            return count == 3
-        }
-        XCTAssertTrue(loaded)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertNil(navigation.error)
+        let count = try await web.callAsyncJavaScript("return document.querySelectorAll('table').length;",
+            arguments: [:], in: nil, contentWorld: .defaultClient) as? Int
+        XCTAssertEqual(count, 3)
         try await present(web)
         let measured = try await web.callAsyncJavaScript("""
         const main = document.querySelector('main');
@@ -383,4 +384,25 @@ private struct HostedWebReader: View {
     func beginOwnership(generation: UUID, handler: @escaping @MainActor (UUID, MobilePlaybackCommand) -> Bool) {}
     func update(_ metadata: MobileNowPlayingMetadata) {}
     func endOwnership() {}
+}
+
+/// Navigation readiness is separate from the geometry assertions. A fresh
+/// WebContent process can take longer than the polling helper's 2.5-second cap.
+@MainActor private final class TestWebNavigation: NSObject, WKNavigationDelegate {
+    let finished: XCTestExpectation
+    private(set) var error: Error?
+    private var completed = false
+
+    init(finished: XCTestExpectation) { self.finished = finished }
+
+    private func complete(_ error: Error? = nil) {
+        guard !completed else { return }
+        completed = true
+        self.error = error
+        finished.fulfill()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { complete() }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { complete(error) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { complete(error) }
 }

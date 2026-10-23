@@ -483,7 +483,9 @@ enum MobileWebResources {
 @MainActor
 final class MobileImageSchemeHandler: NSObject, WKURLSchemeHandler {
     private let loader = ImageSchemeHandler()
-    var generation = ""
+    var generation = "" {
+        didSet { if generation != oldValue { loader.cancelPendingLoads() } }
+    }
     var documentURL: URL? {
         get { loader.documentURL }
         set { loader.documentURL = newValue }

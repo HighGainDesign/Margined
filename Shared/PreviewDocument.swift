@@ -51,12 +51,8 @@ struct PreviewDocument: Sendable {
             try image.removeAttr("src")
             let attachment: PreviewAttachment
             do {
-                guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
-                let file = try FileHandle(forReadingFrom: url)
-                defer { try? file.close() }
-                let data = try file.read(upToCount: MarkdownSource.maximumBytes + 1) ?? Data()
-                guard data.count <= MarkdownSource.maximumBytes,
-                      data.count <= maximumAttachmentBytes - attachmentBytes else { continue }
+                let data = try await LocalImageData.read(url)
+                guard data.count <= maximumAttachmentBytes - attachmentBytes else { continue }
                 attachment = PreviewAttachment(data: data,
                     contentTypeIdentifier: UTType(filenameExtension: url.pathExtension)?.identifier ?? UTType.data.identifier)
             } catch { continue }
