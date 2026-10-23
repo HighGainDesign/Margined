@@ -38,6 +38,8 @@ struct MobileReaderView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
+                Button("Close Document", systemImage: "xmark", action: closeFile)
+                    .labelStyle(.iconOnly)
                 Button("Outline", systemImage: "list.bullet.indent") { showOutline = true }
                     .disabled(reader.rendered?.headings.isEmpty != false)
             }
@@ -47,6 +49,10 @@ struct MobileReaderView: View {
                         .accessibilityLabel(String(localized: "Review Changes") + ", \(reader.changes.count)")
                 }
                 Menu {
+                    Section {
+                        Button("Open Document…", systemImage: "folder", action: openFile)
+                        Button("Settings", systemImage: "gearshape", action: settings)
+                    }
                     Button("Find…", systemImage: "magnifyingglass") { showFind.toggle() }
                     Button("Read Aloud", systemImage: "speaker.wave.2") { showPlayer = true; reader.startSpeech() }
                     if reader.fileURL != nil {
@@ -65,11 +71,6 @@ struct MobileReaderView: View {
                         Button("Undo Checkbox Change", systemImage: "arrow.uturn.backward") { reader.undoChecklist() }.disabled(!reader.canUndoChecklist)
                         Button("Redo Checkbox Change", systemImage: "arrow.uturn.forward") { reader.redoChecklist() }.disabled(!reader.canRedoChecklist)
                         if reader.checklistMode { Button("Stop Saving Checkmarks") { reader.stopSavingCheckmarks() } }
-                    }
-                    Section {
-                        Button("Open Document…", systemImage: "folder", action: openFile)
-                        Button("Close Document", systemImage: "xmark", action: closeFile)
-                        Button("Settings", systemImage: "gearshape", action: settings)
                     }
                 } label: { Label("More", systemImage: "ellipsis.circle") }
             }

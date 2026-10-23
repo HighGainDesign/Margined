@@ -34,6 +34,7 @@ pre { direction: ltr; unicode-bidi: isolate; text-align: start; }
 pre code { padding: 0; background: none; font-size: 1em; }
 blockquote { color: var(--muted); padding: .1em 1.2em; border-inline-start: 3px solid var(--line); margin-inline-start: 0; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 2em 0; }
+figure.table-figure { margin-inline: 0; }
 .table-scroll { overflow-x: auto; }
 table { border-collapse: collapse; font-size: .94em; width: 100%; }
 th, td { border: 1px solid var(--line); padding: 9px 14px; white-space: normal; overflow-wrap: normal; word-break: normal; min-width: 7ch; }

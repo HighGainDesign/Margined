@@ -6,6 +6,71 @@ import XCTest
 
 @MainActor
 final class MobileWebViewTests: XCTestCase {
+    func testCaptionedTablesUseReadingWidthAndConfineHorizontalScrolling() async throws {
+        let source = """
+        # Plain
+
+        | Name | Status |
+        | --- | --- |
+        | Plan | Ready |
+
+        # Captioned
+
+        | Name | Status |
+        | --- | --- |
+        | Plan | Ready |
+
+        [Table summary]
+
+        # Wide
+
+        | One | Two | Three | Four | Five | Six |
+        | --- | --- | --- | --- | --- | --- |
+        | LongUnbreakableOne | LongUnbreakableTwo | LongUnbreakableThree | LongUnbreakableFour | LongUnbreakableFive | LongUnbreakableSix |
+
+        [Wide table summary]
+        """
+        let output = try await MarkdownRenderer.shared.render(source, wide: true)
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 402, height: 650), configuration: MobileWebView.configuration())
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let controller = UIViewController(); controller.view = web
+        let window = UIWindow(windowScene: scene); window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        web.loadHTMLString(output.html, baseURL: nil)
+        let loaded = try await eventually {
+            guard !web.isLoading else { return false }
+            let count = try await web.callAsyncJavaScript("return document.querySelectorAll('table').length;",
+                arguments: [:], in: nil, contentWorld: .defaultClient) as? Int
+            return count == 3
+        }
+        XCTAssertTrue(loaded)
+        try await present(web)
+        let measured = try await web.callAsyncJavaScript("""
+        const main = document.querySelector('main');
+        const style = getComputedStyle(main), box = main.getBoundingClientRect();
+        const left = box.left + parseFloat(style.paddingLeft);
+        const right = box.right - parseFloat(style.paddingRight);
+        const tables = Array.from(document.querySelectorAll('.table-scroll'));
+        return { left, right,
+            bounds: tables.map(node => { const r = node.getBoundingClientRect(); return [r.left, r.right]; }),
+            captions: Array.from(document.querySelectorAll('figcaption')).map(node => node.textContent.trim()),
+            wideScroll: tables[2].scrollWidth > tables[2].clientWidth,
+            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+        """, arguments: [:], in: nil, contentWorld: .defaultClient) as? [String: Any]
+        let values = try XCTUnwrap(measured)
+        let bounds = try XCTUnwrap(values["bounds"] as? [[Double]])
+        XCTAssertEqual(bounds.count, 3)
+        let left = try XCTUnwrap(values["left"] as? Double), right = try XCTUnwrap(values["right"] as? Double)
+        for table in bounds {
+            XCTAssertEqual(table[0], left, accuracy: 1, "Every table starts at the document's reading margin")
+            XCTAssertEqual(table[1], right, accuracy: 1, "Captions must not reduce a table's available width")
+        }
+        XCTAssertEqual(values["captions"] as? [String], ["Table summary", "Wide table summary"])
+        XCTAssertEqual(values["wideScroll"] as? Bool, true, "Wide tables remain locally scrollable")
+        XCTAssertLessThanOrEqual(try XCTUnwrap(values["pageOverflow"] as? Double), 1)
+    }
+
     func testTaskBridgeRejectsStaleSubframeAndUnmappedRequests() {
         let task = MarkdownTask(id: 0, utf8Offset: 3, marker: 32, label: "Review")
         let message: [String: Any] = ["id": 0, "checked": true, "token": "current"]

@@ -64,6 +64,7 @@ struct MobileRootView: View {
                     Text("Open a document from Files to read, follow changes, or listen.")
                         .multilineTextAlignment(.center).foregroundStyle(.secondary)
                     Button(action: { pickFile() }) { Label("Open Document…", systemImage: "folder") }
+                        .labelStyle(.titleAndIcon)
                         .buttonStyle(.borderedProminent).controlSize(.large)
                     Button("Open Sample Document") { Task { await openSample() } }
                 }
