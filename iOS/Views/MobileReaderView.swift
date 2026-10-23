@@ -2,10 +2,8 @@ import SwiftUI
 
 struct MobileReaderView: View {
     @Bindable var reader: MobileReaderState
-    let openFile: () -> Void
     let openFolder: () -> Void
     let closeFile: () -> Void
-    let settings: () -> Void
     @State private var showOutline = false
     @State private var showChanges = false
     @State private var showFind = false
@@ -49,10 +47,6 @@ struct MobileReaderView: View {
                         .accessibilityLabel(String(localized: "Review Changes") + ", \(reader.changes.count)")
                 }
                 Menu {
-                    Section {
-                        Button("Open Document…", systemImage: "folder", action: openFile)
-                        Button("Settings", systemImage: "gearshape", action: settings)
-                    }
                     Button("Find…", systemImage: "magnifyingglass") { showFind.toggle() }
                     Button("Read Aloud", systemImage: "speaker.wave.2") { showPlayer = true; reader.startSpeech() }
                     if reader.fileURL != nil {
@@ -137,7 +131,7 @@ struct MobileReaderView: View {
     }
     private var statusBar: some View {
         HStack {
-            if reader.isRendering || reader.checklistSaving { ProgressView().controlSize(.mini) }
+            if reader.isRendering || reader.fileSaving { ProgressView().controlSize(.mini) }
             if reader.fileUpdatesPaused { Label("Updates Paused", systemImage: "pause.circle") }
             else if reader.fileURL == nil { Text("Snapshot") }
             else { Label("File Updates On", systemImage: "arrow.triangle.2.circlepath") }

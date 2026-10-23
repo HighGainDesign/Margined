@@ -46,6 +46,22 @@ final class MobileDocumentTests: XCTestCase {
         await access.close()
     }
 
+    func testDisplayedSnapshotCannotBeUpgradedToANewerIdenticalServiceVersion() async throws {
+        let file = try fixture(Data("- [ ] Task\n".utf8))
+        defer { try? FileManager.default.removeItem(at: file) }
+        let access = MobileDocumentAccess()
+        let displayed = try await access.open(url: file)
+        try displayed.data.write(to: file, options: .atomic)
+        let refreshed = try await access.refresh()
+        XCTAssertNotEqual(displayed.identity, refreshed.identity)
+        do {
+            _ = try await access.write(expected: displayed, task: task(), marker: 120)
+            XCTFail("A current service snapshot cannot authorize an older displayed click")
+        } catch { }
+        XCTAssertEqual(try Data(contentsOf: file), displayed.data)
+        await access.close()
+    }
+
     func testChangingEncodingWithIdenticalTextStillRefusesOldSnapshotWrite() async throws {
         let file = try fixture(Data("- [ ] Task\n".utf8))
         defer { try? FileManager.default.removeItem(at: file) }
@@ -478,6 +494,60 @@ final class MobileDocumentTests: XCTestCase {
         XCTAssertTrue(gate.stopped(first))
         await access.close()
         XCTAssertTrue(gate.stopped(second))
+    }
+
+    func testByteIdenticalExternalReplacementCannotUseOldLeaseIdentity() async throws {
+        let data = Data("- [ ] Task\n".utf8), file = try fixture(Data("- [ ] Task\n".utf8))
+        defer { try? FileManager.default.removeItem(at: file) }
+        let access = MobileDocumentAccess(), opened = try await access.open(url: file)
+        try data.write(to: file, options: .atomic)
+        do {
+            _ = try await access.write(leaseID: opened.leaseID, task: task(), marker: 120, expectedSource: opened.source)
+            XCTFail("The old displayed file identity must be refused")
+        } catch { }
+        XCTAssertEqual(try Data(contentsOf: file), data)
+        await access.close()
+    }
+
+    func testDiscussionReplacementUsesLeaseAndSuppressesItsOwnPresenterEcho() async throws {
+        let original = Data([255,254]) + "Passage.\r\n".data(using: .utf16LittleEndian)!
+        let replacement = Data([255,254]) + "Passage.\r\n\r\nA longer note 日本.\r\n".data(using: .utf16LittleEndian)!
+        let file = try fixture(original)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let access = MobileDocumentAccess(), opened = try await access.open(url: file)
+        let echo = XCTestExpectation(description: "Own replacement is not an external refresh")
+        echo.isInverted = true
+        access.onChange = { _ in echo.fulfill() }
+        do {
+            let saved = try await access.replace(expected: opened, with: replacement)
+            XCTAssertEqual(saved.data, replacement)
+            XCTAssertEqual(access.snapshot, saved)
+            XCTAssertEqual(try Data(contentsOf: file), replacement)
+            NSFileCoordinator.filePresenters.first { $0.presentedItemURL == file }?.presentedItemDidChange?()
+            await fulfillment(of: [echo], timeout: 0.15)
+        } catch { XCTFail("Accepted replacement failed: \(error)") }
+        await access.close()
+    }
+
+    func testCloseDrainsAcceptedDiscussionReplacementBeforeReleasingTheLease() async throws {
+        let original = Data("Passage.\n".utf8), replacement = Data("Passage.\n\nReply.\n".utf8)
+        let file = try fixture(original)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let gate = DocumentOperationGate(block: .write)
+        defer { gate.resume.signal() }
+        let access = MobileDocumentAccess(environment: gate.environment)
+        let opened = try await access.open(url: file)
+        let saving = Task { try await access.replace(expected: opened, with: replacement) }
+        let entered = await gate.waitUntilEntered()
+        XCTAssertTrue(entered)
+        let closing = Task { await access.close() }
+        await Task.yield()
+        XCTAssertFalse(gate.stopped(file))
+        gate.resume.signal()
+        do { _ = try await saving.value } catch { XCTFail("Accepted save failed: \(error)") }
+        await closing.value
+        XCTAssertEqual(try Data(contentsOf: file), replacement)
+        XCTAssertTrue(gate.stopped(file))
     }
 
     private nonisolated static func notifyDeletion(_ presenter: any NSFilePresenter, completion: @escaping @Sendable (Error?) -> Void) {

@@ -141,7 +141,7 @@ struct ReaderView: View {
         HStack(spacing: 0) {
             if reader.showOutline { outline; Divider() }
             if let rendered = reader.rendered {
-                MarkdownWebView(reader: reader, html: rendered.html, speechRequestID: reader.existingSpeech?.startRequest?.id, speechElementID: reader.existingSpeech?.session.isActive == true ? reader.existingSpeech?.session.currentSegment?.elementID : nil, speechFollowReading: reader.existingSpeech?.session.followReading ?? true, playbackHolding: reader.playbackHolding, checklistEnabled: reader.checklistMode, checklistSaving: reader.checklistSaving, checklistRendering: reader.isRendering, checklistPromptPresented: reader.showChecklistConfirmation)
+                MarkdownWebView(reader: reader, html: rendered.html, speechRequestID: reader.existingSpeech?.startRequest?.id, speechElementID: reader.existingSpeech?.session.isActive == true ? reader.existingSpeech?.session.currentSegment?.elementID : nil, speechFollowReading: reader.existingSpeech?.session.followReading ?? true, playbackHolding: reader.playbackHolding, checklistEnabled: reader.checklistMode, checklistSaving: reader.fileSaving, checklistRendering: reader.isRendering, checklistPromptPresented: reader.showChecklistConfirmation)
             } else {
                 ProgressView("Rendering Markdown…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }

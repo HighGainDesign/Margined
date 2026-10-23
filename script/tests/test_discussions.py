@@ -20,9 +20,9 @@ class DiscussionTests(unittest.TestCase):
                        "-I", str(developer / "Platforms/MacOSX.platform/Developer/usr/lib"), "-L", str(developer / "Platforms/MacOSX.platform/Developer/usr/lib"), "-Xlinker", "-rpath", "-Xlinker", str(developer / "Platforms/MacOSX.platform/Developer/usr/lib"), "-I", str(ROOT / "Vendor/Apex/PackageSupport/cmark-gfm"), "-I", str(PRODUCTS), str(PRODUCTS / "SwiftSoup.o"), "-F", str(frameworks), "-Xlinker", "-rpath", "-Xlinker", str(frameworks)]
             for name in ("CcmarkGFM", "CcmarkGFMSupport", "CYaml"):
                 command += ["-Xcc", "-fmodule-map-file=" + str(MAPS / (name + ".modulemap")), str(PRODUCTS / (name + ".o"))]
-            command += [str(ROOT / "Shared/MarkdownSource.swift"), str(ROOT / "Shared/MathSyntax.swift")]
+            command += [str(ROOT / "Shared/MarkdownSource.swift"), str(ROOT / "Shared/MarkdownSourceEdits.swift"), str(ROOT / "Shared/SourceFileEdit.swift"), str(ROOT / "Shared/SourceFileGate.swift"), str(ROOT / "Shared/MathSyntax.swift")]
             command += [str(p) for p in sorted((ROOT / "Shared/Discussions").glob("*.swift"))]
-            command += [str(ROOT / "Tests/DiscussionCodecTests.swift"), str(ROOT / "Tests/DiscussionAnchorTests.swift"), str(ROOT / "script/tests/DiscussionProbe.swift"), "-o", str(runner)]
+            command += [str(ROOT / "Tests/MarkdownSourceEditsTests.swift"), str(ROOT / "Tests/SourceFileEditTests.swift"), str(ROOT / "Tests/SourceFileGateTests.swift"), str(ROOT / "Tests/DiscussionSessionTests.swift"), str(ROOT / "Tests/DiscussionCodecTests.swift"), str(ROOT / "Tests/DiscussionAnchorTests.swift"), str(ROOT / "script/tests/DiscussionProbe.swift"), "-o", str(runner)]
             build = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             result = subprocess.run([str(runner)], capture_output=True, text=True, timeout=30)

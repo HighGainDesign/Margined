@@ -74,11 +74,6 @@ struct DiscussionDocument: Sendable {
     }
 }
 
-struct MarkdownSourceSplice: Equatable, Sendable {
-    let range: Range<Int>
-    let replacement: String
-}
-
 enum DiscussionOperation: Sendable {
     case newThread(DiscussionThread)
     case reply(threadID: String, message: DiscussionMessage, reopenResolved: Bool)

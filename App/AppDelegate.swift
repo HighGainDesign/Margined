@@ -91,14 +91,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         func saving() -> Bool {
-            NSDocumentController.shared.documents.compactMap { $0 as? MarkdownDocument }.contains { $0.reader.checklistSaving }
+            NSDocumentController.shared.documents.compactMap { $0 as? MarkdownDocument }.contains { $0.reader.fileSaving }
         }
-        guard saving() else { return .terminateNow }
+        guard saving() else { return confirmDiscardDiscussionDrafts() ? .terminateNow : .terminateCancel }
         Task {
             while saving() { try? await Task.sleep(for: .milliseconds(10)) }
-            sender.reply(toApplicationShouldTerminate: true)
+            sender.reply(toApplicationShouldTerminate: confirmDiscardDiscussionDrafts())
         }
         return .terminateLater
+    }
+
+    private func confirmDiscardDiscussionDrafts() -> Bool {
+        let readers = NSDocumentController.shared.documents.compactMap { ($0 as? MarkdownDocument)?.reader }
+        guard readers.contains(where: { $0.discussions.hasUnpostedDrafts }) else { return true }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Discard unposted replies and quit?")
+        alert.informativeText = String(localized: "Keep Margined open to finish your comments and replies, or discard the unposted text and quit.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "Keep Open"))
+        alert.addButton(withTitle: String(localized: "Discard Drafts and Quit")).hasDestructiveAction = true
+        guard alert.runModal() == .alertSecondButtonReturn else { return false }
+        for reader in readers { reader.discussions.discardDrafts() }
+        return true
     }
 
     func showLiveStreamingPreview() {

@@ -277,6 +277,10 @@ targets:
     sources:
       - iOSTests
       - Tests/PreviewDocumentTests.swift
+      - Tests/MarkdownSourceEditsTests.swift
+      - Tests/SourceFileEditTests.swift
+      - Tests/SourceFileGateTests.swift
+      - Tests/DiscussionSessionTests.swift
       - Tests/DiscussionCodecTests.swift
       - Tests/DiscussionAnchorTests.swift
       - Tests/DiscussionWebTests.swift

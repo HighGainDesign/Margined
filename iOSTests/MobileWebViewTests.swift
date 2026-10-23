@@ -359,7 +359,7 @@ private struct HostedWebReader: View {
     let reader: MobileReaderState
     var body: some View {
         NavigationStack {
-            MobileReaderView(reader: reader, openFile: {}, openFolder: {}, closeFile: {}, settings: {})
+            MobileReaderView(reader: reader, openFolder: {}, closeFile: {})
         }
     }
 }

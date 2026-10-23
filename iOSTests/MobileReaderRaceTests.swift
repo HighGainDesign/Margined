@@ -40,6 +40,45 @@ final class MobileReaderRaceTests: XCTestCase {
         await rig.reader.close()
     }
 
+    func testDiscussionOnlyRefreshUpdatesNotesWithoutInterruptingHeldSpeech() async throws {
+        let source = """
+        # Title
+
+        A readable passage.
+
+        <!-- margined:thread v1
+        id: t1
+        state: open
+        target: {type: TextQuoteSelector, exact: A readable passage., prefix: Title, suffix: ''}
+        messages:
+          - id: m1
+            author: Reviewer
+            created: "2026-10-23T09:00:00Z"
+            body: First note.
+        -->
+        """
+        let file = try fixture(source), rig = makeRig()
+        await rig.reader.open(url: file); await rig.reader.waitForRendering()
+        let original = try XCTUnwrap(rig.reader.rendered?.speech)
+        rig.reader.startSpeech(mode: "beginning")
+        XCTAssertTrue(rig.reader.playbackHolding)
+        let requests = rig.driver.requests
+        let message = DiscussionMessage(id: "m2", author: "Another reviewer", created: "2026-10-23T10:00:00Z", body: "An external reply.", inReplyTo: "m1")
+        let parsed = try DiscussionCodec.parse(source)
+        let data = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .reply(threadID: "t1", message: message, reopenResolved: false), in: parsed), to: Data(source.utf8), expectedSource: source)
+        try data.write(to: file, options: .atomic)
+        await rig.reader.refresh()
+        for _ in 0..<300 {
+            if rig.reader.rendered?.discussions?.threads.first?.messages.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(rig.reader.rendered?.discussions?.threads.first?.messages.count, 2)
+        XCTAssertFalse(rig.reader.hasPendingFileUpdate)
+        XCTAssertEqual(rig.reader.rendered?.speech?.fingerprint, original.fingerprint)
+        XCTAssertEqual(rig.driver.requests, requests, "A note-only refresh must not restart speech")
+        await rig.reader.close()
+    }
+
     func testMissingSelectionDoesNotStartButBeginningIgnoresSelection() async throws {
         let rig = makeRig()
         await rig.reader.openPreview(url: preview("# Beginning\n\nA second paragraph.\n"))

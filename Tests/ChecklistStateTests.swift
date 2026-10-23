@@ -147,6 +147,58 @@ final class ChecklistStateTests: XCTestCase {
         XCTAssertFalse(reader.isRendering, "A cancelled render must not leave a closed reader busy forever")
     }
 
+    func testEncodingOnlyExternalChangeCannotBeAcknowledgedByAnOldClick() async throws {
+        let original = "- [ ] Task\n"
+        let (reader, file) = try makeReader(original)
+        defer { reader.stop(); try? FileManager.default.removeItem(at: file) }
+        reader.render(); try await settle(reader); reader.checklistMode = true
+        let external = Data([255,254]) + original.data(using: .utf16LittleEndian)!
+        try external.write(to: file, options: .atomic)
+        reader.setTaskChecked(0, checked: true); try await settle(reader)
+        XCTAssertEqual(try Data(contentsOf: file), external)
+        XCTAssertNotNil(reader.checklistError)
+    }
+
+    func testByteIdenticalExternalReplacementStillInvalidatesTheDisplayedIdentity() async throws {
+        let original = "- [ ] Task\n"
+        let (reader, file) = try makeReader(original)
+        defer { reader.stop(); try? FileManager.default.removeItem(at: file) }
+        reader.render(); try await settle(reader); reader.checklistMode = true
+        try Data(original.utf8).write(to: file, options: .atomic)
+        reader.setTaskChecked(0, checked: true); try await settle(reader)
+        XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
+        XCTAssertNotNil(reader.checklistError)
+    }
+
+    func testIdenticalExternalRefreshInvalidatesChecklistUndo() async throws {
+        let (reader, file) = try makeReader("- [ ] Task\n")
+        defer { reader.stop(); try? FileManager.default.removeItem(at: file) }
+        reader.render(); try await settle(reader); reader.checklistMode = true
+        reader.setTaskChecked(0, checked: true); try await settle(reader)
+        XCTAssertTrue(reader.canUndoChecklist)
+        let priorRefresh = reader.lastRefreshed
+        try Data(contentsOf: file).write(to: file, options: .atomic)
+        reader.reload()
+        for _ in 0..<300 {
+            if reader.lastRefreshed != priorRefresh { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNotEqual(reader.lastRefreshed, priorRefresh)
+        XCTAssertFalse(reader.canUndoChecklist, "A new inode must invalidate conditional write history")
+    }
+
+    func testCanonicallyEquivalentRefreshStillAdoptsTheActualSourceOffsets() async throws {
+        let before = "# cafe\u{301}\n\n- [ ] Task\n"
+        let after = "# café\n\n- [ ] Task\n"
+        let (reader, file) = try makeReader(before)
+        defer { reader.stop(); try? FileManager.default.removeItem(at: file) }
+        reader.render(); try await settle(reader)
+        try Data(after.utf8).write(to: file, options: .atomic)
+        reader.acceptFileUpdate(after); try await settle(reader)
+        XCTAssertEqual(Array(reader.source.utf8), Array(after.utf8))
+        XCTAssertEqual(Array(try XCTUnwrap(reader.rendered).taskSource.utf8), Array(after.utf8))
+    }
+
     private func makeReader(_ source: String) throws -> (ReaderState, URL) {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
         try source.write(to: file, atomically: true, encoding: .utf8)

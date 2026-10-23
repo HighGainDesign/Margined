@@ -60,7 +60,7 @@ struct MobileWebView: UIViewRepresentable {
             searchText = reader.searchText
             searchBackwards = reader.searchBackwards
             rendering = reader.isRendering
-            saving = reader.checklistSaving
+            saving = reader.fileSaving
             confirmation = reader.showChecklistConfirmation
             checklist = reader.checklistMode
             holding = reader.playbackHolding
@@ -289,7 +289,7 @@ struct MobileWebView: UIViewRepresentable {
 
         private var tasksEnabled: Bool {
             contentReady && !isInvalidated && reader.fileURL != nil && loadedFile == reader.fileURL &&
-                !reader.playbackHolding && !reader.hasPendingFileUpdate && !reader.checklistSaving &&
+                !reader.playbackHolding && !reader.hasPendingFileUpdate && !reader.fileSaving &&
                 !reader.isRendering && !reader.showChecklistConfirmation && html == reader.rendered?.html &&
                 reader.rendered?.taskSource == reader.source
         }
@@ -298,7 +298,7 @@ struct MobileWebView: UIViewRepresentable {
             guard contentReady, let webView else { return }
             let enabled = tasksEnabled, canSave = reader.checklistMode
             let token = token
-            let key = "\(token):\(enabled):\(canSave):\(reader.checklistSaving):\(reader.isRendering):\(reader.playbackHolding)"
+            let key = "\(token):\(enabled):\(canSave):\(reader.fileSaving):\(reader.isRendering):\(reader.playbackHolding)"
             guard taskKey != key else { return }
             taskKey = key
             let expectedGeneration = generation
@@ -332,7 +332,7 @@ struct MobileWebView: UIViewRepresentable {
                 }
                 return true;
                 """, arguments: ["enabled": enabled, "canSave": canSave, "token": token,
-                    "saving": reader.checklistSaving, "rendering": reader.isRendering, "holding": reader.playbackHolding,
+                    "saving": reader.fileSaving, "rendering": reader.isRendering, "holding": reader.playbackHolding,
                     "restoreFocus": Self.hasDocumentFocus(webView),
                     "holdingTitle": String(localized: "Stop Read Aloud before saving checkmarks."),
                     "saveTitle": String(localized: "Save this checkbox change to the Markdown file"),

@@ -1,7 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MobileSettingsView: View {
     @Bindable var reader: MobileReaderState
+    @Bindable var imageFolders: MobileImageFolders
+    @State private var showFolderPicker = false
+    @State private var folderError: String?
     @AppStorage(ReaderPreferences.appearanceKey, store: ReaderPreferences.defaults) private var appearance = DocumentAppearance.system.rawValue
     @AppStorage("fullWidthByDefault", store: ReaderPreferences.defaults) private var fullWidth = true
     @Environment(\.dismiss) private var dismiss
@@ -20,10 +24,29 @@ struct MobileSettingsView: View {
                 }
                 Section("Images and Embedded HTML") {
                     LabeledContent("Local Images", value: String(localized: "Automatic"))
-                    Text("Files controls access to images beside your document. If needed, open the image folder from the reader.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Local images load automatically from folders you select in Files. Choose a project folder to include its subfolders, or add several folders.").font(.footnote).foregroundStyle(.secondary)
                     LabeledContent("Remote Images", value: String(localized: "Off by default"))
                     Text("Load Remote Images in the document’s More menu contacts image hosts, which can reveal that you opened the document.").font(.footnote).foregroundStyle(.secondary)
                     Text("Safe formatting and image sizes are supported. Scripts, forms and other active content are removed.").font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Local Image Folders") {
+                    ForEach(imageFolders.folders) { entry in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Label(entry.title, systemImage: "folder").lineLimit(2)
+                                Spacer()
+                                Button("Forget", role: .destructive) {
+                                    imageFolders.forget(entry.id); reader.retryLocalImages()
+                                }
+                                .accessibilityLabel(String(localized: "Forget image folder \(entry.title)"))
+                            }
+                            if let error = imageFolders.errors[entry.id] {
+                                Text(error).font(.footnote).foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    Button("Add Image Folders…", systemImage: "folder.badge.plus") { showFolderPicker = true }
+                    if let folderError { Text(folderError).font(.footnote).foregroundStyle(.red) }
                 }
                 Section("Read Aloud") {
                     Toggle("Follow Reading", isOn: Binding(get: { reader.playback.preferences.followReading }, set: { reader.playback.setFollowReading($0) }))
@@ -35,6 +58,22 @@ struct MobileSettingsView: View {
             }
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .fileImporter(isPresented: $showFolderPicker, allowedContentTypes: [.folder], allowsMultipleSelection: true) { result in
+            switch result {
+            case let .success(urls):
+                let scopes = urls.map { ($0, $0.startAccessingSecurityScopedResource()) }
+                Task {
+                    defer { for (url, started) in scopes where started { url.stopAccessingSecurityScopedResource() } }
+                    folderError = nil
+                    for url in urls {
+                        do { try await imageFolders.remember(url) }
+                        catch { folderError = error.localizedDescription }
+                    }
+                    reader.retryLocalImages()
+                }
+            case let .failure(error): folderError = error.localizedDescription
+            }
         }
         .onChange(of: appearance) { _, value in reader.appearance = DocumentAppearance(rawValue: value) ?? .system }
     }

@@ -60,6 +60,10 @@ local-image gaps, collaboration approval and performance acceptance remain open.
 Verify real File Providers, background audio, accessibility and file handoff
 before release.
 
+## Future enhancements
+
+- Syntax-highlighted JSON, YAML, TOML and other text files; evaluate HTML separately.
+
 ## Released foundation
 
 The previous MDView releases provide Mac reading, Finder Quick Look, Drafts/live

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 import os
+import ObjectiveC
 
 @MainActor
 final class MarkdownDocument: NSDocument {
@@ -35,8 +36,9 @@ final class MarkdownDocument: NSDocument {
     nonisolated override class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { true }
 
     override func read(from url: URL, ofType typeName: String) throws {
-        let text = try MarkdownSource.read(url)
-        loadedSource.withLock { $0 = LoadedSource(text: text, url: url, title: url.lastPathComponent) }
+        let snapshot = try SourceFileEdit.capture(url)
+        let text = try snapshot.source
+        loadedSource.withLock { $0 = LoadedSource(text: text, url: url, title: url.lastPathComponent, snapshot: snapshot) }
     }
 
     override func makeWindowControllers() {
@@ -44,6 +46,7 @@ final class MarkdownDocument: NSDocument {
         reader.source = loaded.text
         reader.fileURL = loaded.url
         reader.title = loaded.title
+        reader.installLoadedSnapshot(loaded.snapshot)
         let controller = NSHostingController(rootView: ReaderView(reader: reader))
         let window = NSWindow(contentViewController: controller)
         window.title = reader.title
@@ -95,15 +98,84 @@ final class MarkdownDocument: NSDocument {
         return operation
     }
 
+    @MainActor private final class CloseRequest {
+        let delegate: Any
+        let selector: Selector?
+        let context: UnsafeMutableRawPointer?
+        init(delegate: Any, selector: Selector?, context: UnsafeMutableRawPointer?) {
+            self.delegate = delegate; self.selector = selector; self.context = context
+        }
+    }
+    private var draftCloseCallbacks: [@MainActor (Bool) -> Void] = []
+    private var draftCloseAlertPresented = false
+
+    override func canClose(withDelegate delegate: Any, shouldClose selector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        let request = CloseRequest(delegate: delegate, selector: selector, context: contextInfo)
+        if reader.fileSaving {
+            Task { [self, request] in
+                while reader.fileSaving { try? await Task.sleep(for: .milliseconds(10)) }
+                validateClose(request)
+            }
+        } else { validateClose(request) }
+    }
+    private func validateClose(_ request: CloseRequest) {
+        guard reader.discussions.hasUnpostedDrafts else {
+            allowClose(request)
+            return
+        }
+        confirmDiscardDrafts { [self, request] allowed in
+            if allowed {
+                allowClose(request)
+            } else { replyCannotClose(request) }
+        }
+    }
+    private func allowClose(_ request: CloseRequest) {
+        super.canClose(withDelegate: request.delegate, shouldClose: request.selector, contextInfo: request.context)
+    }
+    private func replyCannotClose(_ request: CloseRequest) {
+        guard let selector = request.selector else { return }
+        let delegate = request.delegate as AnyObject
+        guard let type = object_getClass(delegate), let method = class_getInstanceMethod(type, selector) else { return }
+        // NSDocument prescribes this legacy delegate callback, including the
+        // opaque context pointer. Keep the ABI bridge in this one small method.
+        typealias Callback = @convention(c) (AnyObject, Selector, NSDocument, ObjCBool, UnsafeMutableRawPointer?) -> Void
+        let callback = unsafeBitCast(method_getImplementation(method), to: Callback.self)
+        callback(delegate, selector, self, ObjCBool(false), request.context)
+    }
+    private func confirmDiscardDrafts(_ completion: @escaping @MainActor (Bool) -> Void) {
+        guard reader.discussions.hasUnpostedDrafts else { completion(true); return }
+        guard let window = windowControllers.compactMap(\.window).first else { completion(false); return }
+        draftCloseCallbacks.append(completion)
+        guard !draftCloseAlertPresented else { return }
+        draftCloseAlertPresented = true
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Discard unposted replies?")
+        alert.informativeText = String(localized: "Keep this document open to finish your comments and replies, or discard the unposted text.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "Keep Open"))
+        alert.addButton(withTitle: String(localized: "Discard Drafts")).hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [self] response in
+            let allowed = response == .alertSecondButtonReturn
+            if allowed { reader.discussions.discardDrafts() }
+            let callbacks = draftCloseCallbacks
+            draftCloseCallbacks.removeAll(); draftCloseAlertPresented = false
+            for callback in callbacks { callback(allowed) }
+        }
+    }
+
     override func close() {
-        if reader.checklistSaving {
+        if reader.fileSaving {
             guard !checklistClosePending else { return }
             checklistClosePending = true
             Task { [self] in
-                while reader.checklistSaving { try? await Task.sleep(for: .milliseconds(10)) }
+                while reader.fileSaving { try? await Task.sleep(for: .milliseconds(10)) }
                 checklistClosePending = false
                 close()
             }
+            return
+        }
+        if reader.discussions.hasUnpostedDrafts {
+            confirmDiscardDrafts { [self] allowed in if allowed { close() } }
             return
         }
         reader.stop()
@@ -115,4 +187,5 @@ private struct LoadedSource: Sendable {
     var text = ""
     var url: URL?
     var title = "Markdown"
+    var snapshot: SourceFileEdit.Snapshot? = nil
 }

@@ -4,12 +4,14 @@ import UniformTypeIdentifiers
 struct MobileRootView: View {
     @State private var reader: MobileReaderState
     @State private var library = MobileDocumentLibrary()
+    let imageFolders: MobileImageFolders
     @State private var showPicker = false
     @State private var pickingFolder = false
     @State private var showSettings = false
     @Environment(\.scenePhase) private var scenePhase
 
-    init(playback: MobilePlaybackOwner) {
+    init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders) {
+        self.imageFolders = imageFolders
         _reader = State(initialValue: MobileReaderState(playback: playback))
     }
 
@@ -17,31 +19,42 @@ struct MobileRootView: View {
         NavigationStack {
             Group {
                 if reader.hasDocument {
-                    MobileReaderView(reader: reader, openFile: { pickFile() }, openFolder: { pickFolder() },
-                        closeFile: { Task { await reader.close() } }, settings: { showSettings = true })
+                    MobileReaderView(reader: reader, openFolder: { pickFolder() },
+                        closeFile: { Task { await reader.close() } })
                 } else { libraryView }
             }
             .navigationTitle(reader.hasDocument ? reader.title : "Margined")
             .navigationBarTitleDisplayMode(.inline)
-            .overlay { if reader.isOpening { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
+            .overlay { if reader.isOpening || imageFolders.isRestoring { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         }
         .fileImporter(isPresented: $showPicker,
             allowedContentTypes: pickingFolder ? [.folder] : [UTType(importedAs: "net.daringfireball.markdown"), .plainText],
-            allowsMultipleSelection: false) { result in
+            allowsMultipleSelection: pickingFolder) { result in
                 switch result {
                 case .success(let urls):
-                    guard let url = urls.first else { return }
-                    let scope = url.startAccessingSecurityScopedResource()
+                    let scopes = urls.map { ($0, $0.startAccessingSecurityScopedResource()) }
                     let folder = pickingFolder
                     Task {
-                        defer { if scope { url.stopAccessingSecurityScopedResource() } }
-                        if folder { await reader.addFolderAccess(url) }
-                        else { await open(url) }
+                        defer { for (url, started) in scopes where started { url.stopAccessingSecurityScopedResource() } }
+                        if folder {
+                            for url in urls {
+                                do { try await imageFolders.remember(url) }
+                                catch { reader.errorMessage = error.localizedDescription }
+                            }
+                            reader.retryLocalImages()
+                        } else if let url = urls.first { await open(url) }
                     }
                 case .failure(let error): reader.errorMessage = error.localizedDescription
                 }
             }
-        .sheet(isPresented: $showSettings) { MobileSettingsView(reader: reader) }
+        .confirmationDialog("Discard unposted replies?", isPresented: $reader.showDraftDiscardConfirmation, titleVisibility: .visible) {
+            Button("Keep Open", role: .cancel) { reader.cancelDocumentTransition() }
+            Button("Discard Drafts", role: .destructive) { Task { await reader.confirmDiscardDrafts() } }
+        } message: {
+            Text("Keep this document open to finish your comments and replies, or discard the unposted text.")
+        }
+        .sheet(isPresented: $showSettings) { MobileSettingsView(reader: reader, imageFolders: imageFolders) }
+        .task { await imageFolders.restore() }
         .onOpenURL { url in
             let scope = url.isFileURL && url.startAccessingSecurityScopedResource()
             Task {
@@ -94,6 +107,7 @@ struct MobileRootView: View {
     private func pickFile() { pickingFolder = false; showPicker = true }
     private func pickFolder() { pickingFolder = true; showPicker = true }
     private func open(_ url: URL) async {
+        await imageFolders.restore()
         await reader.open(url: url)
         if reader.fileURL == url { try? await library.remember(url) }
     }

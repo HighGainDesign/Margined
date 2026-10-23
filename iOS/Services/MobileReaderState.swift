@@ -9,6 +9,81 @@ final class MobileReaderState {
     let id = UUID()
     let playback: MobilePlaybackOwner
     let access: MobileDocumentAccess
+    let discussions = DiscussionSession()
+    private(set) var discussionSaving = false
+    var discussionError: String?
+    var fileSaving: Bool { checklistSaving || discussionSaving }
+    var canUndoDiscussion: Bool { canWrite && discussions.canUndo(snapshot: snapshot?.sourceSnapshot) }
+    var canRedoDiscussion: Bool { canWrite && discussions.canRedo(snapshot: snapshot?.sourceSnapshot) }
+    func postDiscussion(reopenResolved: Bool = false) {
+        guard canWrite, let document = rendered?.discussions,
+              document.source.utf8.elementsEqual(source.utf8) else { return }
+        do {
+            let operation = try discussions.preparePost(in: document, snapshot: snapshot?.sourceSnapshot, reopenResolved: reopenResolved)
+            defaults.set(discussions.displayName, forKey: "discussionDisplayName")
+            commitDiscussion(operation)
+        } catch { discussionError = error.localizedDescription }
+    }
+    func undoDiscussion() {
+        guard canUndoDiscussion, let snapshot else { return }
+        do { commitDiscussion(try discussions.prepareUndo(snapshot: snapshot.sourceSnapshot)) }
+        catch { discussionError = error.localizedDescription }
+    }
+    func redoDiscussion() {
+        guard canRedoDiscussion, let snapshot else { return }
+        do { commitDiscussion(try discussions.prepareRedo(snapshot: snapshot.sourceSnapshot)) }
+        catch { discussionError = error.localizedDescription }
+    }
+    func resolveDiscussion(_ threadID: String, choice: DiscussionSession.ResolveChoice) {
+        guard canWrite, let document = rendered?.discussions else { return }
+        do {
+            if let operation = try discussions.prepareResolve(threadID: threadID, in: document, snapshot: snapshot?.sourceSnapshot, choice: choice) {
+                commitDiscussion(operation)
+            }
+        } catch { discussionError = error.localizedDescription }
+    }
+    private func commitDiscussion(_ operation: DiscussionSession.Pending) {
+        guard canWrite, let captured = snapshot, captured.sourceSnapshot == operation.expected else {
+            discussions.failed(operation, error: SourceFileEdit.Failure.changed)
+            discussionError = SourceFileEdit.Failure.changed.localizedDescription
+            return
+        }
+        let generation = openGeneration, revision = externalRevision
+        discussionSaving = true; discussionError = nil
+        saveTask = Task { [weak self, access, discussions] in
+            do {
+                let saved = try await access.replace(expected: captured, with: operation.replacement)
+                guard let self, generation == openGeneration else {
+                    discussions.failed(operation, error: CancellationError()); return
+                }
+                guard revision == externalRevision, access.snapshot == saved else { throw SourceFileEdit.Failure.changed }
+                try discussions.saved(operation, as: saved.sourceSnapshot)
+                discussionSaving = false; apply(saved)
+            } catch {
+                discussions.failed(operation, error: error)
+                guard let self, generation == openGeneration else { return }
+                discussionSaving = false; discussionError = error.localizedDescription
+                await refresh()
+            }
+        }
+    }
+    var showDraftDiscardConfirmation = false
+    private enum DocumentTransition { case open(URL), preview(URL), close }
+    private var pendingTransition: DocumentTransition?
+    private var transitionRequest = UUID()
+    func cancelDocumentTransition() {
+        transitionRequest = UUID(); pendingTransition = nil; showDraftDiscardConfirmation = false
+    }
+    func confirmDiscardDrafts() async {
+        guard let transition = pendingTransition else { return }
+        pendingTransition = nil; showDraftDiscardConfirmation = false
+        discussions.discardDrafts()
+        switch transition {
+        case let .open(url): await open(url: url)
+        case let .preview(url): await openPreview(url: url)
+        case .close: await close()
+        }
+    }
     @ObservationIgnored private let defaults: UserDefaults
     private(set) var source = ""
     private(set) var title = "Margined"
@@ -56,6 +131,7 @@ final class MobileReaderState {
     private var reviewedUnits: [ReadingUnit]?
     private var externalRevision = 0
     private var openGeneration = UUID()
+    @ObservationIgnored private var classifyUpdateTask: Task<Void, Never>?
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     private var pendingConsent: Consent?
@@ -65,6 +141,7 @@ final class MobileReaderState {
     init(access: MobileDocumentAccess = MobileDocumentAccess(), playback: MobilePlaybackOwner = MobilePlaybackOwner(),
          defaults: UserDefaults = ReaderPreferences.defaults) {
         self.access = access; self.playback = playback; self.defaults = defaults
+        discussions.displayName = defaults.string(forKey: "discussionDisplayName") ?? ""
         wide = defaults.object(forKey: "fullWidthByDefault") as? Bool ?? true
         appearance = ReaderPreferences.appearance(in: defaults)
         access.onChange = { [weak self] in self?.receive($0) }
@@ -81,15 +158,20 @@ final class MobileReaderState {
     var canUndoChecklist: Bool { canWrite && !undoStack.isEmpty }
     var canRedoChecklist: Bool { canWrite && !redoStack.isEmpty }
     var canWrite: Bool {
-        fileURL != nil && !isOpening && !isRendering && !checklistSaving &&
+        fileURL != nil && !isOpening && !isRendering && !fileSaving &&
         !showChecklistConfirmation && !hasPendingFileUpdate && !playbackHolding
     }
 
     func open(url: URL) async {
+        let request = UUID(); transitionRequest = request
         let inFlightSave = saveTask
+        await inFlightSave?.value
+        guard transitionRequest == request else { return }
+        if discussions.hasUnpostedDrafts {
+            pendingTransition = .open(url); showDraftDiscardConfirmation = true; return
+        }
         let generation = UUID(); openGeneration = generation
         resetForOpen(); isOpening = true
-        await inFlightSave?.value
         guard generation == openGeneration else { return }
         do {
             let value = try await access.open(url: url)
@@ -106,31 +188,47 @@ final class MobileReaderState {
 
     func openPreview(url: URL) async {
         do {
-            let request = try PreviewRequest(url: url)
+            let preview = try PreviewRequest(url: url)
+            let request = UUID(); transitionRequest = request
             let inFlightSave = saveTask
+            await inFlightSave?.value
+            guard transitionRequest == request else { return }
+            if discussions.hasUnpostedDrafts {
+                pendingTransition = .preview(url); showDraftDiscardConfirmation = true; return
+            }
             let generation = UUID(); openGeneration = generation
             resetForOpen(); isOpening = true
-            await inFlightSave?.value
             guard generation == openGeneration else { return }
             await access.close()
             guard generation == openGeneration else { return }
-            source = request.text; title = request.title; hasDocument = true; isOpening = false
+            source = preview.text; title = preview.title; hasDocument = true; isOpening = false
             render()
         } catch { errorMessage = error.localizedDescription }
     }
 
     func close() async {
+        let request = UUID(); transitionRequest = request
+        // Hide an accepted close immediately, while the immutable lease and
+        // session continue draining its accepted save. A draft stays visible
+        // until its save succeeds or the user explicitly discards it.
+        if !discussions.hasUnpostedDrafts { hasDocument = false; fileURL = nil }
         let inFlightSave = saveTask
+        await inFlightSave?.value
+        guard transitionRequest == request else { return }
+        if discussions.hasUnpostedDrafts {
+            pendingTransition = .close; showDraftDiscardConfirmation = true; return
+        }
         let generation = UUID(); openGeneration = generation
         resetForOpen(); hasDocument = false
-        await inFlightSave?.value
         guard generation == openGeneration else { return }
         await access.close()
     }
 
     private func resetForOpen() {
         playback.documentWillChange(ownerID: id)
-        renderTask?.cancel(); isRendering = false
+        renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
+        discussions.resetDocument(); discussionSaving = false; discussionError = nil
+        pendingTransition = nil; showDraftDiscardConfirmation = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil
         reviewedSource = nil; reviewedUnits = nil; rendered = nil
         source = ""; title = "Margined"; hasDocument = false; isOpening = false
@@ -162,6 +260,8 @@ final class MobileReaderState {
         if visible { await refresh() }
     }
 
+    func retryLocalImages() { localImageError = nil; imageReloadGeneration += 1 }
+
     func addFolderAccess(_ url: URL) async {
         let generation = openGeneration
         do {
@@ -175,23 +275,39 @@ final class MobileReaderState {
     private func receive(_ value: MobileDocumentSnapshot) {
         guard let current = snapshot, value.leaseID == current.leaseID else { return }
         fileURL = value.url; title = value.url.lastPathComponent
-        guard value.data != current.data || pendingSnapshot != nil else { return }
+        guard value != current || pendingSnapshot != nil else { return }
         externalRevision += 1; undoStack.removeAll(); redoStack.removeAll()
         cancelChecklistConfirmation()
         errorMessage = nil
         if fileUpdatesPaused || playbackHolding {
-            pendingSnapshot = value.data == current.data ? nil : value
-            if playback.ownerID == id {
+            pendingSnapshot = value == current ? nil : value
+            if !fileUpdatesPaused, playbackHolding, pendingSnapshot != nil {
+                classifyHeldUpdate(value, displayed: current)
+            } else if playback.ownerID == id {
                 if pendingSnapshot != nil { playback.notePendingVersion(ownerID: id) }
                 else { playback.clearPendingVersion(ownerID: id) }
             }
         } else { apply(value) }
     }
+    private func classifyHeldUpdate(_ value: MobileDocumentSnapshot, displayed: MobileDocumentSnapshot) {
+        classifyUpdateTask?.cancel()
+        let generation = openGeneration
+        classifyUpdateTask = Task { [weak self] in
+            let same = (try? await MarkdownRenderer.shared.hasSameReadingContent(displayed.source, value.source)) == true
+            guard let self, !Task.isCancelled, generation == openGeneration,
+                  snapshot == displayed, pendingSnapshot == value, !fileUpdatesPaused else { return }
+            if same {
+                playback.clearPendingVersion(ownerID: id)
+                apply(value)
+            } else { playback.notePendingVersion(ownerID: id) }
+        }
+    }
 
     private func apply(_ value: MobileDocumentSnapshot) {
         snapshot = value; pendingSnapshot = nil
+        guard hasDocument else { return }
         fileURL = value.url; title = value.url.lastPathComponent
-        guard source != value.source else { return }
+        guard !source.utf8.elementsEqual(value.source.utf8) else { return }
         source = value.source; currentChangeIndex = 0; render()
     }
 
@@ -217,7 +333,7 @@ final class MobileReaderState {
 
     @discardableResult
     func requestTaskChecked(_ id: Int, checked: Bool) -> Bool {
-        guard canWrite, let snapshot, rendered?.taskSource == source,
+        guard canWrite, let snapshot, rendered?.taskSource.utf8.elementsEqual(source.utf8) == true,
               let task = rendered?.tasks.first(where: { $0.id == id }), task.checked != checked else { return false }
         if checklistMode { save(task: task, marker: checked ? 120 : 32, history: .normal) }
         else {
@@ -231,7 +347,7 @@ final class MobileReaderState {
     func confirmChecklistSaving() {
         guard let consent = pendingConsent else { return }
         cancelChecklistConfirmation()
-        guard snapshot?.leaseID == consent.leaseID, source == consent.source, !hasPendingFileUpdate else {
+        guard snapshot?.leaseID == consent.leaseID, source.utf8.elementsEqual(consent.source.utf8), !hasPendingFileUpdate else {
             errorMessage = ChecklistError.changed.localizedDescription; return
         }
         checklistMode = true
@@ -247,10 +363,10 @@ final class MobileReaderState {
         checklistSaving = true; errorMessage = nil
         saveTask = Task { [weak self, access] in
             do {
-                let updated = try await access.write(leaseID: captured.leaseID, task: task, marker: marker, expectedSource: expected)
+                let updated = try await access.write(expected: captured, task: task, marker: marker)
                 guard let self, snapshot?.leaseID == captured.leaseID else { return }
                 checklistSaving = false
-                guard revision == externalRevision, source == expected, access.snapshot?.data == updated.data else {
+                guard revision == externalRevision, source.utf8.elementsEqual(expected.utf8), access.snapshot?.data == updated.data else {
                     undoStack.removeAll(); redoStack.removeAll()
                     errorMessage = ChecklistError.changed.localizedDescription; return
                 }
@@ -278,13 +394,16 @@ final class MobileReaderState {
         let text = source, name = title, wide = wide, remote = loadRemoteImages, appearance = appearance
         let baseline = reviewedSource, units = reviewedUnits, mapTasks = fileURL != nil
         let generation = openGeneration, options = playback.preferences.options
+        let previousProjection = fileURL != nil ? rendered?.discussionText : nil
+        let previousDiscussions = fileURL != nil ? rendered?.discussions : nil
         renderTask = Task { [weak self] in
             do {
                 let output = try await MarkdownRenderer.shared.render(text, title: name, wide: wide, baseline: baseline,
                     reviewedUnits: units, loadRemoteImages: remote, appearance: appearance, mapTasks: mapTasks,
-                    prepareSpeech: true, speechOptions: options)
-                guard let self, !Task.isCancelled, generation == openGeneration, source == text else { return }
+                    prepareSpeech: true, speechOptions: options, previousDiscussionProjection: previousProjection, previousDiscussions: previousDiscussions)
+                guard let self, !Task.isCancelled, generation == openGeneration, source.utf8.elementsEqual(text.utf8) else { return }
                 rendered = output; isRendering = false
+                if let projection = output.discussionText { discussions.acceptProjection(projection) }
                 currentChangeIndex = output.changes.count == 0 ? 0 : min(currentChangeIndex, output.changes.count - 1)
             } catch {
                 guard let self, !Task.isCancelled, generation == openGeneration else { return }
@@ -320,7 +439,7 @@ final class MobileReaderState {
     func speechOptionsChanged() { if !playbackHolding { render() } }
     func startSpeech(mode: String = "visible") {
         guard !isRendering, !checklistSaving, !showChecklistConfirmation,
-              let document = rendered?.speech, rendered?.taskSource == source else { return }
+              let document = rendered?.speech, rendered?.taskSource.utf8.elementsEqual(source.utf8) == true else { return }
         if document.options != playback.preferences.options {
             playback.stop()
             render()
@@ -328,7 +447,7 @@ final class MobileReaderState {
             Task { [weak self] in
                 guard let self else { return }
                 await waitForRendering()
-                guard generation == openGeneration, source == text else { return }
+                guard generation == openGeneration, source.utf8.elementsEqual(text.utf8) else { return }
                 startSpeech(mode: mode)
             }
             return
@@ -340,7 +459,7 @@ final class MobileReaderState {
     func completeSpeechStart(requestID: UUID, elementID: String?, offset: Int) {
         guard speechStartRequest == requestID else { return }
         speechStartRequest = nil
-        guard !isRendering, !checklistSaving, !showChecklistConfirmation, rendered?.taskSource == source,
+        guard !isRendering, !checklistSaving, !showChecklistConfirmation, rendered?.taskSource.utf8.elementsEqual(source.utf8) == true,
               let document = rendered?.speech, document.fingerprint == speechRequestedFingerprint else {
             errorMessage = String(localized: "Wait for the document to finish loading, then try Read Aloud again."); return
         }

@@ -32,6 +32,18 @@ actor MarkdownRenderer {
     private var stylesheet: String?
     private let mathTypesetter = MathTypesetter()
 
+    /// Compare sanitized semantic reading units before releasing a held version.
+    /// Parsing stays on this actor; note payloads never enter the comparison.
+    func hasSameReadingContent(_ old: String, _ new: String) throws -> Bool {
+        try Task.checkCancellation()
+        guard old.utf8.count <= MarkdownSource.maximumBytes, new.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
+        let previous = try parse(DiscussionCodec.parse(old).readingSource, loadRemoteImages: false)
+        let current = try parse(DiscussionCodec.parse(new).readingSource, loadRemoteImages: false)
+        let same = try DocumentChanges.snapshot(in: previous) == DocumentChanges.snapshot(in: current)
+        try Task.checkCancellation()
+        return same
+    }
+
     func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), previousDiscussionProjection: DiscussionTextProjection? = nil, previousDiscussions: DiscussionDocument? = nil) async throws -> RenderedMarkdown {
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }

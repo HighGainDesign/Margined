@@ -3,9 +3,14 @@ import Darwin
 
 struct MobileDocumentSnapshot: Sendable, Equatable {
     let leaseID: UUID
-    let url: URL
-    let data: Data
+    let sourceSnapshot: SourceFileEdit.Snapshot
     let source: String
+    var url: URL { sourceSnapshot.url }
+    var data: Data { sourceSnapshot.data }
+    var identity: SourceFileEdit.Identity { sourceSnapshot.identity }
+    init(leaseID: UUID, snapshot: SourceFileEdit.Snapshot) throws {
+        self.leaseID = leaseID; self.sourceSnapshot = snapshot; source = try snapshot.source
+    }
 }
 
 /// Scope operations and a coordination observer allow lifecycle instrumentation
@@ -91,9 +96,14 @@ final class MobileDocumentAccess {
     }
 
     func write(leaseID: UUID, task: MarkdownTask, marker: UInt8, expectedSource: String) async throws -> MobileDocumentSnapshot {
-        guard let lease = active, lease.id == leaseID,
-              let expected = snapshot, expected.leaseID == leaseID,
-              expected.source == expectedSource else { throw ChecklistError.changed }
+        guard let expected = snapshot, expected.leaseID == leaseID,
+              expected.source.utf8.elementsEqual(expectedSource.utf8) else { throw ChecklistError.changed }
+        return try await write(expected: expected, task: task, marker: marker)
+    }
+
+    func write(expected: MobileDocumentSnapshot, task: MarkdownTask, marker: UInt8) async throws -> MobileDocumentSnapshot {
+        guard let lease = active, lease.id == expected.leaseID, snapshot == expected else { throw ChecklistError.changed }
+        let leaseID = expected.leaseID
         let operation = lease.write(expected: expected, task: task, marker: marker)
         let saved = try await operation.value()
         // An old accepted save may finish after another file has opened, or
@@ -101,6 +111,16 @@ final class MobileDocumentAccess {
         if active?.id == leaseID, saved.sequence >= appliedSequence {
             appliedSequence = saved.sequence
             snapshot = saved.snapshot
+        }
+        return saved.snapshot
+    }
+
+    func replace(expected: MobileDocumentSnapshot, with replacement: Data) async throws -> MobileDocumentSnapshot {
+        guard let lease = active, lease.id == expected.leaseID, snapshot == expected else { throw SourceFileEdit.Failure.changed }
+        let operation = lease.replace(expected: expected, with: replacement)
+        let saved = try await operation.value()
+        if active?.id == expected.leaseID, saved.sequence >= appliedSequence {
+            appliedSequence = saved.sequence; snapshot = saved.snapshot
         }
         return saved.snapshot
     }
@@ -271,37 +291,23 @@ private final class MobileDocumentLease: NSObject, NSFilePresenter, @unchecked S
             guard presentedItemURL == expected.url else { throw ChecklistError.changed }
             environment.willCoordinate(.write, expected.url)
             guard presentedItemURL == expected.url else { throw ChecklistError.changed }
-            let coordinator = NSFileCoordinator(filePresenter: self)
-            var coordinationError: NSError?
-            var outcome: Result<MobileDocumentSnapshot, Error>?
-            coordinator.coordinate(writingItemAt: expected.url, options: [], error: &coordinationError) { coordinatedURL in
-                outcome = Result {
-                    guard presentedItemURL == expected.url else { throw ChecklistError.changed }
-                    let file = try FileHandle(forUpdating: coordinatedURL)
-                    defer { try? file.close() }
-                    let original = try file.read(upToCount: MarkdownSource.maximumBytes + 1) ?? Data()
-                    guard original == expected.data else { throw ChecklistError.changed }
-                    let patched = try MarkdownTasks.patch(original, expectedSource: expected.source, task: task, marker: marker)
-                    try Self.verifyIdentity(file, at: coordinatedURL)
-                    try file.seek(toOffset: 0)
-                    guard try file.read(upToCount: MarkdownSource.maximumBytes + 1) == original else { throw ChecklistError.changed }
-                    if original != patched {
-                        let differences = original.indices.filter { original[$0] != patched[$0] }
-                        guard let first = differences.first, let last = differences.last else { throw ChecklistError.changed }
-                        try file.seek(toOffset: UInt64(first))
-                        try file.write(contentsOf: patched[first...last])
-                        try file.synchronize()
-                    }
-                    try Self.verifyIdentity(file, at: coordinatedURL)
-                    guard try Self.readBytes(coordinatedURL) == patched else { throw ChecklistError.changed }
-                    return MobileDocumentSnapshot(leaseID: id, url: expected.url, data: patched, source: try MarkdownSource.decode(patched))
-                }
-            }
-            if let coordinationError { throw coordinationError }
-            guard let outcome else { throw ChecklistError.changed }
-            let saved = try outcome.get()
+            let committed = try SourceFileEdit.setMarker(marker, at: task.utf8Offset, was: task.marker, expected: expected.sourceSnapshot, presenter: self)
+            let saved = try MobileDocumentSnapshot(leaseID: id, snapshot: committed)
             // Commit before any subsequent presenter read: exact own-write echoes
             // never become external-change events, even while MainActor is busy.
+            latest = saved
+            sequence &+= 1
+            return MobileDocumentUpdate(snapshot: saved, sequence: sequence)
+        }
+    }
+
+    func replace(expected: MobileDocumentSnapshot, with replacement: Data) -> MobileDocumentResult<MobileDocumentUpdate> {
+        perform { [self] in
+            guard presentedItemURL == expected.url else { throw SourceFileEdit.Failure.changed }
+            environment.willCoordinate(.write, expected.url)
+            guard presentedItemURL == expected.url else { throw SourceFileEdit.Failure.changed }
+            let committed = try SourceFileEdit.commit(replacement, expected: expected.sourceSnapshot, presenter: self)
+            let saved = try MobileDocumentSnapshot(leaseID: id, snapshot: committed)
             latest = saved
             sequence &+= 1
             return MobileDocumentUpdate(snapshot: saved, sequence: sequence)
@@ -447,8 +453,8 @@ private final class MobileDocumentLease: NSObject, NSFilePresenter, @unchecked S
         var outcome: Result<MobileDocumentSnapshot, Error>?
         coordinator.coordinate(readingItemAt: readingURL, options: [], error: &coordinationError) { coordinatedURL in
             outcome = Result {
-                let bytes = try Self.readBytes(coordinatedURL)
-                return MobileDocumentSnapshot(leaseID: id, url: readingURL, data: bytes, source: try MarkdownSource.decode(bytes))
+                let captured = try SourceFileEdit.capture(coordinatedURL, logicalURL: readingURL)
+                return try MobileDocumentSnapshot(leaseID: id, snapshot: captured)
             }
         }
         if let coordinationError { throw coordinationError }
@@ -457,18 +463,5 @@ private final class MobileDocumentLease: NSObject, NSFilePresenter, @unchecked S
         latest = updated
         sequence &+= 1
         return MobileDocumentUpdate(snapshot: updated, sequence: sequence)
-    }
-
-    private static func readBytes(_ url: URL) throws -> Data {
-        let file = try FileHandle(forReadingFrom: url)
-        defer { try? file.close() }
-        return try file.read(upToCount: MarkdownSource.maximumBytes + 1) ?? Data()
-    }
-
-    private static func verifyIdentity(_ handle: FileHandle, at url: URL) throws {
-        var opened = stat(), current = stat()
-        guard fstat(handle.fileDescriptor, &opened) == 0,
-              url.path.withCString({ fstatat(AT_FDCWD, $0, &current, 0) }) == 0,
-              opened.st_dev == current.st_dev, opened.st_ino == current.st_ino else { throw ChecklistError.changed }
     }
 }
