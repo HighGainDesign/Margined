@@ -44,7 +44,7 @@ actor MarkdownRenderer {
         return same
     }
 
-    func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), previousDiscussionProjection: DiscussionTextProjection? = nil, previousDiscussions: DiscussionDocument? = nil) async throws -> RenderedMarkdown {
+    func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), previousDiscussionProjection: DiscussionTextProjection? = nil, previousDiscussions: DiscussionDocument? = nil, includeDiscussionAppendix: Bool = false) async throws -> RenderedMarkdown {
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
         try loadStylesheet()
@@ -78,6 +78,16 @@ actor MarkdownRenderer {
         }
         let checkboxCount = try document.select("input[type=checkbox]").size()
         let tasks = mapTasks ? try MarkdownTasks.attach(to: document, source: source) : []
+        if includeDiscussionAppendix, !discussions.threads.isEmpty {
+            var remaining = MarkdownSource.maximumBytes
+            let bodies = try discussions.threads.map {
+                try parseDiscussionBodies($0, loadRemoteImages: loadRemoteImages, remaining: &remaining)
+            }
+            let ids = Set(try document.select("[id]").array().map { try $0.attr("id") })
+            let appendix = try DiscussionRendering.appendix(discussions.threads, bodies: bodies,
+                anchors: discussionText.anchorResults, existingIDs: ids, locale: .current, timeZone: .current)
+            try document.body()?.appendChild(appendix)
+        }
         // Typeset after semantic review/speech, so generated artwork never changes
         // comparison identity or duplicates MathML tokens in Read Aloud.
         try await typeset(document)
@@ -100,14 +110,7 @@ actor MarkdownRenderer {
         try Task.checkCancellation()
         try loadStylesheet()
         var remaining = MarkdownSource.maximumBytes
-        var bodies: [Document] = []
-        for message in thread.messages {
-            try Task.checkCancellation()
-            let count = message.body.utf8.count + message.author.utf8.count + message.created.utf8.count
-            guard count <= remaining else { throw ReaderError.tooLarge }
-            remaining -= count
-            bodies.append(try parse(message.body, loadRemoteImages: loadRemoteImages))
-        }
+        let bodies = try parseDiscussionBodies(thread, loadRemoteImages: loadRemoteImages, remaining: &remaining)
         let document = try DiscussionRendering.document(thread, bodies: bodies, locale: locale, timeZone: timeZone, includeContext: includeContext)
         let semanticSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
         let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
@@ -125,6 +128,19 @@ actor MarkdownRenderer {
             loadRemoteImages: loadRemoteImages, appearance: appearance, language: language,
             extraBodyClass: "discussion-history", documentLabel: String(localized: "Discussion history")), headings: headings, wordCount: wordCount,
             documentLanguage: language, speech: speech)
+    }
+
+    private func parseDiscussionBodies(_ thread: DiscussionThread, loadRemoteImages: Bool,
+                                       remaining: inout Int) throws -> [Document] {
+        var bodies: [Document] = []
+        for message in thread.messages {
+            try Task.checkCancellation()
+            let count = message.body.utf8.count + message.author.utf8.count + message.created.utf8.count
+            guard count <= remaining else { throw ReaderError.tooLarge }
+            remaining -= count
+            bodies.append(try parse(message.body, loadRemoteImages: loadRemoteImages))
+        }
+        return bodies
     }
 
     private func loadStylesheet() throws {

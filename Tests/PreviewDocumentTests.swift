@@ -115,6 +115,78 @@ final class PreviewDocumentTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(images.last).hasAttr("src"))
     }
 
+    func testSystemPreviewIncludesFormattedReadOnlyDiscussionHistoryAndLocalAttachments() async throws {
+        let root = try folder(), file = root.appendingPathComponent("Discussion.md")
+        try pixel.write(to: root.appendingPathComponent("figure.png"))
+        let author = "Alex **literal** <img src=x>"
+        let thread = DiscussionThread(id: "t-preview", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "Review this passage.", prefix: "Review", suffix: "", section: "Review"),
+            messages: [
+                .init(id: "m-question", author: author, created: "2026-10-24T10:00:00Z",
+                      body: "**A formatted note.**\n\n| Item | State |\n| --- | --- |\n| Reader | Ready |\n\n$x^2$\n\n```mermaid\nflowchart LR\nA[Read]-->B[Reply]\n```\n\n![Local](figure.png)\n\n![Remote](https://example.invalid/track.png)\n\n- [ ] Comment task", inReplyTo: nil),
+                .init(id: "m-reply", author: "Sam", created: "2026-10-24T11:00:00Z", body: "A reply.", inReplyTo: "m-question")],
+            resolvedBy: nil, resolved: nil, attachmentHistory: [])
+        let bytes = try previewSource([thread]); try bytes.write(to: file)
+        let preview = try await PreviewDocument.load(file, appearance: .light)
+        let doc = try SwiftSoup.parse(preview.html)
+        let appendix = try doc.select("section.discussion-appendix")
+        XCTAssertEqual(appendix.size(), 1, "Quick Look must expose saved conversations as a read-only appendix")
+        guard let history = appendix.first() else { return }
+        XCTAssertEqual(try history.select("article").size(), 2)
+        XCTAssertEqual(try history.select("blockquote").text(), "Review this passage.")
+        XCTAssertEqual(try history.select("article header h3,article header h4").first()?.text(), author)
+        XCTAssertEqual(try history.select("article header time").array().map { try $0.attr("datetime") },
+                       ["2026-10-24T10:00:00Z", "2026-10-24T11:00:00Z"])
+        XCTAssertEqual(try history.select("article header a").text(), author)
+        XCTAssertEqual(try history.select("strong").text(), "A formatted note.")
+        XCTAssertEqual(try history.select("td").first()?.text(), "Reader")
+        XCTAssertEqual(try history.select("math").size(), 1)
+        XCTAssertEqual(try history.select("figure.margined-diagram img[src^='data:image/svg+xml;base64,']").size(), 1)
+        let local = try history.select("img[alt=Local]").attr("src")
+        XCTAssertTrue(local.hasPrefix("cid:"))
+        XCTAssertEqual(preview.attachments[String(local.dropFirst(4))]?.data, pixel)
+        XCTAssertFalse(try history.select("img[alt=Remote]").hasAttr("src"))
+        XCTAssertEqual(try history.select("input[type=checkbox][disabled]").size(), 1)
+        XCTAssertEqual(try doc.select("button,form,script,[data-margined-task],[data-margined-thread]").size(), 0)
+        XCTAssertTrue(try history.text().contains("Open this file in Margined to reply."))
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    func testPreviewKeepsMissingAndAmbiguousQuotesVisibleWithAnUnavailablePassageLabel() async throws {
+        let root = try folder(), file = root.appendingPathComponent("Unattached.md")
+        let threads = ["This passage was deleted.", "Repeated passage."].enumerated().map { index, quote in
+            DiscussionThread(id: "t-unattached-\(index)", state: index == 0 ? .open : .resolved,
+                target: .init(type: "TextQuoteSelector", exact: quote, prefix: "", suffix: "", section: nil),
+                messages: [.init(id: "m-unattached-\(index)", author: "Reviewer", created: "2026-10-24T10:00:00Z", body: "Keep this conversation.", inReplyTo: nil)],
+                resolvedBy: index == 0 ? nil : "Reviewer", resolved: index == 0 ? nil : "2026-10-24T11:00:00Z", attachmentHistory: [])
+        }
+        let bytes = try previewSource(threads, prose: "# Review\n\nRepeated passage.\n\nRepeated passage.\n")
+        let source = try MarkdownSource.decode(bytes)
+        let encoded = Data([0xff, 0xfe]) + (try XCTUnwrap(source.data(using: .utf16LittleEndian)))
+        try encoded.write(to: file)
+        let preview = try await PreviewDocument.load(file)
+        let doc = try SwiftSoup.parse(preview.html)
+        let appendix = try doc.select("section.discussion-appendix")
+        XCTAssertEqual(appendix.size(), 1, "Unavailable anchors must not hide their saved conversations")
+        guard let history = appendix.first() else { return }
+        XCTAssertEqual(try history.select("blockquote").array().map { try $0.text() }, threads.map(\.target.exact))
+        XCTAssertEqual(try history.select(".discussion-anchor-status").array().map { try $0.text() },
+                       ["Passage needs attention", "Passage needs attention"])
+        XCTAssertEqual(try history.select(".discussion-state").array().map { try $0.text() }, ["Open", "Resolved"])
+        XCTAssertEqual(try history.select("button,textarea,input").size(), 0)
+        XCTAssertEqual(try Data(contentsOf: file), encoded, "Quick Look never repairs or rewrites the source")
+    }
+
+    private func previewSource(_ threads: [DiscussionThread], prose: String = "# Review\n\nReview this passage.\n") throws -> Data {
+        var bytes = Data(prose.utf8)
+        for thread in threads {
+            let source = try MarkdownSource.decode(bytes)
+            bytes = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .newThread(thread),
+                in: DiscussionCodec.parse(source)), to: bytes, expectedSource: source)
+        }
+        return bytes
+    }
+
     func testCanceledPreviewDoesNotProduceAResult() async throws {
         let file = try folder().appendingPathComponent("review.md")
         try Data("# Canceled".utf8).write(to: file)

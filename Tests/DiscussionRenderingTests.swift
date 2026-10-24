@@ -40,6 +40,49 @@ final class DiscussionRenderingTests: XCTestCase {
         XCTAssertFalse(after.html.contains("margined:thread"))
     }
 
+    func testOptionalAppendixDoesNotChangeProseSpeechWordCountReviewOrEditableTasks() async throws {
+        let prose = "# Plan\n\nRead this paragraph.\n\n- [ ] Complete the task.\n\n## appendix-discussion-title-t-appendix\n"
+        let thread = DiscussionThread(id: "t-appendix", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "Read this paragraph.", prefix: "Plan", suffix: "Complete the task.", section: "Plan"),
+            messages: [.init(id: "m-appendix", author: "Reviewer", created: "2026-10-24T10:00:00Z",
+                             body: "A saved **comment**.\n\n- [ ] Read-only comment task\n\n## Note details\n\n[Back to note details](#note-details)", inReplyTo: nil)],
+            resolvedBy: nil, resolved: nil, attachmentHistory: [])
+        let bytes = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .newThread(thread), in: DiscussionCodec.parse(prose)),
+                                                 to: Data(prose.utf8), expectedSource: prose)
+        let source = try MarkdownSource.decode(bytes)
+        let ordinary = try await MarkdownRenderer.shared.render(source, mapTasks: true, prepareSpeech: true)
+        let included = try await MarkdownRenderer.shared.render(source, baseline: source, mapTasks: true, prepareSpeech: true,
+                                                               includeDiscussionAppendix: true)
+        let doc = try SwiftSoup.parse(included.html)
+        XCTAssertEqual(try doc.select("section.discussion-appendix").size(), 1)
+        guard try doc.select("section.discussion-appendix").size() == 1 else { return }
+        XCTAssertEqual(try SwiftSoup.parse(ordinary.html).select("section.discussion-appendix").size(), 0)
+        XCTAssertEqual(included.wordCount, ordinary.wordCount)
+        XCTAssertEqual(included.headings, ordinary.headings)
+        XCTAssertEqual(included.speech?.fingerprint, ordinary.speech?.fingerprint)
+        XCTAssertEqual(included.speech?.segments, ordinary.speech?.segments)
+        XCTAssertEqual(included.discussionText?.text, ordinary.discussionText?.text)
+        XCTAssertEqual(included.tasks, ordinary.tasks)
+        XCTAssertEqual(included.tasks.count, 1)
+        XCTAssertEqual(included.checkboxCount, ordinary.checkboxCount)
+        XCTAssertEqual(included.taskSource, source)
+        XCTAssertEqual(included.changes.count, 0)
+        XCTAssertEqual(try doc.select("section.discussion-appendix [data-margined-task],section.discussion-appendix [data-margined-speech]").size(), 0)
+        XCTAssertEqual(try doc.select("section.discussion-appendix input[type=checkbox][disabled]").size(), 1)
+        let ids = try doc.select("[id]").array().map { try $0.attr("id") }
+        XCTAssertEqual(Set(ids).count, ids.count, "Appended metadata and message headings must not collide with prose IDs")
+        let appendix = try XCTUnwrap(doc.select("section.discussion-appendix").first())
+        let localIDs = Set(try appendix.select("[id]").array().map { try $0.attr("id") })
+        let link = try appendix.select(".discussion-message-body a").attr("href")
+        XCTAssertTrue(link.hasPrefix("#"))
+        XCTAssertTrue(localIDs.contains(String(link.dropFirst())), "A local note link must still target its own message")
+        for element in try appendix.select("[aria-labelledby]").array() {
+            for id in try element.attr("aria-labelledby").split(separator: " ") {
+                XCTAssertTrue(localIDs.contains(String(id)), "Metadata accessibility labels must target the appended history")
+            }
+        }
+    }
+
     func testCodeExamplesRemainVisibleAndMalformedNotesKeepLocatedWarnings() async throws {
         let code = "```md\n<!-- margined:thread v1\nexample only\n-->\n```"
         let source = code + "\n\n<!-- margined:thread v9\nfuture data\n-->\n\nAfter."

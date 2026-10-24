@@ -117,3 +117,9 @@ a:focus-visible, [tabindex="-1"]:focus-visible { outline: 2px solid var(--link);
 .discussion-history header h3 { font-size: 1em; margin: .5em 0 .2em; letter-spacing: normal; }
 .discussion-history header p { color: var(--muted); font-size: .85em; margin: .2em 0; }
 .discussion-history article + article { border-block-start: 1px solid var(--line); margin-block-start: 20px; padding-block-start: 12px; }
+
+/* System previews and optional discussion printing share the same safe DOM. */
+.discussion-appendix { border-block-start: 1px solid var(--line); margin-block-start: 40px; padding-block-start: 20px; }
+.discussion-appendix header h4 { font-size: 1em; margin: .5em 0 .2em; }
+.discussion-appendix header p, .discussion-anchor-status, .discussion-preview-help { color: var(--muted); font-size: .85em; }
+.discussion-transcript + .discussion-transcript { border-block-start: 1px solid var(--line); margin-block-start: 28px; padding-block-start: 12px; }
