@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LinkPresentation
 import UIKit
 
 struct MobileDiscussionShare: Identifiable {
@@ -61,6 +62,11 @@ extension MobileReaderState {
                         return nil
                     }
                     let configuration = UIActivityItemsConfiguration(itemProviders: [provider])
+                    let metadata = LPLinkMetadata()
+                    metadata.title = filename
+                    configuration.perItemMetadataProvider = { index, key in
+                        index == 0 && key == .linkPresentationMetadata ? metadata : nil
+                    }
                     discussionShare = .init(url: url, configuration: configuration)
                 } catch {
                     guard documentGeneration == prepared.version.context else { return }

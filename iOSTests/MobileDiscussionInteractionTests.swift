@@ -1,4 +1,5 @@
 import SwiftUI
+import LinkPresentation
 import UIKit
 import WebKit
 import XCTest
@@ -674,6 +675,10 @@ import XCTest
         f.reader.requestMarkdownShare(); await f.reader.waitForSaving()
         XCTAssertNotNil(f.reader.discussionShare, "Share must stage a Markdown file without asking for an export folder")
         guard let share = f.reader.discussionShare else { return }
+        let metadata = share.configuration.perItemMetadataProvider?(0, .linkPresentationMetadata) as? LPLinkMetadata
+        XCTAssertNotNil(metadata, "The system share header must identify the Markdown file being shared")
+        guard let metadata else { return }
+        XCTAssertEqual(metadata.title, f.file.lastPathComponent)
         let presented = await poll { self.activityController(in: f.host) != nil }; XCTAssertTrue(presented)
         let activity = try XCTUnwrap(activityController(in: f.host))
         // The inherited responder configuration is independent of the input to
