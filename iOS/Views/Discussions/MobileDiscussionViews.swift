@@ -54,6 +54,8 @@ struct MobileDiscussionThread: View {
                 .accessibilityLabel(String(localized: "Quoted passage") + ", " + quote)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
+                    if let thread { MobileDiscussionControls(reader: reader, thread: thread) }
+                    MobileDiscussionDecisionView(reader: reader, key: key)
                     if let thread { MobileDiscussionMessages(thread: thread) }
                     if let error = reader.discussionError {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -147,11 +149,11 @@ private struct MobileDiscussionComposerFields: View {
                 Text("Replies are saved in this Markdown file.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(isReply ? "Reply" : "Post") {
-                    guard isCurrent else { return }
+                    guard isCurrent, reader.discussionDecision?.key != key else { return }
                     reader.discussions.selection = key; reader.postDiscussion()
                 }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
-                    .disabled(!isCurrent || reader.fileSaving || reader.isRendering || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!isCurrent || reader.discussionDecision?.key == key || reader.fileSaving || reader.isRendering || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .onAppear { if reader.discussions.displayName.isEmpty { editingName = true } }
@@ -191,6 +193,8 @@ struct MobileDiscussionMargin: View {
                                 VStack(alignment: .leading, spacing: 14) {
                                     Button { reader.openDiscussion(thread.id) } label: { MobileDiscussionSummary(reader: reader, thread: thread) }
                                     if reader.discussions.selection == .thread(thread.id) {
+                                        MobileDiscussionControls(reader: reader, thread: thread)
+                                        MobileDiscussionDecisionView(reader: reader, key: .thread(thread.id))
                                         ScrollView { VStack(alignment: .leading, spacing: 18) { MobileDiscussionMessages(thread: thread) } }.frame(maxHeight: 240)
                                         MobileDiscussionComposer(reader: reader, key: .thread(thread.id))
                                     }
@@ -203,6 +207,7 @@ struct MobileDiscussionMargin: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Unposted discussion").font(.headline)
                                 Text(reader.discussions.drafts[key]?.target?.exact ?? "")
+                                MobileDiscussionDecisionView(reader: reader, key: key)
                                 MobileDiscussionComposer(reader: reader, key: key)
                             }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
                         }
@@ -285,5 +290,74 @@ struct MobileDiscussionPassagePickerView: View {
         .onChange(of: query) { _, _ in
             if let selected, !units.contains(where: { $0.id == selected }) { self.selected = nil }
         }
+    }
+}
+
+struct MobileDiscussionControls: View {
+    let reader: MobileReaderState
+    let thread: DiscussionThread
+    private let version: MobileDiscussionVersion
+    @MainActor init(reader: MobileReaderState, thread: DiscussionThread) {
+        self.reader = reader; self.thread = thread; version = reader.currentDiscussionVersion
+    }
+    var body: some View {
+        HStack {
+            Button(thread.state == .open ? "Resolve" : "Reopen",
+                   systemImage: thread.state == .open ? "checkmark.bubble" : "arrow.uturn.backward") {
+                guard reader.matchesDiscussionVersion(version) else {
+                    reader.discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+                }
+                if thread.state == .open { reader.requestResolveDiscussion(thread.id) }
+                else { reader.reopenDiscussion(thread.id) }
+            }.buttonStyle(.bordered).disabled(!reader.canEditDiscussions)
+            Spacer()
+        }
+    }
+}
+
+struct MobileDiscussionDecisionView: View {
+    let reader: MobileReaderState
+    let key: DiscussionSession.DraftKey
+    var body: some View {
+        if let decision = reader.discussionDecision, decision.key == key {
+            MobileDiscussionDecisionCard(reader: reader, decision: decision).id(decision.id)
+        }
+    }
+}
+
+private struct MobileDiscussionDecisionCard: View {
+    let reader: MobileReaderState
+    let decision: MobileDiscussionDecision
+    private var stale: Bool {
+        !reader.matchesDiscussionVersion(decision.version) || reader.discussions.drafts[decision.key]?.revision != decision.draftRevision
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            switch decision.kind {
+            case .resolve:
+                Text("Resolve with an unposted reply?").font(.headline).accessibilityAddTraits(.isHeader)
+                Text("Keep the discussion open, post your reply before resolving, or discard this draft and resolve.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Keep Open") { reader.confirmDiscussionResolution(decision.id, choice: .keepOpen) }
+                Button("Post Reply and Resolve") { reader.confirmDiscussionResolution(decision.id, choice: .postDraft) }
+                    .buttonStyle(.borderedProminent).disabled(stale || !reader.canEditDiscussions)
+                Button("Discard Draft and Resolve", role: .destructive) { reader.confirmDiscussionResolution(decision.id, choice: .discardDraft) }
+                    .disabled(stale || !reader.canEditDiscussions)
+            case .reopenReply:
+                Text("Reopen and post this reply?").font(.headline).accessibilityAddTraits(.isHeader)
+                Text("This discussion is resolved. Posting your reply reopens it and keeps every earlier message.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Cancel") { reader.cancelDiscussionDecision(decision.id) }
+                Button("Reopen and Reply") { reader.confirmDiscussionReopenReply(decision.id) }
+                    .buttonStyle(.borderedProminent).disabled(stale || !reader.canEditDiscussions)
+            }
+            if stale {
+                Label("The document or reply changed. Close this confirmation and try again.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        .disabled(reader.fileSaving)
     }
 }

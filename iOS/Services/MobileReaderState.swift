@@ -13,6 +13,7 @@ final class MobileReaderState {
     enum Inspector: Equatable { case changes, discussions }
     var inspector: Inspector?
     var discussionRoute: DiscussionSession.DraftKey?
+    var discussionDecision: MobileDiscussionDecision?
     var discussionPassagePicker: MobileDiscussionPassagePicker?
     var discussionSelectionGeneration = 0
     var discussionSelectionRequest: MobileDiscussionVersion?
@@ -74,7 +75,7 @@ final class MobileReaderState {
         discussionImportPreview = nil; discussionImportSnapshot = nil; discussionImportLoading = false
     }
 
-    func postDiscussion(reopenResolved: Bool = false) {
+    func postDiscussion(reopenResolved: Bool = false, decisionID: UUID? = nil) {
         guard canEditDiscussions, let document = rendered?.discussions,
               document.source.utf8.elementsEqual(source.utf8) else { return }
         guard fileURL != nil else { offerDiscussionCopy(); return }
@@ -82,8 +83,13 @@ final class MobileReaderState {
         do {
             let operation = try discussions.preparePost(in: document, snapshot: snapshot?.sourceSnapshot, reopenResolved: reopenResolved)
             defaults.set(discussions.displayName, forKey: "discussionDisplayName")
-            commitDiscussion(operation)
+            commitDiscussion(operation, decisionID: decisionID)
         } catch {
+            if (error as? DiscussionSession.Failure) == .reopenRequired,
+               let key = discussions.selection, let draft = discussions.drafts[key] {
+                discussionDecision = .init(version: currentDiscussionVersion, kind: .reopenReply(key, draft.revision))
+                discussionError = nil; return
+            }
             discussionError = error.localizedDescription
             if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
         }
@@ -98,12 +104,12 @@ final class MobileReaderState {
         do { commitDiscussion(try discussions.prepareRedo(snapshot: snapshot.sourceSnapshot)) }
         catch { discussionError = error.localizedDescription }
     }
-    func resolveDiscussion(_ threadID: String, choice: DiscussionSession.ResolveChoice) {
+    func resolveDiscussion(_ threadID: String, choice: DiscussionSession.ResolveChoice, decisionID: UUID? = nil) {
         guard canEditDiscussions, let document = rendered?.discussions else { return }
         guard fileURL != nil else { offerDiscussionCopy(); return }
         do {
             if let operation = try discussions.prepareResolve(threadID: threadID, in: document, snapshot: snapshot?.sourceSnapshot, choice: choice) {
-                commitDiscussion(operation)
+                commitDiscussion(operation, decisionID: decisionID)
             }
         } catch {
             discussionError = error.localizedDescription
@@ -113,11 +119,11 @@ final class MobileReaderState {
     var canEditDiscussions: Bool {
         !isOpening && !isRendering && !fileSaving && !showChecklistConfirmation && !hasPendingFileUpdate
     }
-    private func offerDiscussionCopy() {
+    func offerDiscussionCopy() {
         discussionCopyOffered = true
         discussionError = DiscussionSession.Failure.savedCopyRequired.localizedDescription
     }
-    private func commitDiscussion(_ operation: DiscussionSession.Pending) {
+    func commitDiscussion(_ operation: DiscussionSession.Pending, decisionID: UUID? = nil) {
         guard canEditDiscussions, let captured = snapshot, captured.sourceSnapshot == operation.expected else {
             discussions.failed(operation, error: SourceFileEdit.Failure.changed)
             discussionError = SourceFileEdit.Failure.changed.localizedDescription
@@ -133,6 +139,7 @@ final class MobileReaderState {
                 }
                 guard revision == externalRevision, access.snapshot == saved else { throw SourceFileEdit.Failure.changed }
                 try discussions.saved(operation, as: saved.sourceSnapshot)
+                if let decisionID, discussionDecision?.id == decisionID { discussionDecision = nil }
                 if operation.kind == .post, discussions.selection == operation.key,
                    discussions.drafts[operation.key] == nil {
                     discussions.selection = .thread(operation.threadID)
@@ -313,7 +320,7 @@ final class MobileReaderState {
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
         discardDiscussionImport()
         inspector = nil; discussionRoute = nil; discussionSelectionRequest = nil; discussionMargin = nil
-        discussionPassagePicker = nil
+        discussionPassagePicker = nil; discussionDecision = nil
         discussions.resetDocument(); discussionSaving = false; discussionError = nil; discussionCopyOffered = false
         pendingTransition = nil; showDraftDiscardConfirmation = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil

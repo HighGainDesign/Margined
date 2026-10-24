@@ -262,6 +262,83 @@ import XCTest
         f.reader.discussions.discardDrafts(); await f.reader.close()
     }
 
+    func testResolveOffersDraftChoicesAndReopenPreservesTheConversation() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.displayName = "Test Author"
+        f.reader.discussions.setDraft("Post this reply before resolving.", for: .thread("t-mobile"))
+        f.reader.requestResolveDiscussion("t-mobile")
+        XCTAssertNotNil(f.reader.discussionDecision, "Resolve must ask what to do with the unposted reply")
+        guard let first = f.reader.discussionDecision else { return }
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        f.reader.confirmDiscussionResolution(first.id, choice: .keepOpen)
+        XCTAssertNil(f.reader.discussionDecision)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Post this reply before resolving.")
+        f.reader.requestResolveDiscussion("t-mobile")
+        let decision = try XCTUnwrap(f.reader.discussionDecision)
+        f.reader.confirmDiscussionResolution(decision.id, choice: .postDraft)
+        let resolved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.state == .resolved }
+        XCTAssertTrue(resolved)
+        let saved = try XCTUnwrap(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first)
+        XCTAssertEqual(saved.messages.map(\.body), ["A portable note.", "Post this reply before resolving."])
+        XCTAssertEqual(saved.resolvedBy, "Test Author")
+        XCTAssertNil(f.reader.discussionDecision)
+        XCTAssertFalse(f.reader.discussions.hasUnpostedDrafts)
+        f.reader.reopenDiscussion("t-mobile")
+        let reopened = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.state == .open }
+        XCTAssertTrue(reopened)
+        XCTAssertEqual(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first?.messages, saved.messages)
+    }
+
+    func testResolvedReplyConfirmationRejectsNewTypingAndOldDecisionCallbacks() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile"); f.reader.discussions.displayName = "Test Author"
+        f.reader.resolveDiscussion("t-mobile", choice: .discardDraft)
+        let resolved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.state == .resolved }
+        XCTAssertTrue(resolved)
+        let before = try Data(contentsOf: f.file)
+        f.reader.discussions.setDraft("First version of the reply.", for: .thread("t-mobile"))
+        f.reader.postDiscussion()
+        XCTAssertNotNil(f.reader.discussionDecision, "Posting to a resolved thread needs explicit reopening confirmation")
+        guard let first = f.reader.discussionDecision else { return }
+        f.reader.discussions.setDraft("New typing must be reviewed first.", for: .thread("t-mobile"))
+        f.reader.confirmDiscussionReopenReply(first.id)
+        XCTAssertEqual(try Data(contentsOf: f.file), before)
+        XCTAssertNotNil(f.reader.discussionError)
+        f.reader.cancelDiscussionDecision(first.id)
+        f.reader.postDiscussion()
+        let current = try XCTUnwrap(f.reader.discussionDecision)
+        XCTAssertNotEqual(current.id, first.id)
+        f.reader.confirmDiscussionReopenReply(first.id)
+        f.reader.cancelDiscussionDecision(first.id)
+        XCTAssertEqual(f.reader.discussionDecision?.id, current.id)
+        XCTAssertEqual(try Data(contentsOf: f.file), before)
+        f.reader.confirmDiscussionReopenReply(current.id)
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.messages.count == 2 }
+        XCTAssertTrue(saved)
+        let thread = try XCTUnwrap(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first)
+        XCTAssertEqual(thread.state, .open)
+        XCTAssertEqual(thread.messages.last?.body, "New typing must be reviewed first.")
+        XCTAssertNil(f.reader.discussionDecision)
+        XCTAssertFalse(f.reader.discussions.hasUnpostedDrafts)
+    }
+
+    func testResolveConfirmationRejectsAnIdenticalExternalReplacement() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile"); f.reader.discussions.displayName = "Test Author"
+        f.reader.discussions.setDraft("Keep this unposted reply.", for: .thread("t-mobile"))
+        f.reader.requestResolveDiscussion("t-mobile")
+        XCTAssertNotNil(f.reader.discussionDecision)
+        guard let decision = f.reader.discussionDecision else { return }
+        try f.original.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.reader.confirmDiscussionResolution(decision.id, choice: .discardDraft)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this unposted reply.")
+        XCTAssertEqual(f.reader.rendered?.discussions?.threads.first?.state, .open)
+        XCTAssertNotNil(f.reader.discussionError)
+    }
+
     private enum FixtureFailure: Error { case documentDidNotLoad }
     private struct Fixture {
         let reader: MobileReaderState

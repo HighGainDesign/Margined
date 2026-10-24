@@ -9,6 +9,18 @@ struct MobileDiscussionPassagePicker: Identifiable {
     let version: MobileDiscussionVersion
     let projection: DiscussionTextProjection
 }
+struct MobileDiscussionDecision: Identifiable {
+    enum Kind { case resolve(String, UUID?), reopenReply(DiscussionSession.DraftKey, UUID) }
+    let id = UUID()
+    let version: MobileDiscussionVersion
+    let kind: Kind
+    var key: DiscussionSession.DraftKey {
+        switch kind { case let .resolve(id, _): .thread(id); case let .reopenReply(key, _): key }
+    }
+    var draftRevision: UUID? {
+        switch kind { case let .resolve(_, revision): revision; case let .reopenReply(_, revision): revision }
+    }
+}
 enum MobileDiscussionRoute: Hashable { case list, thread(DiscussionSession.DraftKey) }
 
 extension MobileReaderState {
@@ -62,6 +74,48 @@ extension MobileReaderState {
     func cancelDiscussionPassage(pickerID: UUID) {
         guard discussionPassagePicker?.id == pickerID else { return }
         discussionPassagePicker = nil
+    }
+    func requestResolveDiscussion(_ threadID: String) {
+        guard canEditDiscussions, rendered?.discussions?.threads.contains(where: { $0.id == threadID && $0.state == .open }) == true else { return }
+        let revision = discussions.drafts[.thread(threadID)]?.revision
+        if discussions.drafts[.thread(threadID)]?.body.isEmpty == false {
+            discussionDecision = .init(version: currentDiscussionVersion, kind: .resolve(threadID, revision))
+            discussionError = nil
+        } else { resolveDiscussion(threadID, choice: .discardDraft) }
+    }
+    func confirmDiscussionResolution(_ decisionID: UUID, choice: DiscussionSession.ResolveChoice) {
+        guard let decision = discussionDecision, decision.id == decisionID,
+              case let .resolve(threadID, _) = decision.kind else { return }
+        if choice == .keepOpen { cancelDiscussionDecision(decisionID); return }
+        guard canConfirmDiscussionDecision(decision) else { return }
+        resolveDiscussion(threadID, choice: choice, decisionID: decisionID)
+    }
+    func confirmDiscussionReopenReply(_ decisionID: UUID) {
+        guard let decision = discussionDecision, decision.id == decisionID,
+              case let .reopenReply(key, _) = decision.kind,
+              discussions.selection == key, canConfirmDiscussionDecision(decision) else { return }
+        postDiscussion(reopenResolved: true, decisionID: decisionID)
+    }
+    func cancelDiscussionDecision(_ decisionID: UUID) {
+        guard !fileSaving, discussionDecision?.id == decisionID else { return }
+        discussionDecision = nil
+    }
+    func canConfirmDiscussionDecision(_ decision: MobileDiscussionDecision) -> Bool {
+        guard canEditDiscussions else { return false }
+        guard matchesDiscussionVersion(decision.version) else {
+            discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return false
+        }
+        guard discussions.drafts[decision.key]?.revision == decision.draftRevision else {
+            discussionError = String(localized: "Your reply changed. Review it before confirming again."); return false
+        }
+        return true
+    }
+    func reopenDiscussion(_ threadID: String) {
+        guard canEditDiscussions, let document = rendered?.discussions,
+              document.threads.contains(where: { $0.id == threadID && $0.state == .resolved }) else { return }
+        guard fileURL != nil else { offerDiscussionCopy(); return }
+        do { commitDiscussion(try discussions.prepareReopen(threadID: threadID, in: document, snapshot: currentDiscussionVersion.snapshot)) }
+        catch { discussionError = error.localizedDescription }
     }
     func requestAddDiscussion() {
         guard discussionPassagePicker == nil, canEditDiscussions, rendered?.discussionText != nil else { return }
