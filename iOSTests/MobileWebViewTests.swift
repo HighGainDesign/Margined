@@ -141,8 +141,8 @@ final class MobileWebViewTests: XCTestCase {
 
     func testResourceNamespaceLeavesRemoteDataAndCodeUntouched() {
         let html = #"<img alt="local" src="margined-resource://local/pic%2Epng"><img src="https://example.com/pic.png"><img src="data:image/png;base64,abc"><code>src="margined-resource://local/example"</code>"#
-        let first = MobileWebResources.html(html, token: "first")
-        let second = MobileWebResources.html(html, token: "second")
+        let first = ImageResourceNamespace.html(html, token: "first")
+        let second = ImageResourceNamespace.html(html, token: "second")
         XCTAssertNotEqual(first, second)
         XCTAssertTrue(first.contains(#"src="margined-resource://local/pic%2Epng?generation=first""#))
         XCTAssertTrue(first.contains(#"src="https://example.com/pic.png""#))
@@ -153,10 +153,10 @@ final class MobileWebViewTests: XCTestCase {
     func testAnOldImageRequestCannotResolveAgainstANewDocumentsFolder() {
         let old = URL(string: "margined-resource://local/image%2Epng?generation=old")!
         let current = URL(string: "margined-resource://local/image%2Epng?generation=current")!
-        XCTAssertFalse(MobileWebResources.authorizes(old, token: "current"))
-        XCTAssertTrue(MobileWebResources.authorizes(current, token: "current"))
-        XCTAssertFalse(MobileWebResources.authorizes(URL(string: "margined-resource://local/image.png")!, token: "current"))
-        XCTAssertFalse(MobileWebResources.authorizes(URL(string: "https://example.com/?generation=current")!, token: "current"))
+        XCTAssertFalse(ImageResourceNamespace.authorizes(old, token: "current"))
+        XCTAssertTrue(ImageResourceNamespace.authorizes(current, token: "current"))
+        XCTAssertFalse(ImageResourceNamespace.authorizes(URL(string: "margined-resource://local/image.png")!, token: "current"))
+        XCTAssertFalse(ImageResourceNamespace.authorizes(URL(string: "https://example.com/?generation=current")!, token: "current"))
     }
 
     func testConfigurationDisablesAuthorJavaScriptAndHasNoPersistentWebsiteStore() {

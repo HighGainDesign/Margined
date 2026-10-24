@@ -56,3 +56,19 @@ final class ImageSchemeHandler: NSObject, WKURLSchemeHandler {
         requests.removeValue(forKey: ObjectIdentifier(urlSchemeTask))?.cancel()
     }
 }
+
+/// Namespace custom-scheme image requests to the currently authorized resource
+/// tree. A new file or explicit folder reload cannot reuse another file's cache.
+enum ImageResourceNamespace {
+    static func authorizes(_ url: URL, token: String) -> Bool {
+        guard url.scheme == "margined-resource", url.host == "local",
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        let generations = parts.queryItems?.filter { $0.name == "generation" } ?? []
+        return generations.count == 1 && generations[0].value == token
+    }
+
+    static func html(_ html: String, token: String) -> String {
+        html.replacingOccurrences(of: #"(<img\b[^>]*\ssrc=")(margined-resource://local/[^"]*)(")"#,
+            with: "$1$2?generation=\(token)$3", options: .regularExpression)
+    }
+}

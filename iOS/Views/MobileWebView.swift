@@ -198,7 +198,7 @@ struct MobileWebView: UIViewRepresentable {
                     loadedFile = reader.fileURL
                     let preservePosition = html != nil
                     html = rendered.html
-                    load(MobileWebResources.html(rendered.html, token: resourceToken), forceNavigation: resourceChange, preservePosition: preservePosition)
+                    load(ImageResourceNamespace.html(rendered.html, token: resourceToken), forceNavigation: resourceChange, preservePosition: preservePosition)
                 }
             }
             synchronizeTypography()
@@ -546,22 +546,6 @@ enum MobileTaskBridge {
     }
 }
 
-/// Namespace custom-scheme image requests to the currently authorized resource
-/// tree. A new file or explicit folder reload cannot reuse another file's cache.
-enum MobileWebResources {
-    static func authorizes(_ url: URL, token: String) -> Bool {
-        guard url.scheme == "margined-resource", url.host == "local",
-              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
-        let generations = parts.queryItems?.filter { $0.name == "generation" } ?? []
-        return generations.count == 1 && generations[0].value == token
-    }
-
-    static func html(_ html: String, token: String) -> String {
-        html.replacingOccurrences(of: #"(<img\b[^>]*\ssrc=")(margined-resource://local/[^"]*)(")"#,
-            with: "$1$2?generation=\(token)$3", options: .regularExpression)
-    }
-}
-
 @MainActor
 final class MobileImageSchemeHandler: NSObject, WKURLSchemeHandler {
     private let loader = ImageSchemeHandler()
@@ -577,7 +561,7 @@ final class MobileImageSchemeHandler: NSObject, WKURLSchemeHandler {
         set { loader.loadFailed = newValue }
     }
     func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
-        guard let url = task.request.url, MobileWebResources.authorizes(url, token: generation) else {
+        guard let url = task.request.url, ImageResourceNamespace.authorizes(url, token: generation) else {
             // A canceled page must never read an identically named image from
             // the next document, nor report that old failure in the new reader.
             task.didFailWithError(URLError(.cancelled))
@@ -639,7 +623,7 @@ private enum MobileWebScripts {
     }
 }
 
-private extension ContentSizeCategory {
+extension ContentSizeCategory {
     var uiCategory: UIContentSizeCategory {
         switch self {
         case .extraSmall: .extraSmall

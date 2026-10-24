@@ -787,6 +787,128 @@ import XCTest
         f.reader.finishDiscussionShare(current.id)
     }
 
+
+    func testNativeHistoryRendersFormattedBodiesAndLocalImagesWithReadOnlyTasks() async throws {
+        let f = try await fixture(withThread: true)
+        let image = f.file.deletingPathExtension().appendingPathExtension("png")
+        try historyPixel.write(to: image); defer { try? FileManager.default.removeItem(at: image) }
+        let body = "**Formatted history.**\n\n| Item | State |\n| --- | --- |\n| Reader | Ready |\n\n- [ ] Comment task\n\n![History](\(image.lastPathComponent))\n\n![Remote](https://127.0.0.1:9/history.png)"
+        let bytes = try appendHistoryReply(body, id: "m-rich", file: f.file, threadID: "t-mobile")
+        await f.reader.refresh(); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
+        let mounted = await poll { self.history(in: f.host.view, excluding: f.web) != nil }
+        XCTAssertTrue(mounted, "Saved discussion bodies must use a native rendered history, separate from the composer")
+        guard mounted, let history = history(in: f.host.view, excluding: f.web) else { return }
+        let ready = await pollAsync {
+            try await history.evaluateJavaScript("document.querySelector('article[data-message-id=m-rich] strong')?.textContent==='Formatted history.' && document.querySelector('img[alt=History]')?.naturalWidth===1") as? Bool == true
+        }; XCTAssertTrue(ready)
+        let duplicateQuoteCount = try await history.evaluateJavaScript("document.querySelectorAll('main > blockquote').length") as? Int
+        XCTAssertEqual(duplicateQuoteCount, 0, "The surrounding native thread already displays its quoted context")
+        let historyValue0 = try await history.evaluateJavaScript("document.querySelector('td')?.textContent") as? String
+        XCTAssertEqual(historyValue0, "Reader")
+        let historyValue1 = try await history.evaluateJavaScript("document.querySelector('input').disabled") as? Bool
+        XCTAssertEqual(historyValue1, true)
+        let historyValue2 = try await history.evaluateJavaScript("document.querySelector('img[alt=Remote]').getAttribute('src')") as? String
+        XCTAssertEqual(historyValue2, nil)
+        let historyValue3 = try await history.evaluateJavaScript("document.querySelectorAll('article header time').length") as? Int
+        XCTAssertEqual(historyValue3, 2)
+        let historyValue4 = try await history.evaluateJavaScript("document.querySelector('article[data-message-id=m-rich] header a')?.textContent") as? String
+        XCTAssertEqual(historyValue4, "Reviewer")
+        f.reader.loadRemoteImages = true
+        let optedIn = await pollAsync {
+            try await history.evaluateJavaScript("document.querySelector('img[alt=Remote]')?.getAttribute('src')==='https://127.0.0.1:9/history.png'") as? Bool == true
+        }; XCTAssertTrue(optedIn, "The history must follow this document's remote-image choice")
+        XCTAssertEqual(try Data(contentsOf: f.file), bytes)
+        XCTAssertFalse(f.reader.fileSaving)
+    }
+
+    func testNativeHistoryRefreshKeepsItsPageReadingPositionAndFocusedDraft() async throws {
+        let f = try await fixture(withThread: true)
+        let paragraphs = (0..<45).map { "History paragraph \($0) stays readable." }.joined(separator: "\n\n")
+        _ = try appendHistoryReply(paragraphs, id: "m-long", file: f.file, threadID: "t-mobile")
+        await f.reader.refresh(); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this focused reply.", for: .thread("t-mobile"))
+        let mounted = await poll { self.history(in: f.host.view, excluding: f.web) != nil && self.editor(in: f.host.view)?.text == "Keep this focused reply." }
+        XCTAssertTrue(mounted, "The rendered history and native reply editor must coexist")
+        guard mounted, let history = history(in: f.host.view, excluding: f.web), let editor = editor(in: f.host.view) else { return }
+        let ready = await pollAsync {
+            guard !history.isLoading else { return false }
+            return try await history.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.documentElement.scrollHeight>innerHeight && document.body.style.fontSize!==''") as? Bool == true
+        }
+        XCTAssertTrue(ready)
+        XCTAssertTrue(editor.becomeFirstResponder())
+        _ = try await history.callAsyncJavaScript("""
+        await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+        window.scrollTo(0,160);
+        await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        let scrolled = await pollAsync { try await history.evaluateJavaScript("scrollY>=159 && scrollY<=161") as? Bool == true }
+        XCTAssertTrue(scrolled, "Establish an actual scrolled history with its native editor focused before refreshing")
+        guard scrolled else { return }
+        _ = try await history.evaluateJavaScript("window.historyPage=document;true")
+        let before = try await history.evaluateJavaScript("scrollY") as? Double ?? 0
+        XCTAssertGreaterThan(before, 0)
+        let bytes = try appendHistoryReply("A newly saved reply.", id: "m-new", file: f.file, threadID: "t-mobile")
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        let updated = await pollAsync { try await history.evaluateJavaScript("document.querySelectorAll('article').length===3") as? Bool == true }
+        XCTAssertTrue(updated)
+        XCTAssertTrue(self.history(in: f.host.view, excluding: f.web) === history)
+        let historyValue5 = try await history.evaluateJavaScript("window.historyPage===document") as? Bool
+        XCTAssertEqual(historyValue5, true)
+        let historyValue6 = try await history.evaluateJavaScript("scrollY") as? Double ?? 0
+        XCTAssertEqual(historyValue6, before, accuracy: 1)
+        XCTAssertTrue(self.editor(in: f.host.view) === editor)
+        XCTAssertTrue(editor.isFirstResponder)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this focused reply.")
+        XCTAssertEqual(try Data(contentsOf: f.file), bytes)
+        editor.resignFirstResponder()
+    }
+
+    func testOldHistoryImageRequestCannotReadOrReportIntoTheNextDocument() async throws {
+        let f = try await fixture(withThread: true)
+        let image = f.file.deletingPathExtension().appendingPathExtension("png")
+        try historyPixel.write(to: image); defer { try? FileManager.default.removeItem(at: image) }
+        let bytes = try appendHistoryReply("![History](\(image.lastPathComponent))", id: "m-image", file: f.file, threadID: "t-mobile")
+        await f.reader.refresh(); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
+        let mounted = await poll { self.history(in: f.host.view, excluding: f.web) != nil }
+        XCTAssertTrue(mounted, "The current conversation must own a native history image context")
+        guard mounted, let old = history(in: f.host.view, excluding: f.web) else { return }
+        let ready = await pollAsync { try await old.evaluateJavaScript("document.querySelector('img[alt=History]')?.naturalWidth===1") as? Bool == true }; XCTAssertTrue(ready)
+        let oldAddress = try await old.evaluateJavaScript("document.querySelector('img[alt=History]').src") as? String
+        let address = try XCTUnwrap(oldAddress)
+        let handler = try XCTUnwrap(old.configuration.urlSchemeHandler(forURLScheme: "margined-resource"))
+        let folder = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let next = folder.appendingPathComponent("Identical.md")
+        try bytes.write(to: next); try historyPixel.write(to: folder.appendingPathComponent(image.lastPathComponent))
+        await f.reader.open(url: next); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
+        let replaced = await poll { self.history(in: f.host.view, excluding: f.web).map { $0 !== old } == true }; XCTAssertTrue(replaced)
+        let request = MobileHistoryImageRequest(URLRequest(url: try XCTUnwrap(URL(string: address))))
+        handler.webView(old, start: request)
+        let finished = await poll { request.failure != nil || !request.data.isEmpty }; XCTAssertTrue(finished)
+        XCTAssertEqual((request.failure as? URLError)?.code, .cancelled)
+        XCTAssertTrue(request.data.isEmpty)
+        XCTAssertNil(f.reader.localImageError)
+        XCTAssertEqual(try Data(contentsOf: next), bytes)
+        XCTAssertEqual(try Data(contentsOf: f.file), bytes)
+    }
+
+    private var historyPixel: Data { Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5iQAAAAASUVORK5CYII=")! }
+    private func appendHistoryReply(_ body: String, id: String, file: URL, threadID: String) throws -> Data {
+        let data = try Data(contentsOf: file), source = try MarkdownSource.decode(data)
+        let message = DiscussionMessage(id: id, author: "Guest", created: "2026-10-24T10:00:00Z", body: body,
+                                        inReplyTo: threadID == "t-mobile" ? "m-mobile" : "m-t1")
+        let bytes = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for:
+            .reply(threadID: threadID, message: message, reopenResolved: false), in: DiscussionCodec.parse(source)),
+            to: data, expectedSource: source)
+        try bytes.write(to: file, options: .atomic); return bytes
+    }
+    private func history(in view: UIView, excluding document: WKWebView) -> WKWebView? {
+        if let web = view as? WKWebView { return web !== document ? web : nil }
+        return view.subviews.lazy.compactMap { self.history(in: $0, excluding: document) }.first
+    }
+
     private func activityController(in controller: UIViewController) -> UIActivityViewController? {
         if let activity = controller as? UIActivityViewController { return activity }
         if let presented = controller.presentedViewController, let activity = activityController(in: presented) { return activity }
@@ -882,4 +1004,15 @@ import XCTest
         if let text = view as? UITextView, text.isEditable { return text }
         return view.subviews.lazy.compactMap { self.editor(in: $0) }.first
     }
+}
+
+private final class MobileHistoryImageRequest: NSObject, WKURLSchemeTask {
+    let request: URLRequest
+    var data = Data()
+    var failure: (any Error)?
+    init(_ request: URLRequest) { self.request = request }
+    func didReceive(_ response: URLResponse) {}
+    func didReceive(_ data: Data) { self.data.append(data) }
+    func didFinish() {}
+    func didFailWithError(_ error: any Error) { failure = error }
 }

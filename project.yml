@@ -39,6 +39,7 @@ targets:
     type: application
     platform: macOS
     sources:
+      - path: UI
       - path: App
         excludes: [Resources]
       - path: App/Resources
@@ -154,6 +155,7 @@ targets:
     type: application
     platform: iOS
     sources:
+      - path: UI
       - path: iOS
         excludes: [Resources]
       - path: iOS/Resources

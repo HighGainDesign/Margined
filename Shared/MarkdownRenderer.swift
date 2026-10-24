@@ -96,7 +96,7 @@ actor MarkdownRenderer {
     func renderDiscussion(_ thread: DiscussionThread, loadRemoteImages: Bool = false,
                           appearance: DocumentAppearance = .system, documentLanguage: String? = nil,
                           prepareSpeech: Bool = false, locale: Locale = .current,
-                          timeZone: TimeZone = .current) async throws -> RenderedMarkdown {
+                          timeZone: TimeZone = .current, includeContext: Bool = true) async throws -> RenderedMarkdown {
         try Task.checkCancellation()
         try loadStylesheet()
         var remaining = MarkdownSource.maximumBytes
@@ -108,7 +108,7 @@ actor MarkdownRenderer {
             remaining -= count
             bodies.append(try parse(message.body, loadRemoteImages: loadRemoteImages))
         }
-        let document = try DiscussionRendering.document(thread, bodies: bodies, locale: locale, timeZone: timeZone)
+        let document = try DiscussionRendering.document(thread, bodies: bodies, locale: locale, timeZone: timeZone, includeContext: includeContext)
         let semanticSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
         let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
         let speech = prepareSpeech

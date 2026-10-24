@@ -184,6 +184,20 @@ final class DiscussionRenderingTests: XCTestCase {
         XCTAssertTrue(rendered.tasks.isEmpty)
     }
 
+    func testNativeHistoryCanOmitContextWhileFullTranscriptsKeepIt() async throws {
+        let thread = conversation("**A saved message.**")
+        let history = try await MarkdownRenderer.shared.renderDiscussion(thread, includeContext: false)
+        let document = try SwiftSoup.parse(history.html)
+        let quoteCount = try document.select("main > blockquote").size()
+        XCTAssertEqual(quoteCount, 0, "The native thread already displays its quote and state outside the history")
+        guard quoteCount == 0 else { return }
+        XCTAssertEqual(try document.select("main > h1").size(), 0)
+        XCTAssertEqual(try document.select("article header h3").text(), "Alex")
+        XCTAssertEqual(try document.select("article strong").text(), "A saved message.")
+        let full = try await MarkdownRenderer.shared.renderDiscussion(thread)
+        XCTAssertEqual(try SwiftSoup.parse(full.html).select("main > blockquote").text(), "Review this sentence.")
+    }
+
     private func conversation(_ body: String, second: String? = nil, firstAuthor: String = "Alex") -> DiscussionThread {
         var messages = [DiscussionMessage(id: "m-first", author: firstAuthor, created: "2026-10-23T10:00:00Z", body: body, inReplyTo: nil)]
         if let second {

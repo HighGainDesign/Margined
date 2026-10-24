@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct DiscussionThreadCard: View {
@@ -53,16 +54,7 @@ struct DiscussionThreadCard: View {
                 Button("Reattach to Selection…", systemImage: "link") { reader.requestReattachDiscussion(thread.id) }
                     .disabled(reader.fileSaving || reader.isRendering)
                     .help("Select replacement text in the document, then compare the old and new passages before attaching.")
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        ForEach(thread.messages, id: \.id) { message in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(message.author).fontWeight(.semibold)
-                                Text(verbatim: message.body).textSelection(.enabled)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }.frame(maxHeight: 240)
+                history
                 if thread.state == .resolved { Label("Resolved", systemImage: "checkmark.circle").font(.caption) }
                 DiscussionComposer(reader: reader, key: .thread(thread.id), isReply: true)
             }
@@ -71,5 +63,21 @@ struct DiscussionThreadCard: View {
         .overlay(alignment: .leading) {
             if selected { RoundedRectangle(cornerRadius: 2).fill(.tint).frame(width: 3).padding(.vertical, 10) }
         }
+    }
+    private var history: some View {
+        let context = reader.currentDiscussionVersion.context
+        return DiscussionHistoryView(documentID: context, thread: thread, fileURL: reader.fileURL,
+            appearance: reader.documentAppearance, loadRemoteImages: reader.loadRemoteImages,
+            zoom: reader.zoom, imageGeneration: reader.imageReloadGeneration,
+            documentLanguage: reader.documentLanguageOverride,
+            isCurrent: { reader.currentDiscussionVersion.context == context && reader.showDiscussions &&
+                reader.discussions.selection == .thread(thread.id) &&
+                reader.rendered?.discussions?.threads.contains(where: { $0.id == thread.id }) == true },
+            imageFailed: { reader.localImageError = $0 },
+            openFile: { url in
+                NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+                    if let error { NSApp.presentError(error) }
+                }
+            })
     }
 }

@@ -61,7 +61,7 @@ struct MobileDiscussionThread: View {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     if let thread { MobileDiscussionControls(reader: reader, thread: thread) }
                     MobileDiscussionDecisionView(reader: reader, key: key)
-                    if let thread { MobileDiscussionMessages(thread: thread) }
+                    if let thread { MobileDiscussionMessages(reader: reader, thread: thread) }
                     if let error = reader.discussionError {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.red).textSelection(.enabled)
@@ -96,14 +96,24 @@ struct MobileDiscussionSummary: View {
 }
 
 private struct MobileDiscussionMessages: View {
+    let reader: MobileReaderState
     let thread: DiscussionThread
     var body: some View {
-        ForEach(thread.messages, id: \.id) { message in
-            VStack(alignment: .leading, spacing: 8) {
-                Text(verbatim: message.author).font(.headline)
-                Text(verbatim: message.body).textSelection(.enabled)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }
+        let context = reader.documentGeneration
+        DiscussionHistoryView(documentID: context, thread: thread, fileURL: reader.fileURL,
+            appearance: reader.appearance, loadRemoteImages: reader.loadRemoteImages,
+            zoom: reader.zoom, imageGeneration: reader.imageReloadGeneration, documentLanguage: nil,
+            isCurrent: { reader.documentGeneration == context && reader.inspector == .discussions &&
+                reader.discussions.selection == .thread(thread.id) && reader.discussionRoute == .thread(thread.id) &&
+                reader.rendered?.discussions?.threads.contains(where: { $0.id == thread.id }) == true },
+            imageFailed: { reader.localImageError = $0 },
+            openFile: { url in
+                guard ["md", "markdown", "mdown", "mkd", "mkdn"].contains(url.pathExtension.lowercased()) else { return }
+                Task {
+                    guard reader.documentGeneration == context else { return }
+                    await reader.open(url: url)
+                }
+            })
     }
 }
 
@@ -199,7 +209,7 @@ struct MobileDiscussionMargin: View {
                                     if reader.discussions.selection == .thread(thread.id) {
                                         MobileDiscussionControls(reader: reader, thread: thread)
                                         MobileDiscussionDecisionView(reader: reader, key: .thread(thread.id))
-                                        ScrollView { VStack(alignment: .leading, spacing: 18) { MobileDiscussionMessages(thread: thread) } }.frame(maxHeight: 240)
+                                        MobileDiscussionMessages(reader: reader, thread: thread)
                                         MobileDiscussionComposer(reader: reader, key: .thread(thread.id))
                                     }
                                 }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))

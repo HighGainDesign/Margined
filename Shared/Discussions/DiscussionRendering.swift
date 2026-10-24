@@ -5,14 +5,16 @@ import SwiftSoup
 /// Author labels and identifiers are inserted as DOM data, never as markup.
 enum DiscussionRendering {
     static func document(_ thread: DiscussionThread, bodies: [Document],
-                         locale: Locale, timeZone: TimeZone) throws -> Document {
+                         locale: Locale, timeZone: TimeZone, includeContext: Bool = true) throws -> Document {
         let document = try SwiftSoup.parseBodyFragment("")
         document.outputSettings().prettyPrint(pretty: false)
         guard let root = document.body() else { throw ReaderError.rendererUnavailable }
-        try root.appendElement("h1").attr("id", "discussion-title-" + thread.id).text(String(localized: "Discussion"))
-        try root.appendElement("blockquote").appendElement("p").attr("dir", "auto").text(thread.target.exact)
-        try root.appendElement("p").addClass("discussion-state")
-            .text(thread.state == .open ? String(localized: "Open") : String(localized: "Resolved"))
+        if includeContext {
+            try root.appendElement("h1").attr("id", "discussion-title-" + thread.id).text(String(localized: "Discussion"))
+            try root.appendElement("blockquote").appendElement("p").attr("dir", "auto").text(thread.target.exact)
+            try root.appendElement("p").addClass("discussion-state")
+                .text(thread.state == .open ? String(localized: "Open") : String(localized: "Resolved"))
+        }
         let parser = ISO8601DateFormatter()
         let formatter = DateFormatter()
         formatter.locale = locale; formatter.timeZone = timeZone
