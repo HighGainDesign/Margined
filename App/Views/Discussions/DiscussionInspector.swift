@@ -5,7 +5,6 @@ struct DiscussionInspector: View {
     @Bindable var reader: ReaderState
     var aligned = false
     @State private var frames: [String: CGRect] = [:]
-    @State private var bodyTop: CGFloat = 0
 
     private enum Item: Identifiable {
         case thread(DiscussionThread), draft(UUID)
@@ -28,8 +27,6 @@ struct DiscussionInspector: View {
     var body: some View {
         let entries = items
         let indexed = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
-        let positions = DiscussionMarginLayout.cards(ids: entries.map(\.id), anchorTops: anchorTops,
-            heights: frames.mapValues { Double($0.height) }, topInset: aligned ? bodyTop : 0)
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("Discussions", systemImage: "bubble.left.and.bubble.right").font(.headline)
@@ -83,54 +80,58 @@ struct DiscussionInspector: View {
                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 Button("Inspect Source…") { reader.inspectDiscussionSource() }.buttonStyle(.link)
             }
-            ScrollViewReader { scroll in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(positions.enumerated()), id: \.element.id) { index, position in
-                            let previous = index > 0 ? positions[index - 1] : nil
-                            let priorBottom = previous.map { $0.top + Double(frames[$0.id]?.height ?? 100) } ?? 0
-                            Color.clear.frame(height: max(0, position.top - priorBottom)).accessibilityHidden(true)
-                            if let item = indexed[position.id] {
-                                itemView(item).id(item.id)
-                                    .background(GeometryReader { proxy in
-                                        Color.clear.preference(key: DiscussionCardFrames.self, value: [item.id: proxy.frame(in: .named("discussion-margin"))])
-                                    })
-                            }
-                        }
-                        if entries.isEmpty {
-                            Text("Select a passage to start a discussion. Comments and replies stay in this Markdown file.")
-                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        if let diagnostics = reader.rendered?.discussions?.diagnostics, !diagnostics.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Label("Some discussions are unavailable", systemImage: "exclamationmark.bubble")
-                                ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, item in
-                                    Text("Line \(item.line): \(item.message)").font(.caption)
+            // Web anchors use viewport coordinates; subtract the fixed controls in this layout pass.
+            GeometryReader { bodyGeometry in
+                let positions = DiscussionMarginLayout.cards(ids: entries.map(\.id), anchorTops: anchorTops,
+                    heights: frames.mapValues { Double($0.height) },
+                    topInset: aligned ? bodyGeometry.frame(in: .named("discussion-margin")).minY : 0)
+                ScrollViewReader { scroll in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(positions.enumerated()), id: \.element.id) { index, position in
+                                let previous = index > 0 ? positions[index - 1] : nil
+                                let priorBottom = previous.map { $0.top + Double(frames[$0.id]?.height ?? 100) } ?? 0
+                                Color.clear.frame(height: max(0, position.top - priorBottom)).accessibilityHidden(true)
+                                if let item = indexed[position.id] {
+                                    itemView(item).id(item.id)
+                                        .background(GeometryReader { proxy in
+                                            Color.clear.preference(key: DiscussionCardFrames.self, value: [item.id: proxy.frame(in: .named("discussion-margin"))])
+                                        })
                                 }
-                            }.textSelection(.enabled).padding(.top, 14)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .background(GeometryReader { proxy in Color.clear.preference(key: DiscussionBodyTop.self, value: proxy.frame(in: .named("discussion-margin")).minY) })
-                .task(id: reader.discussionComposerFocusGeneration) {
-                    guard reader.discussionComposerFocusGeneration > 0, case let .new(id) = reader.discussions.selection else { return }
-                    scroll.scrollTo("d:" + id.uuidString, anchor: .top)
-                }
-                .task(id: reader.discussionCardFocusGeneration) {
-                    guard reader.discussionCardFocusGeneration > 0,
-                          reader.discussionCardFocusIntent == reader.focusIntentGeneration,
-                          case let .thread(id) = reader.discussions.selection else { return }
-                    let intent = reader.focusIntentGeneration
-                    await Task.yield()
-                    guard !Task.isCancelled, intent == reader.focusIntentGeneration else { return }
-                    scroll.scrollTo("t:" + id, anchor: .top)
+                            }
+                            if entries.isEmpty {
+                                Text("Select a passage to start a discussion. Comments and replies stay in this Markdown file.")
+                                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let diagnostics = reader.rendered?.discussions?.diagnostics, !diagnostics.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label("Some discussions are unavailable", systemImage: "exclamationmark.bubble")
+                                    ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, item in
+                                        Text("Line \(item.line): \(item.message)").font(.caption)
+                                    }
+                                }.textSelection(.enabled).padding(.top, 14)
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .task(id: reader.discussionComposerFocusGeneration) {
+                        guard reader.discussionComposerFocusGeneration > 0, case let .new(id) = reader.discussions.selection else { return }
+                        scroll.scrollTo("d:" + id.uuidString, anchor: .top)
+                    }
+                    .task(id: reader.discussionCardFocusGeneration) {
+                        guard reader.discussionCardFocusGeneration > 0,
+                              reader.discussionCardFocusIntent == reader.focusIntentGeneration,
+                              case let .thread(id) = reader.discussions.selection else { return }
+                        let intent = reader.focusIntentGeneration
+                        await Task.yield()
+                        guard !Task.isCancelled, intent == reader.focusIntentGeneration else { return }
+                        scroll.scrollTo("t:" + id, anchor: .top)
+                    }
                 }
             }
         }
         .font(.callout).padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .coordinateSpace(name: "discussion-margin")
         .onPreferenceChange(DiscussionCardFrames.self) { frames = $0 }
-        .onPreferenceChange(DiscussionBodyTop.self) { bodyTop = $0 }
         .overlay { DiscussionConnectors(reader: reader, frames: frames, aligned: aligned) }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: Text("Add Discussion")) { reader.requestAddDiscussion() }
@@ -162,8 +163,4 @@ struct DiscussionInspector: View {
 private struct DiscussionCardFrames: PreferenceKey {
     static let defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { _, new in new }) }
-}
-private struct DiscussionBodyTop: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
