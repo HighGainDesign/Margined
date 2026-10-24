@@ -197,3 +197,65 @@ private struct MobileDiscussionFrames: PreferenceKey {
     static let defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { _, new in new }) }
 }
+
+/// Frozen semantic units provide a native alternative to selecting text in WebKit.
+struct MobileDiscussionPassagePickerView: View {
+    let reader: MobileReaderState
+    let picker: MobileDiscussionPassagePicker
+    @State private var query = ""
+    @State private var selected: Int?
+    @Environment(\.dismiss) private var dismiss
+    private var stale: Bool { !reader.matchesDiscussionVersion(picker.version) || reader.hasPendingFileUpdate }
+    private var units: [DiscussionTextUnit] {
+        guard !query.isEmpty else { return picker.projection.units }
+        return picker.projection.units.filter {
+            $0.text.localizedCaseInsensitiveContains(query) || ($0.section?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+    var body: some View {
+        List {
+            Section {
+                Text("Choose the text to discuss. Your comment stays unposted until you choose Post.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                ForEach(units, id: \.id) { unit in
+                    Button { selected = unit.id } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let section = unit.section { Text(verbatim: section).font(.caption).foregroundStyle(.secondary) }
+                                Text(verbatim: unit.text).lineLimit(4)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            if selected == unit.id { Image(systemName: "checkmark").accessibilityHidden(true) }
+                        }.foregroundStyle(.primary).padding(.vertical, 4)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(selected == unit.id ? .isSelected : [])
+                    .disabled(stale)
+                }
+                if units.isEmpty { Text("No matching passages").foregroundStyle(.secondary) }
+            }
+            if stale {
+                Label("The document changed. Cancel and choose the passage again.", systemImage: "exclamationmark.triangle")
+            } else if let error = reader.discussionError {
+                Label(error, systemImage: "exclamationmark.triangle")
+            }
+        }
+        .navigationTitle("Choose a Passage").navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: "Find a passage")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { reader.cancelDiscussionPassage(); dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Use Passage") {
+                    if let selected { reader.confirmDiscussionPassage(selected) }
+                    if reader.discussionPassagePicker == nil { dismiss() }
+                }.disabled(selected == nil || stale || reader.isRendering || reader.fileSaving)
+            }
+        }
+        .onChange(of: query) { _, _ in
+            if let selected, !units.contains(where: { $0.id == selected }) { self.selected = nil }
+        }
+    }
+}

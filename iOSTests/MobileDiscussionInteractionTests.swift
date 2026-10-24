@@ -132,6 +132,46 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), replacement, "Refresh and retained draft presentation must not write")
     }
 
+    func testNoSelectionOffersNativePassagesAndStartsAnUnpostedComment() async throws {
+        let f = try await fixture()
+        _ = try await f.web.evaluateJavaScript("getSelection().removeAllRanges();true")
+        f.reader.requestAddDiscussion()
+        let offered = await poll { f.reader.discussionPassagePicker != nil }
+        XCTAssertTrue(offered, "Add without a text selection must offer accessible semantic passages")
+        guard let picker = f.reader.discussionPassagePicker else { return }
+        let presented = await poll { f.host.presentedViewController != nil }
+        XCTAssertTrue(presented, "The passage chooser must be a mounted native sheet")
+        let unit = try XCTUnwrap(picker.projection.units.first { $0.text == "Café bold passage." })
+        XCTAssertNil(f.reader.discussions.selection)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        f.reader.confirmDiscussionPassage(unit.id)
+        XCTAssertNil(f.reader.discussionPassagePicker)
+        let key = try XCTUnwrap(f.reader.discussions.selection)
+        XCTAssertEqual(f.reader.discussions.drafts[key]?.target?.exact, "Café bold passage.")
+        let composer = await poll { self.editor(in: f.host.view) != nil }
+        XCTAssertTrue(composer)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original, "Choosing a passage only starts a draft")
+    }
+
+    func testPassageChooserRefusesConfirmationAfterTheFileChanges() async throws {
+        let f = try await fixture()
+        f.reader.requestAddDiscussion()
+        let offered = await poll { f.reader.discussionPassagePicker != nil }
+        XCTAssertTrue(offered)
+        guard let picker = f.reader.discussionPassagePicker else { return }
+        let unit = try XCTUnwrap(picker.projection.units.first { $0.text == "Café bold passage." })
+        let replacement = Data(try MarkdownSource.decode(f.original).replacingOccurrences(of: "Before.", with: "Before updated externally.").utf8)
+        try replacement.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.reader.confirmDiscussionPassage(unit.id)
+        XCTAssertNil(f.reader.discussions.selection)
+        XCTAssertTrue(f.reader.discussions.drafts.isEmpty)
+        XCTAssertNotNil(f.reader.discussionError)
+        XCTAssertEqual(try Data(contentsOf: f.file), replacement)
+        f.reader.cancelDiscussionPassage()
+        XCTAssertNil(f.reader.discussionPassagePicker)
+    }
+
     private enum FixtureFailure: Error { case documentDidNotLoad }
     private struct Fixture {
         let reader: MobileReaderState

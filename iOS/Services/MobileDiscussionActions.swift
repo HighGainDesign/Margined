@@ -4,6 +4,11 @@ struct MobileDiscussionVersion {
     let context: UUID
     let snapshot: SourceFileEdit.Snapshot?
 }
+struct MobileDiscussionPassagePicker: Identifiable {
+    let id = UUID()
+    let version: MobileDiscussionVersion
+    let projection: DiscussionTextProjection
+}
 enum MobileDiscussionRoute: Hashable { case list, thread(DiscussionSession.DraftKey) }
 
 extension MobileReaderState {
@@ -36,20 +41,40 @@ extension MobileReaderState {
             included.contains($0.id) || discussions.drafts[.thread($0.id)]?.body.isEmpty == false
         }
     }
+    func matchesDiscussionVersion(_ version: MobileDiscussionVersion) -> Bool {
+        version.context == documentGeneration && version.snapshot == currentDiscussionVersion.snapshot
+    }
+    func confirmDiscussionPassage(_ unitID: Int) {
+        guard let picker = discussionPassagePicker else { return }
+        guard matchesDiscussionVersion(picker.version), !hasPendingFileUpdate,
+              picker.projection.sourceID == rendered?.discussionText?.sourceID else {
+            discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+        }
+        guard canEditDiscussions else { return }
+        guard let unit = picker.projection.units.first(where: { $0.id == unitID }),
+              let selection = picker.projection.selection(unit.range, renderID: "passage-picker-" + picker.id.uuidString) else {
+            discussionError = DiscussionSession.Failure.unavailable.localizedDescription; return
+        }
+        discussionSelectionRequest = picker.version
+        discussionPassagePicker = nil
+        acceptNewDiscussionSelection(selection)
+    }
+    func cancelDiscussionPassage() { discussionPassagePicker = nil }
     func requestAddDiscussion() {
-        guard canEditDiscussions, rendered?.discussionText != nil else { return }
+        guard discussionPassagePicker == nil, canEditDiscussions, rendered?.discussionText != nil else { return }
         discussionSelectionRequest = currentDiscussionVersion
         discussionSelectionGeneration += 1
     }
     func acceptNewDiscussionSelection(_ selection: DiscussionSelection?) {
         guard let version = discussionSelectionRequest else { return }
         discussionSelectionRequest = nil
-        guard version.context == documentGeneration, version.snapshot == currentDiscussionVersion.snapshot,
-              canEditDiscussions, let projection = rendered?.discussionText else {
+        guard matchesDiscussionVersion(version), canEditDiscussions, let projection = rendered?.discussionText else {
             discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
         }
         guard let selection else {
-            discussionError = String(localized: "Select a passage in the document to start a discussion."); return
+            discussionError = nil
+            discussionPassagePicker = .init(version: version, projection: projection)
+            return
         }
         do {
             let key = try discussions.beginDraft(selection, in: projection)

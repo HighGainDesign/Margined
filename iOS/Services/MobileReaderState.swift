@@ -13,6 +13,7 @@ final class MobileReaderState {
     enum Inspector: Equatable { case changes, discussions }
     var inspector: Inspector?
     var discussionRoute: DiscussionSession.DraftKey?
+    var discussionPassagePicker: MobileDiscussionPassagePicker?
     var discussionSelectionGeneration = 0
     var discussionSelectionRequest: MobileDiscussionVersion?
     var discussionMargin: DiscussionMarginSnapshot?
@@ -312,6 +313,7 @@ final class MobileReaderState {
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
         discardDiscussionImport()
         inspector = nil; discussionRoute = nil; discussionSelectionRequest = nil; discussionMargin = nil
+        discussionPassagePicker = nil
         discussions.resetDocument(); discussionSaving = false; discussionError = nil; discussionCopyOffered = false
         pendingTransition = nil; showDraftDiscardConfirmation = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil

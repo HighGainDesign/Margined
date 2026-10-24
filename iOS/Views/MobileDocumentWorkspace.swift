@@ -24,6 +24,9 @@ struct MobileDocumentWorkspace: View {
                     }
             }
             .onChange(of: fits, initial: true) { _, value in reader.discussionUsesMargin = value }
+            .sheet(item: $reader.discussionPassagePicker) { picker in
+                NavigationStack { MobileDiscussionPassagePickerView(reader: reader, picker: picker) }
+            }
         }
     }
 }
