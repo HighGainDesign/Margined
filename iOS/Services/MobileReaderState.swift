@@ -10,6 +10,16 @@ final class MobileReaderState {
     let playback: MobilePlaybackOwner
     let access: MobileDocumentAccess
     let discussions = DiscussionSession()
+    enum Inspector: Equatable { case changes, discussions }
+    var inspector: Inspector?
+    var discussionRoute: DiscussionSession.DraftKey?
+    var discussionSelectionGeneration = 0
+    var discussionSelectionRequest: MobileDiscussionVersion?
+    var discussionMargin: DiscussionMarginSnapshot?
+    var discussionUsesMargin = false
+    var currentDiscussionVersion: MobileDiscussionVersion {
+        .init(context: openGeneration, snapshot: snapshot?.sourceSnapshot)
+    }
     private(set) var discussionSaving = false
     var discussionError: String?
     private(set) var discussionCopyOffered = false
@@ -99,7 +109,7 @@ final class MobileReaderState {
             if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
         }
     }
-    private var canEditDiscussions: Bool {
+    var canEditDiscussions: Bool {
         !isOpening && !isRendering && !fileSaving && !showChecklistConfirmation && !hasPendingFileUpdate
     }
     private func offerDiscussionCopy() {
@@ -294,6 +304,7 @@ final class MobileReaderState {
         playback.documentWillChange(ownerID: id)
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
         discardDiscussionImport()
+        inspector = nil; discussionRoute = nil; discussionSelectionRequest = nil; discussionMargin = nil
         discussions.resetDocument(); discussionSaving = false; discussionError = nil; discussionCopyOffered = false
         pendingTransition = nil; showDraftDiscardConfirmation = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil

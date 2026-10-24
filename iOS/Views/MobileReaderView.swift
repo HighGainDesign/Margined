@@ -5,7 +5,13 @@ struct MobileReaderView: View {
     let openFolder: () -> Void
     let closeFile: () -> Void
     @State private var showOutline = false
-    @State private var showChanges = false
+    private var showChanges: Bool {
+        get { reader.inspector == .changes }
+        nonmutating set {
+            if newValue { reader.inspector = .changes }
+            else if reader.inspector == .changes { reader.inspector = nil }
+        }
+    }
     @State private var showFind = false
     @State private var showPlayer = false
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -28,6 +34,10 @@ struct MobileReaderView: View {
                 statusBar
                 if showPlayer || reader.playback.ownerID == reader.id { MobileSpeechPlayer(reader: reader) }
             }
+            if reader.inspector == .discussions, reader.discussionUsesMargin {
+                Divider()
+                MobileDiscussionMargin(reader: reader).frame(width: 340)
+            }
             if showChanges, sizeClass == .regular {
                 Divider()
                 MobileChangesView(reader: reader, close: { showChanges = false }, reveal: { reader.showSelectedChange() })
@@ -42,11 +52,25 @@ struct MobileReaderView: View {
                     .disabled(reader.rendered?.headings.isEmpty != false)
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    if reader.inspector == .discussions { reader.hideDiscussions() }
+                    else { reader.inspector = .discussions }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                        if reader.discussionUsesMargin { Text("Discussions") }
+                        Text("\(reader.rendered?.discussions?.threads.count ?? 0)")
+                    }
+                }.accessibilityLabel("Discussions, \(reader.rendered?.discussions?.threads.count ?? 0)")
+
                 if reader.changes.count > 0 {
                     Button { showChanges.toggle() } label: { Label("Review Changes", systemImage: "text.badge.checkmark").badge(reader.changes.count) }
                         .accessibilityLabel(String(localized: "Review Changes") + ", \(reader.changes.count)")
                 }
                 Menu {
+                    Button("Add Discussion from Selection", systemImage: "plus.bubble") { reader.requestAddDiscussion() }
+                        .disabled(reader.isRendering || reader.fileSaving)
+                    Button("Discussions", systemImage: "bubble.left.and.bubble.right") { reader.inspector = .discussions }
                     Button("Find…", systemImage: "magnifyingglass") { showFind.toggle() }
                     Button("Read Aloud", systemImage: "speaker.wave.2") { showPlayer = true; reader.startSpeech() }
                     if reader.fileURL != nil {

@@ -18,17 +18,15 @@ struct MobileRootView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if reader.hasDocument {
-                    MobileReaderView(reader: reader, openFolder: { pickFolder() },
-                        closeFile: { Task { await reader.close() } })
-                } else { libraryView }
+        Group {
+            if reader.hasDocument {
+                MobileDocumentWorkspace(reader: reader, openFolder: { pickFolder() },
+                    closeFile: { Task { await reader.close() } })
+            } else {
+                NavigationStack { libraryView.navigationTitle("Margined").navigationBarTitleDisplayMode(.inline) }
             }
-            .navigationTitle(reader.hasDocument ? reader.title : "Margined")
-            .navigationBarTitleDisplayMode(.inline)
-            .overlay { if reader.isOpening || imageFolders.isRestoring { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         }
+        .overlay { if reader.isOpening || imageFolders.isRestoring { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         .fileImporter(isPresented: $showPicker,
             allowedContentTypes: pickingFolder ? [.folder] : [UTType(importedAs: "net.daringfireball.markdown"), .plainText],
             allowsMultipleSelection: pickingFolder) { result in

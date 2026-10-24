@@ -21,6 +21,10 @@ struct MobileWebView: UIViewRepresentable {
 
     private struct Inputs: Equatable {
         let readerID: UUID
+        let inspector: MobileReaderState.Inspector?
+        let discussionFilter: DiscussionSession.Filter
+        let discussionSelection: DiscussionSession.DraftKey?
+        let discussionRequest: Int
         let documentGeneration: UUID
         let html: String?
         let source: String
@@ -48,6 +52,10 @@ struct MobileWebView: UIViewRepresentable {
         @MainActor
         init(reader: MobileReaderState) {
             readerID = reader.id
+            inspector = reader.inspector
+            discussionFilter = reader.discussions.filter
+            discussionSelection = reader.discussions.selection
+            discussionRequest = reader.discussionSelectionGeneration
             documentGeneration = reader.documentGeneration
             html = reader.rendered?.html
             source = reader.source
@@ -87,6 +95,7 @@ struct MobileWebView: UIViewRepresentable {
         let configuration = Self.configuration()
         configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "margined-resource")
         configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.contentWorld, name: "taskToggle")
+        configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.allowsLinkPreview = false
@@ -106,6 +115,7 @@ struct MobileWebView: UIViewRepresentable {
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.invalidate()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "taskToggle", contentWorld: Coordinator.contentWorld)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "discussion", contentWorld: Coordinator.discussionWorld)
         webView.navigationDelegate = nil
         webView.stopLoading()
     }
@@ -113,6 +123,10 @@ struct MobileWebView: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         static let contentWorld = WKContentWorld.world(name: "MarginedMobileDocument")
+        static let discussionWorld = WKContentWorld.world(name: "MarginedMobileDiscussions")
+        private var discussionConfiguration: String?
+        private var discussionSelectionGeneration = 0
+        private var discussionDecorationKey: String?
         let reader: MobileReaderState
         let images = MobileImageSchemeHandler()
         weak var webView: WKWebView?
@@ -153,6 +167,7 @@ struct MobileWebView: UIViewRepresentable {
 
         func update(category: UIContentSizeCategory) {
             guard !isInvalidated else { return }
+            defer { configureDiscussions() }
             self.category = category
             if documentGeneration != reader.documentGeneration {
                 documentGeneration = reader.documentGeneration
@@ -266,6 +281,7 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         private func ready() {
+            defer { configureDiscussions() }
             synchronizeTypography()
             configureTasks()
             synchronizeSpeech()
@@ -341,7 +357,73 @@ struct MobileWebView: UIViewRepresentable {
             }
         }
 
+        private func configureDiscussions() {
+            guard contentReady, !reader.isRendering, html == reader.rendered?.html,
+                  let projection = reader.rendered?.discussionText, let webView else { return }
+            let token = String(generation), ids = reader.rendered?.discussions?.threads.map(\.id) ?? []
+            let key = token + ":" + projection.sourceID
+            let selected: String
+            if case let .thread(id) = reader.discussions.selection { selected = id } else { selected = "" }
+            let visible = reader.inspector == .discussions
+            let decorationKey = key + ":" + String(visible) + ":" + selected + ":" + reader.discussions.filter.rawValue
+            let configure = discussionConfiguration != key
+            let decorate = discussionDecorationKey != decorationKey
+            let wantsSelection = discussionSelectionGeneration != reader.discussionSelectionGeneration
+            guard configure || decorate || wantsSelection else { return }
+            discussionConfiguration = key; discussionDecorationKey = decorationKey
+            let selectionGeneration = reader.discussionSelectionGeneration
+            discussionSelectionGeneration = selectionGeneration
+            let anchors: [[String: Any]] = reader.filteredDiscussionThreads.compactMap { thread in
+                let id = thread.id
+                guard let anchor = projection.anchorResults[id], anchor.status == .attached, let range = anchor.range,
+                      let selection = projection.selection(range, renderID: token) else { return nil }
+                return ["id": id, "location": selection.range.location, "length": selection.range.length,
+                    "startUnit": selection.domRange.start.unit, "startOffset": selection.domRange.start.offset,
+                    "endUnit": selection.domRange.end.unit, "endOffset": selection.domRange.end.offset]
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                let context = DiscussionBridge.Context(token: token, sourceID: projection.sourceID, enabled: true, allowedThreadIDs: Set(ids))
+                var arguments: [String: Any] = ["operation": "configure", "token": token,
+                    "sourceID": projection.sourceID, "allowedThreadIDs": ids]
+                if configure {
+                    _ = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments,
+                        in: nil, contentWorld: Self.discussionWorld)
+                }
+                guard contentReady, String(generation) == token, html == reader.rendered?.html,
+                      reader.rendered?.discussionText?.sourceID == projection.sourceID else { return }
+                if decorate, discussionDecorationKey == decorationKey {
+                    arguments.merge(["operation": "decorate", "anchors": anchors, "expectedText": projection.text,
+                        "visible": visible, "selectedID": selected, "markerLabel": String(localized: "Open discussion")], uniquingKeysWith: { _, value in value })
+                    let value = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments,
+                        in: nil, contentWorld: Self.discussionWorld)
+                    if discussionDecorationKey == decorationKey, let value,
+                       let snapshot = DiscussionMarginSnapshot.read(value, context: context) { reader.acceptDiscussionMargin(snapshot) }
+                }
+                if wantsSelection, reader.discussionSelectionGeneration == selectionGeneration {
+                    arguments["operation"] = "selection"
+                    let value = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments,
+                        in: nil, contentWorld: Self.discussionWorld)
+                    guard contentReady, String(generation) == token, html == reader.rendered?.html,
+                          reader.discussionSelectionGeneration == selectionGeneration else { return }
+                    if let value, case let .selection(selection) = DiscussionBridge.request(value, isMainFrame: true,
+                        context: context, projection: projection) { reader.acceptNewDiscussionSelection(selection) }
+                    else { reader.acceptNewDiscussionSelection(nil) }
+                }
+            }
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "discussion" {
+                guard contentReady, !reader.isRendering, html == reader.rendered?.html,
+                      let projection = reader.rendered?.discussionText, message.frameInfo.isMainFrame else { return }
+                let context = DiscussionBridge.Context(token: String(generation), sourceID: projection.sourceID,
+                    enabled: true, allowedThreadIDs: Set(reader.rendered?.discussions?.threads.map(\.id) ?? []))
+                if let value = DiscussionMarginSnapshot.read(message.body, context: context) { reader.acceptDiscussionMargin(value) }
+                else if case let .openThread(id) = DiscussionBridge.request(message.body, isMainFrame: true,
+                    context: context, projection: projection) { reader.openDiscussion(id) }
+                return
+            }
             guard message.name == "taskToggle",
                   let request = MobileTaskBridge.request(message.body, isMainFrame: message.frameInfo.isMainFrame,
                     enabled: tasksEnabled, token: token, tasks: reader.rendered?.tasks ?? []) else { return }
