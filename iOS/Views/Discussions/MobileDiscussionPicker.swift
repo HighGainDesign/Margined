@@ -100,6 +100,8 @@ struct MobileDiscussionSheetPresenter: View {
                 case let .export(export):
                     NavigationStack { MobileDiscussionExportView(reader: reader, export: export) }
                         .interactiveDismissDisabled(reader.fileSaving)
+                case let .share(share):
+                    MobileDiscussionSharingView(reader: reader, share: share)
                 }
             }
             .task { if reader.discussionSheet?.id == sheet.id { presented = true } }

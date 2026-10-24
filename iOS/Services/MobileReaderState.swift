@@ -18,6 +18,7 @@ final class MobileReaderState {
     var discussionImportReview: MobileDiscussionImportReview?
     var discussionExport: MobileDiscussionExport?
     var discussionExportResult: MobileDiscussionExportResult?
+    var discussionShare: MobileDiscussionShare?
     var discussionCopyOpenRequest: UUID?
     private(set) var discussionCopySaving = false
     var discussionPassagePicker: MobileDiscussionPassagePicker?
@@ -327,6 +328,7 @@ final class MobileReaderState {
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
         discardDiscussionImport()
         if let export = discussionExport { cancelDiscussionExport(export.id) }
+        if let share = discussionShare { finishDiscussionShare(share.id) }
         inspector = nil; discussionRoute = nil; discussionSelectionRequest = nil; discussionMargin = nil
         discussionPassagePicker = nil; discussionDecision = nil
         discussionCopyRequest = nil

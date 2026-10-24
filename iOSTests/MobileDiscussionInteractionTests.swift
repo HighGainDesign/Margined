@@ -665,6 +665,96 @@ import XCTest
         XCTAssertNil(f.reader.discussionExportResult)
     }
 
+    func testNativeMarkdownShareProvidesTheFrozenEncodedFileWithoutDrafts() async throws {
+        let f = try await fixture(withThread: true)
+        let encoded = Data([0xff, 0xfe]) + (try MarkdownSource.decode(f.original)).data(using: .utf16LittleEndian)!
+        try encoded.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.reader.discussions.setDraft("Private unposted reply.", for: .thread("t-mobile"))
+        f.reader.requestMarkdownShare(); await f.reader.waitForSaving()
+        XCTAssertNotNil(f.reader.discussionShare, "Share must stage a Markdown file without asking for an export folder")
+        guard let share = f.reader.discussionShare else { return }
+        let presented = await poll { self.activityController(in: f.host) != nil }; XCTAssertTrue(presented)
+        let activity = try XCTUnwrap(activityController(in: f.host))
+        // The inherited responder configuration is independent of the input to
+        // UIActivityViewController's initializer, including on plain UIKit controls.
+        let provider = try XCTUnwrap(share.configuration.itemProvidersForActivityItemsConfiguration.first)
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier("net.daringfireball.markdown"))
+        let newer = Data("# A newer original\n\nKeep this agent update.\n".utf8)
+        try newer.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        let bytes = try await sharedData(from: provider)
+        XCTAssertEqual(bytes, encoded, "The real native activity provider must keep the version chosen for sharing")
+        XCTAssertTrue(try MarkdownSource.decode(bytes).contains("A portable note."))
+        XCTAssertFalse(try MarkdownSource.decode(bytes).contains("Private unposted reply."))
+        XCTAssertEqual(try Data(contentsOf: f.file), newer)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Private unposted reply.")
+        activity.completionWithItemsHandler?(nil, false, nil, nil)
+        let finished = await poll { f.reader.discussionShare == nil }; XCTAssertTrue(finished)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: share.url.path), "An activity provider still holding the file must keep it readable")
+    }
+
+    func testSharedTemporaryFileLivesUntilTheLastProviderReleasesIt() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let data = Data("# Share safely\n\nThe original stays unchanged.\n".utf8); try data.write(to: file)
+        let reader = MobileReaderState(defaults: UserDefaults(suiteName: "MobileShare-\(UUID().uuidString)")!)
+        addTeardownBlock { @MainActor in await reader.close(); try? FileManager.default.removeItem(at: file) }
+        await reader.open(url: file); await reader.waitForRendering()
+        reader.requestMarkdownShare(); await reader.waitForSaving()
+        XCTAssertNotNil(reader.discussionShare)
+        var share: MobileDiscussionShare? = reader.discussionShare
+        guard share != nil else { return }
+        let url = try XCTUnwrap(share?.url), id = try XCTUnwrap(share?.id)
+        var provider = share?.configuration.itemProvidersForActivityItemsConfiguration.first
+        reader.finishDiscussionShare(id); share = nil
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        let bytes = try await sharedData(from: XCTUnwrap(provider)); XCTAssertEqual(bytes, data)
+        provider = nil
+        let cleaned = await poll { !FileManager.default.fileExists(atPath: url.path) }; XCTAssertTrue(cleaned)
+        XCTAssertEqual(try Data(contentsOf: file), data)
+    }
+
+    func testOldActivityCompletionCannotDismissTheNextDocumentsShare() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.requestMarkdownShare(); await f.reader.waitForSaving()
+        XCTAssertNotNil(f.reader.discussionShare)
+        guard let first = f.reader.discussionShare else { return }
+        let mounted = await poll { self.activityController(in: f.host) != nil }; XCTAssertTrue(mounted)
+        let activity = try XCTUnwrap(activityController(in: f.host))
+        let completion = try XCTUnwrap(activity.completionWithItemsHandler)
+        let second = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        try f.original.write(to: second); defer { try? FileManager.default.removeItem(at: second) }
+        await f.reader.open(url: second); await f.reader.waitForRendering()
+        let dismissed = await poll { f.host.presentedViewController == nil }; XCTAssertTrue(dismissed)
+        f.reader.requestMarkdownShare(); await f.reader.waitForSaving()
+        let current = try XCTUnwrap(f.reader.discussionShare)
+        completion(nil, false, nil, nil)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        f.reader.finishDiscussionShare(first.id)
+        let stillCurrent = await poll { f.reader.discussionShare?.id == current.id }; XCTAssertTrue(stillCurrent)
+        XCTAssertEqual(f.reader.discussionShare?.id, current.id)
+        XCTAssertEqual(try Data(contentsOf: current.url), f.original)
+        XCTAssertEqual(try Data(contentsOf: second), f.original)
+        f.reader.finishDiscussionShare(current.id)
+    }
+
+    private func activityController(in controller: UIViewController) -> UIActivityViewController? {
+        if let activity = controller as? UIActivityViewController { return activity }
+        if let presented = controller.presentedViewController, let activity = activityController(in: presented) { return activity }
+        return controller.children.lazy.compactMap { self.activityController(in: $0) }.first
+    }
+    private func sharedData(from provider: NSItemProvider) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadFileRepresentation(forTypeIdentifier: "net.daringfireball.markdown") { url, error in
+                do {
+                    if let error { throw error }
+                    guard let url else { throw CocoaError(.fileReadNoSuchFile) }
+                    continuation.resume(returning: try Data(contentsOf: url))
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
     private func incomingCopy(_ data: Data, conflict: Bool) throws -> Data {
         let source = try MarkdownSource.decode(data).replacingOccurrences(of: "# Plan\n", with: "# Other copy prose\n")
         if conflict { return Data(source.replacingOccurrences(of: "A portable note.", with: "Incoming conflicting comment.").utf8) }

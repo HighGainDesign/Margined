@@ -44,24 +44,25 @@ extension MobileReaderState {
         guard canEditDiscussions, !discussionImportLoading, discussionSheet == nil,
               discussionCopyRequest == nil else { return }
         discussionError = nil
-        do {
-            guard let document = rendered?.discussions, document.source.utf8.elementsEqual(source.utf8) else {
-                throw DiscussionSession.Failure.unavailable
-            }
-            let data: Data
-            if let snapshot = currentDiscussionVersion.snapshot, try snapshot.source.utf8.elementsEqual(source.utf8) {
-                data = snapshot.data
-            } else { data = Data(source.utf8) }
-            let output: Data, removed: Int
-            switch kind {
-            case .savedCopy, .markdown: output = data; removed = 0
-            case .clean:
-                let clean = try DiscussionExports.cleanCopy(data); output = clean.data; removed = clean.removedBlocks
-            case .conversation: output = Data(DiscussionExports.conversation(document).utf8); removed = 0
-            }
-            discussionExport = .init(kind: kind, version: currentDiscussionVersion,
-                source: source, data: output, removedBlocks: removed)
-        } catch { discussionError = error.localizedDescription }
+        do { discussionExport = try prepareDiscussionExport(kind) }
+        catch { discussionError = error.localizedDescription }
+    }
+    func prepareDiscussionExport(_ kind: MobileDiscussionExport.Kind) throws -> MobileDiscussionExport {
+        guard let document = rendered?.discussions, document.source.utf8.elementsEqual(source.utf8) else {
+            throw DiscussionSession.Failure.unavailable
+        }
+        let data: Data
+        if let snapshot = currentDiscussionVersion.snapshot, try snapshot.source.utf8.elementsEqual(source.utf8) {
+            data = snapshot.data
+        } else { data = Data(source.utf8) }
+        let output: Data, removed: Int
+        switch kind {
+        case .savedCopy, .markdown: output = data; removed = 0
+        case .clean:
+            let clean = try DiscussionExports.cleanCopy(data); output = clean.data; removed = clean.removedBlocks
+        case .conversation: output = Data(DiscussionExports.conversation(document).utf8); removed = 0
+        }
+        return .init(kind: kind, version: currentDiscussionVersion, source: source, data: output, removedBlocks: removed)
     }
     func createDiscussionExport(_ exportID: UUID, at destination: URL, folder: URL? = nil) {
         guard let export = discussionExport, export.id == exportID, discussionExportResult == nil, canEditDiscussions else { return }

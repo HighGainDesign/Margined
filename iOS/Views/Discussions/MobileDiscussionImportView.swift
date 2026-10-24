@@ -139,7 +139,7 @@ struct MobileDiscussionFileActions: View {
     var body: some View {
         Group {
             Button("Save Markdown Copy…", systemImage: "doc.badge.plus") { reader.requestDiscussionExport(.savedCopy) }
-            Button("Save Markdown with Discussions…", systemImage: "doc.text") { reader.requestDiscussionExport(.markdown) }
+            Button("Share Markdown with Discussions…", systemImage: "square.and.arrow.up") { reader.requestMarkdownShare() }
             Button("Export Clean Copy…", systemImage: "doc") { reader.requestDiscussionExport(.clean) }
             Button("Export Conversations…", systemImage: "bubble.left.and.bubble.right") { reader.requestDiscussionExport(.conversation) }
             Button("Review Another Copy…", systemImage: "doc.on.doc") { reader.requestReviewAnotherCopy() }
