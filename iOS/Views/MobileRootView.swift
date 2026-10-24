@@ -7,7 +7,9 @@ struct MobileRootView: View {
     let imageFolders: MobileImageFolders
     @State private var showPicker = false
     @State private var pickingFolder = false
-    @State private var showSettings = false
+    private enum Sheet: String, Identifiable { case settings, guide; var id: String { rawValue } }
+    @State private var activeSheet: Sheet?
+    @AppStorage("mobileSetupGuideSeen", store: ReaderPreferences.defaults) private var setupGuideSeen = false
     @Environment(\.scenePhase) private var scenePhase
 
     init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders) {
@@ -53,8 +55,21 @@ struct MobileRootView: View {
         } message: {
             Text("Keep this document open to finish your comments and replies, or discard the unposted text.")
         }
-        .sheet(isPresented: $showSettings) { MobileSettingsView(reader: reader, imageFolders: imageFolders) }
-        .task { await imageFolders.restore() }
+        .sheet(item: $activeSheet) { destination in
+            switch destination {
+            case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders)
+            case .guide:
+                NavigationStack { MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }) }
+            }
+        }
+        .onChange(of: activeSheet) { previous, current in
+            // The guide's nested Files picker does not change this destination.
+            if previous == .guide && current == nil { setupGuideSeen = true }
+        }
+        .task {
+            await imageFolders.restore()
+            if !setupGuideSeen && activeSheet == nil { activeSheet = .guide }
+        }
         .onOpenURL { url in
             let scope = url.isFileURL && url.startAccessingSecurityScopedResource()
             Task {
@@ -101,7 +116,7 @@ struct MobileRootView: View {
             }
             if let error = reader.errorMessage { Section { Text(error).foregroundStyle(.red).accessibilityLabel(error) } }
         }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Settings", systemImage: "gearshape") { showSettings = true } } }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Settings", systemImage: "gearshape") { activeSheet = .settings } } }
     }
 
     private func pickFile() { pickingFolder = false; showPicker = true }

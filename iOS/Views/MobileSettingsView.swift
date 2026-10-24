@@ -54,6 +54,11 @@ struct MobileSettingsView: View {
                     Toggle("Speak Link Destinations", isOn: Binding(get: { reader.playback.preferences.options.includeLinkDestinations }, set: { reader.playback.preferences.options.includeLinkDestinations = $0; reader.speechOptionsChanged() }))
                     Button("Clear Reading History", role: .destructive) { reader.playback.clearHistory() }
                 }
+                Section {
+                    NavigationLink {
+                        MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() })
+                    } label: { Label("Getting Started", systemImage: "questionmark.circle") }
+                }
                 Section { Text("Margined 2.0 · iOS development build").foregroundStyle(.secondary) }
             }
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)

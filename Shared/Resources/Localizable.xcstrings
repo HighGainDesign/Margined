@@ -14490,6 +14490,570 @@
           }
         }
       }
+    },
+    "Welcome to Margined": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Welcome to Margined"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Te damos la bienvenida a Margined"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "欢迎使用 Margined"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歡迎使用 Margined"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marginedへようこそ"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bienvenue dans Margined"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Willkommen bei Margined"
+          }
+        }
+      }
+    },
+    "Getting Started": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting Started"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Primeros pasos"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用入门"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用入門"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使い方"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Premiers pas"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erste Schritte"
+          }
+        }
+      }
+    },
+    "Open Markdown from Files to read, listen, and follow changes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Markdown from Files to read, listen, and follow changes."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre documentos Markdown desde Archivos para leerlos, escucharlos y seguir sus cambios."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从“文件”打开 Markdown，阅读、收听并跟踪更改。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從「檔案」開啟 Markdown，閱讀、聆聽並追蹤變更。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「ファイル」からMarkdownを開いて、読んだり、読み上げを聞いたり、変更を確認したりできます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrez des documents Markdown depuis Fichiers pour les lire, les écouter et suivre leurs modifications."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffne Markdown aus „Dateien“, um Dokumente zu lesen, anzuhören und Änderungen zu verfolgen."
+          }
+        }
+      }
+    },
+    "Images from your folders": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Images from your folders"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imágenes de tus carpetas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件夹中的图片"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檔案夾中的圖片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダ内の画像"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Images de vos dossiers"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilder aus deinen Ordnern"
+          }
+        }
+      }
+    },
+    "Opening a file doesn’t grant access to nearby images. Choose a folder that contains your document and its images; subfolders are included.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening a file doesn’t grant access to nearby images. Choose a folder that contains your document and its images; subfolders are included."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir un archivo no da acceso a las imágenes cercanas. Selecciona una carpeta que contenga el documento y sus imágenes; se incluyen las subcarpetas."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开文件并不代表允许访问附近的图片。请选择一个包含文档及其图片的文件夹；其子文件夹也包含在内。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟檔案並不代表允許存取附近的圖片。請選擇包含文件及其圖片的檔案夾；其子檔案夾也包含在內。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイルを開くだけでは、周辺の画像へのアクセスは許可されません。文書と画像が入ったフォルダを選んでください。サブフォルダも含まれます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir un fichier ne donne pas accès aux images voisines. Choisissez un dossier contenant le document et ses images ; les sous-dossiers sont inclus."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Öffnen einer Datei erlaubt keinen Zugriff auf benachbarte Bilder. Wähle einen Ordner mit dem Dokument und seinen Bildern; Unterordner sind eingeschlossen."
+          }
+        }
+      }
+    },
+    "You can select all of Dropbox when Files allows it, or remember several smaller folders. Manage or forget them in Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can select all of Dropbox when Files allows it, or remember several smaller folders. Manage or forget them in Settings."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Si Archivos lo permite, puedes seleccionar todo Dropbox o recordar varias carpetas más pequeñas. Adminístralas o elimina su acceso en Ajustes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如果“文件”允许，你可以选择整个 Dropbox，也可以记住多个较小的文件夹。在“设置”中管理或移除它们。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如果「檔案」允許，你可以選擇整個 Dropbox，也可以記住多個較小的檔案夾。在「設定」中管理或移除它們。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「ファイル」で選択できる場合はDropbox全体を選べます。複数の小さなフォルダを記憶させることもできます。「設定」で管理や登録解除ができます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Si Fichiers le permet, vous pouvez sélectionner tout Dropbox ou mémoriser plusieurs dossiers plus petits. Gérez-les ou retirez-les dans Réglages."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn „Dateien“ es erlaubt, kannst du ganz Dropbox auswählen oder mehrere kleinere Ordner merken lassen. Verwalte oder entferne sie in den Einstellungen."
+          }
+        }
+      }
+    },
+    "Choose Image Folders…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Image Folders…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seleccionar carpetas de imágenes…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择图片文件夹…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇圖片檔案夾…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画像フォルダを選択…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir des dossiers d’images…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bildordner auswählen …"
+          }
+        }
+      }
+    },
+    "Image folder: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image folder: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carpeta de imágenes: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图片文件夹：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "圖片檔案夾：%@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画像フォルダ：%@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dossier d’images : %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bildordner: %@"
+          }
+        }
+      }
+    },
+    "Quick Look in Files": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick Look in Files"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vista rápida en Archivos"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“文件”中的快速查看"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「檔案」中的快速查看"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「ファイル」のクイックルック"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coup d’œil dans Fichiers"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersicht in „Dateien“"
+          }
+        }
+      }
+    },
+    "On iOS 27, Files currently shows Markdown as plain text instead of using Margined’s Quick Look extension. This also affects some earlier iOS releases.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On iOS 27, Files currently shows Markdown as plain text instead of using Margined’s Quick Look extension. This also affects some earlier iOS releases."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En iOS 27, Archivos muestra actualmente Markdown como texto sin formato en lugar de usar la extensión Vista rápida de Margined. También ocurre en algunas versiones anteriores de iOS."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 iOS 27 上，“文件”目前将 Markdown 显示为纯文本，而不使用 Margined 的快速查看扩展。部分较早的 iOS 版本也有此问题。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 iOS 27 上，「檔案」目前將 Markdown 顯示為純文字，而不使用 Margined 的快速查看延伸功能。部分較早的 iOS 版本也有此問題。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS 27の「ファイル」では現在、Marginedのクイックルック拡張機能が使われず、Markdownがプレーンテキストで表示されます。一部の以前のiOSバージョンでも発生します。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sous iOS 27, Fichiers affiche actuellement le Markdown en texte brut au lieu d’utiliser l’extension Coup d’œil de Margined. Certaines versions antérieures d’iOS sont aussi concernées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unter iOS 27 zeigt „Dateien“ Markdown derzeit als einfachen Text an, statt die Übersicht-Erweiterung von Margined zu verwenden. Das betrifft auch einige frühere iOS-Versionen."
+          }
+        }
+      }
+    },
+    "Choose Open With → Margined or Share → Margined to open the formatted document.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Open With → Margined or Share → Margined to open the formatted document."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecciona Abrir con → Margined o Compartir → Margined para abrir el documento con formato."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择“打开方式”→“Margined”或“共享”→“Margined”，打开排版后的文档。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇「打開方式」→「Margined」或「分享」→「Margined」，開啟排版後的文件。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「このアプリで開く」→「Margined」、または「共有」→「Margined」を選ぶと、書式付きの文書を開けます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez Ouvrir avec → Margined ou Partager → Margined pour ouvrir le document mis en forme."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle „Öffnen mit“ → Margined oder „Teilen“ → Margined, um das formatierte Dokument zu öffnen."
+          }
+        }
+      }
+    },
+    "You can reopen this guide from Settings → Getting Started.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can reopen this guide from Settings → Getting Started."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puedes volver a abrir esta guía desde Ajustes → Primeros pasos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你可以通过“设置”→“使用入门”再次打开本指南。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你可以透過「設定」→「使用入門」再次開啟本指南。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このガイドは「設定」→「使い方」からもう一度開けます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vous pouvez rouvrir ce guide depuis Réglages → Premiers pas."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Du kannst diese Anleitung unter „Einstellungen“ → „Erste Schritte“ erneut öffnen."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
