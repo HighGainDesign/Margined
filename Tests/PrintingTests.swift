@@ -112,6 +112,104 @@ final class PrintingTests: XCTestCase {
         XCTAssertEqual(appearance, "dark")
     }
 
+    func testDefaultPrintingKeepsExpandedDiscussionContentAndMarkersOffThePage() async throws {
+        let prose = "# Print review\n\nVisible document body.\n"
+        let thread = DiscussionThread(id: "t-print", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "Visible document body.", prefix: "Print review", suffix: "", section: "Print review"),
+            messages: [.init(id: "m-print", author: "Reviewer", created: "2026-10-24T10:00:00Z",
+                             body: "SAVED_COMMENT_MUST_NOT_PRINT", inReplyTo: nil)],
+            resolvedBy: nil, resolved: nil, attachmentHistory: [])
+        let bytes = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .newThread(thread), in: DiscussionCodec.parse(prose)),
+                                                 to: Data(prose.utf8), expectedSource: prose)
+        let source = try MarkdownSource.decode(bytes)
+        var url = URLComponents(); url.scheme = "margined"; url.host = "preview"
+        url.queryItems = [.init(name: "title", value: "Print review"), .init(name: "text", value: source)]
+        let document = try MarkdownDocument(preview: PreviewRequest(url: XCTUnwrap(url.url)))
+        defer { document.close() }
+        document.makeWindowControllers(); document.showWindows()
+        let window = try XCTUnwrap(document.windowControllers.first?.window)
+        let mainReady = await printPoll {
+            guard let web = self.findWeb(in: window.contentView!), web.url != nil, !web.isLoading else { return false }
+            return (try? await web.evaluateJavaScript("document.querySelector('main')?.textContent.includes('Visible document body.')===true")) as? Bool == true
+        }
+        XCTAssertTrue(mainReady); guard mainReady else { return }
+        let main = try XCTUnwrap(findWeb(in: window.contentView!))
+        document.reader.openDiscussion("t-print")
+        let expanded = await printPoll {
+            guard let history = self.printWebViews(in: window.contentView!).first(where: { $0 !== main }),
+                  history.url != nil, !history.isLoading else { return false }
+            return (try? await history.evaluateJavaScript("document.querySelectorAll('article').length===1")) as? Bool == true
+        }
+        XCTAssertTrue(expanded, "Keep a real expanded history present while choosing the document's print view")
+        guard expanded else { return }
+        let decorated = await printPoll {
+            (try? await main.evaluateJavaScript("document.querySelector('.margined-note-button')!==null")) as? Bool == true
+        }
+        XCTAssertTrue(decorated); guard decorated else { return }
+        // Freeze only decoration observers so print reflow cannot replace our
+        // identifiable marker. This remains the actual installed app overlay.
+        let prepared = try await main.callAsyncJavaScript("""
+        const layout=window.__marginedDiscussions?.layout;
+        const marker=document.querySelector('.margined-note-button');
+        const line=document.querySelector('.margined-note-line');
+        if(!layout || !marker || !line) return false;
+        layout.abort.abort();layout.observer?.disconnect();
+        if(layout.pending!==null)cancelAnimationFrame(layout.pending);
+        marker.textContent='TRANSIENT_MARKER_MUST_NOT_PRINT';
+        Object.assign(marker.style,{left:'8px',top:'70px',width:'330px',color:'#000'});
+        Object.assign(line.style,{left:'8px',top:'110px',width:'280px',height:'6px',borderBottom:'6px solid #ff0000'});
+        return true;
+        """, arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.discussionWorld) as? Bool
+        XCTAssertEqual(prepared, true)
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("Margined-print-discussions-\(UUID()).pdf")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let operation = try document.printOperation(withSettings: [.jobDisposition: NSPrintInfo.JobDisposition.save, .jobSavingURL: destination])
+        operation.printInfo.paperSize = NSSize(width: 612, height: 792)
+        operation.showsPrintPanel = false; operation.showsProgressPanel = false
+        let completion = PrintCompletion()
+        operation.runModal(for: window, delegate: completion,
+                           didRun: #selector(PrintCompletion.didRun(_:success:contextInfo:)), contextInfo: nil)
+        let finished = await printPoll { completion.success != nil }
+        XCTAssertTrue(finished); XCTAssertEqual(completion.success, true)
+        guard finished, completion.success == true else { return }
+        let pdf = try XCTUnwrap(PDFDocument(url: destination)), text = try XCTUnwrap(pdf.string)
+        XCTAssertTrue(text.contains("Visible document body."))
+        XCTAssertFalse(text.contains("SAVED_COMMENT_MUST_NOT_PRINT"), "Standard Print remains prose-only even with another WebView in the margin")
+        XCTAssertFalse(text.contains("TRANSIENT_MARKER_MUST_NOT_PRINT"), "On-screen discussion buttons never belong in printed content")
+        let page = try XCTUnwrap(pdf.page(at: 0))
+        XCTAssertEqual(try redPrintPixels(page), 0, "Discussion lines and highlights must also stay off the page")
+        XCTAssertEqual(document.reader.source, source)
+        let markerRetained = try await main.evaluateJavaScript("document.querySelector('.margined-note-button')?.textContent==='TRANSIENT_MARKER_MUST_NOT_PRINT'") as? Bool
+        XCTAssertEqual(markerRetained, true, "Printing hides transient decorations without deleting the live interface")
+        let attachment = XCTAttachment(data: try Data(contentsOf: destination), uniformTypeIdentifier: "com.adobe.pdf")
+        attachment.name = "Prose-only print with discussion markers"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
+    private func printPoll(_ condition: @MainActor () async -> Bool) async -> Bool {
+        for _ in 0..<300 {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        return false
+    }
+    private func printWebViews(in view: NSView) -> [WKWebView] {
+        if let web = view as? WKWebView { return [web] }
+        return view.subviews.flatMap { printWebViews(in: $0) }
+    }
+    private func redPrintPixels(_ page: PDFPage) throws -> Int {
+        let width = 612, height = 792
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+        context.setFillColor(CGColor(gray: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+        context.drawPDFPage(try XCTUnwrap(page.pageRef))
+        let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        return (0..<(width * height)).reduce(into: 0) { count, pixel in
+            let offset = pixel * 4
+            if pixels[offset] > 180 && pixels[offset + 1] < 100 && pixels[offset + 2] < 100 { count += 1 }
+        }
+    }
+
     private func findWeb(in view: NSView) -> WKWebView? {
         if let web = view as? WKWebView { return web }
         return view.subviews.lazy.compactMap { self.findWeb(in: $0) }.first

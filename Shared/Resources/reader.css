@@ -79,6 +79,7 @@ a:focus-visible, [tabindex="-1"]:focus-visible { outline: 2px solid var(--link);
   .margined-change { border-inline-start: 0; background: transparent; }
   .margined-word-change { background: transparent !important; padding: 0; }
   .margined-speaking, a:focus-visible, [tabindex="-1"]:focus-visible { outline: none; }
+  .margined-note-layer { display: none !important; }
   input[type=checkbox] { width: 10pt; height: 10pt; opacity: 1; }
 }
 

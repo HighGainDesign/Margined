@@ -101,6 +101,42 @@ actor MarkdownRenderer {
         return RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
     }
 
+    /// Preserve the displayed prose/artwork rather than rereading a newer file.
+    /// Only saved notes from that same immutable result enter the optional appendix.
+    func printHTML(_ output: RenderedMarkdown, title: String, includeDiscussions: Bool,
+                   loadRemoteImages: Bool) async throws -> String {
+        try Task.checkCancellation()
+        let document = try SwiftSoup.parse(output.html)
+        document.outputSettings().prettyPrint(pretty: false)
+        guard let main = try document.select("main").first() else { throw ReaderError.rendererUnavailable }
+        try document.select(".discussion-appendix,.margined-note-layer").remove()
+        if includeDiscussions, let discussions = output.discussions, !discussions.threads.isEmpty {
+            var remaining = MarkdownSource.maximumBytes
+            let bodies = try discussions.threads.map {
+                try parseDiscussionBodies($0, loadRemoteImages: loadRemoteImages, remaining: &remaining)
+            }
+            let ids = Set(try document.select("[id]").array().map { try $0.attr("id") })
+            let appendix = try DiscussionRendering.appendix(discussions.threads, bodies: bodies,
+                anchors: output.discussionText?.anchorResults ?? [:], existingIDs: ids,
+                locale: .current, timeZone: .current, showReplyInstructions: false)
+            let artwork = try SwiftSoup.parseBodyFragment("")
+            try artwork.body()?.appendChild(appendix)
+            // Prose artwork is already rendered. Apply the bound once to the
+            // newly assembled notes without typesetting the prose a second time.
+            try await typeset(artwork)
+            try main.appendChild(appendix)
+        }
+        try document.select("input").attr("disabled", "")
+        try document.select("title").first()?.text(title)
+        if !loadRemoteImages {
+            for policy in try document.select("meta[http-equiv=Content-Security-Policy]").array() {
+                try policy.attr("content", "default-src 'none'; style-src 'unsafe-inline'; img-src margined-resource: data:; base-uri 'none'; form-action 'none'")
+            }
+        }
+        try Task.checkCancellation()
+        return try document.outerHtml()
+    }
+
     /// Comment bodies use the same Apex/sanitizer and artwork stages as prose.
     /// They are independent Markdown fragments, never nested document discussions.
     func renderDiscussion(_ thread: DiscussionThread, loadRemoteImages: Bool = false,

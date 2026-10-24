@@ -51,7 +51,7 @@ enum DiscussionRendering {
     /// artwork pass. Reserve IDs against prose as well as other conversations.
     static func appendix(_ threads: [DiscussionThread], bodies: [[Document]],
                          anchors: [String: DiscussionAnchorResult], existingIDs: Set<String>,
-                         locale: Locale, timeZone: TimeZone) throws -> Element {
+                         locale: Locale, timeZone: TimeZone, showReplyInstructions: Bool = true) throws -> Element {
         let appendix = Element(try Tag.valueOf("section"), "")
         try appendix.addClass("discussion-appendix")
             .attr("aria-label", String(localized: "Discussions"))
@@ -74,8 +74,10 @@ enum DiscussionRendering {
                 else { try transcript.appendChild(status) }
             }
         }
-        try appendix.appendElement("p").addClass("discussion-preview-help")
-            .text(String(localized: "Open this file in Margined to reply."))
+        if showReplyInstructions {
+            try appendix.appendElement("p").addClass("discussion-preview-help")
+                .text(String(localized: "Open this file in Margined to reply."))
+        }
         try rebaseIDs(in: appendix, prefix: "margined-appendix-", avoiding: existingIDs)
         return appendix
     }

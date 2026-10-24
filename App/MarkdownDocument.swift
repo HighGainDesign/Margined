@@ -67,6 +67,65 @@ final class MarkdownDocument: NSDocument {
         (NSApp.delegate as? AppDelegate)?.documentDidOpen()
     }
 
+    private var preparingPrint: Task<Void, Never>?
+    private var preparedPrint: PreparedPrintDocument?
+    private var activePrintID: ObjectIdentifier?
+    var isPrintingDiscussions: Bool { preparedPrint != nil }
+
+    @objc func printWithDiscussions(_ sender: Any?) {
+        guard preparingPrint == nil, preparedPrint == nil,
+              let output = reader.rendered, output.discussions?.threads.isEmpty == false,
+              let window = windowControllers.first?.window else { return }
+        let title = reader.title, file = reader.fileURL, remote = reader.loadRemoteImages
+        preparingPrint = Task { [weak self, weak window] in
+            do {
+                let prepared = try await PreparedPrintDocument.prepare(output, title: title, fileURL: file,
+                    includeDiscussions: true, loadRemoteImages: remote)
+                guard !Task.isCancelled, let self else { prepared.cancel(); return }
+                guard let window, window.isVisible else {
+                    preparingPrint = nil; prepared.cancel(); return
+                }
+                let info = printInfo.copy() as! NSPrintInfo
+                info.horizontalPagination = .fit
+                info.verticalPagination = .automatic
+                info.isHorizontallyCentered = false
+                info.isVerticallyCentered = false
+                let operation = prepared.webView.printOperation(with: info)
+                operation.canSpawnSeparateThread = true
+                operation.jobTitle = title
+                runDiscussionPrint(operation, prepared: prepared, for: window)
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                preparingPrint = nil
+                if let window, window.isVisible { presentError(error, modalFor: window, delegate: nil, didPresent: nil, contextInfo: nil) }
+            }
+        }
+    }
+
+    func runDiscussionPrint(_ operation: NSPrintOperation, prepared: PreparedPrintDocument, for window: NSWindow) {
+        guard preparedPrint == nil else { prepared.cancel(); return }
+        preparedPrint = prepared
+        activePrintID = ObjectIdentifier(operation)
+        preparingPrint = nil
+        operation.runModal(for: window, delegate: self,
+            didRun: #selector(discussionPrintDidRun(_:success:contextInfo:)), contextInfo: nil)
+    }
+
+    @objc nonisolated private func discussionPrintDidRun(_ operation: NSPrintOperation, success: Bool,
+                                                         contextInfo: UnsafeMutableRawPointer?) {
+        let identity = ObjectIdentifier(operation)
+        // NSPrintOperation may finish on its spool thread. Only the matching
+        // job may release this document's page, and WebKit cleanup is main-only.
+        Task { @MainActor [weak self] in
+            guard let self, activePrintID == identity else { return }
+            preparedPrint?.cancel(); preparedPrint = nil; activePrintID = nil
+        }
+    }
+
+    private func cancelPendingPrint() {
+        preparingPrint?.cancel(); preparingPrint = nil
+    }
+
     private var checklistClosePending = false
 
     private var printableWebView: WKWebView? {
@@ -81,8 +140,13 @@ final class MarkdownDocument: NSDocument {
     }
 
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(printWithDiscussions(_:)) {
+            return preparingPrint == nil && preparedPrint == nil && reader.rendered?.discussions?.threads.isEmpty == false
+                && printableWebView?.url != nil && printableWebView?.isLoading == false
+        }
         if item.action == #selector(printDocument(_:)) {
-            return reader.rendered != nil && printableWebView?.url != nil && printableWebView?.isLoading == false
+            return preparingPrint == nil && preparedPrint == nil && reader.rendered != nil
+                && printableWebView?.url != nil && printableWebView?.isLoading == false
         }
         return super.validateUserInterfaceItem(item)
     }
@@ -119,6 +183,7 @@ final class MarkdownDocument: NSDocument {
     private var draftCloseAlertPresented = false
 
     override func canClose(withDelegate delegate: Any, shouldClose selector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        cancelPendingPrint()
         let request = CloseRequest(delegate: delegate, selector: selector, context: contextInfo)
         if reader.fileSaving {
             Task { [self, request] in
@@ -168,6 +233,7 @@ final class MarkdownDocument: NSDocument {
     }
 
     override func close() {
+        cancelPendingPrint()
         if reader.fileSaving {
             guard !checklistClosePending else { return }
             checklistClosePending = true
