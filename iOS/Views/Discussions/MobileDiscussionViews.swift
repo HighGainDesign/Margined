@@ -103,18 +103,39 @@ private struct MobileDiscussionMessages: View {
 struct MobileDiscussionComposer: View {
     @Bindable var reader: MobileReaderState
     let key: DiscussionSession.DraftKey
+    private struct Identity: Hashable {
+        let document: UUID
+        let draft: DiscussionSession.DraftKey
+    }
+    var body: some View {
+        // Keep native binding storage separate when navigation reuses this view
+        // for another document or thread, including files with identical IDs.
+        MobileDiscussionComposerFields(reader: reader, key: key)
+            .id(Identity(document: reader.documentGeneration, draft: key))
+    }
+}
+
+private struct MobileDiscussionComposerFields: View {
+    @Bindable var reader: MobileReaderState
+    let key: DiscussionSession.DraftKey
+    private let documentContext: UUID
     @State private var editingName = false
+    @MainActor init(reader: MobileReaderState, key: DiscussionSession.DraftKey) {
+        self.reader = reader; self.key = key; documentContext = reader.documentGeneration
+    }
+    private var isCurrent: Bool { documentContext == reader.documentGeneration }
     private var isReply: Bool { if case .thread = key { return true }; return false }
     private var bodyBinding: Binding<String> {
-        Binding(get: { reader.discussions.drafts[key]?.body ?? "" },
-                set: { reader.discussions.setDraft($0, for: key) })
+        Binding(get: { isCurrent ? reader.discussions.drafts[key]?.body ?? "" : "" },
+                set: { if isCurrent { reader.discussions.setDraft($0, for: key) } })
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if editingName || reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("This name is saved in the Markdown file. It is not a verified identity.")
                     .font(.caption).foregroundStyle(.secondary)
-                TextField("Your name", text: Binding(get: { reader.discussions.displayName }, set: { reader.discussions.displayName = $0 }))
+                TextField("Your name", text: Binding(get: { reader.discussions.displayName },
+                    set: { if isCurrent { reader.discussions.displayName = $0 } }))
                     .textFieldStyle(.roundedBorder).textInputAutocapitalization(.words).onSubmit { editingName = false }
             } else { Text("Reply as \(reader.discussions.displayName)").font(.caption).foregroundStyle(.secondary) }
             TextEditor(text: bodyBinding).frame(minHeight: 90, maxHeight: 150)
@@ -125,9 +146,12 @@ struct MobileDiscussionComposer: View {
             HStack {
                 Text("Replies are saved in this Markdown file.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button(isReply ? "Reply" : "Post") { reader.discussions.selection = key; reader.postDiscussion() }
+                Button(isReply ? "Reply" : "Post") {
+                    guard isCurrent else { return }
+                    reader.discussions.selection = key; reader.postDiscussion()
+                }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
-                    .disabled(reader.fileSaving || reader.isRendering || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!isCurrent || reader.fileSaving || reader.isRendering || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .onAppear { if reader.discussions.displayName.isEmpty { editingName = true } }
@@ -245,11 +269,15 @@ struct MobileDiscussionPassagePickerView: View {
         .searchable(text: $query, prompt: "Find a passage")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { reader.cancelDiscussionPassage(); dismiss() }
+                Button("Cancel") {
+                    guard reader.discussionPassagePicker?.id == picker.id else { return }
+                    reader.cancelDiscussionPassage(pickerID: picker.id); dismiss()
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Use Passage") {
-                    if let selected { reader.confirmDiscussionPassage(selected) }
+                    guard reader.discussionPassagePicker?.id == picker.id else { return }
+                    if let selected { reader.confirmDiscussionPassage(selected, pickerID: picker.id) }
                     if reader.discussionPassagePicker == nil { dismiss() }
                 }.disabled(selected == nil || stale || reader.isRendering || reader.fileSaving)
             }

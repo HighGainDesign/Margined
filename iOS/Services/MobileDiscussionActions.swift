@@ -44,8 +44,8 @@ extension MobileReaderState {
     func matchesDiscussionVersion(_ version: MobileDiscussionVersion) -> Bool {
         version.context == documentGeneration && version.snapshot == currentDiscussionVersion.snapshot
     }
-    func confirmDiscussionPassage(_ unitID: Int) {
-        guard let picker = discussionPassagePicker else { return }
+    func confirmDiscussionPassage(_ unitID: Int, pickerID: UUID) {
+        guard let picker = discussionPassagePicker, picker.id == pickerID else { return }
         guard matchesDiscussionVersion(picker.version), !hasPendingFileUpdate,
               picker.projection.sourceID == rendered?.discussionText?.sourceID else {
             discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
@@ -59,7 +59,10 @@ extension MobileReaderState {
         discussionPassagePicker = nil
         acceptNewDiscussionSelection(selection)
     }
-    func cancelDiscussionPassage() { discussionPassagePicker = nil }
+    func cancelDiscussionPassage(pickerID: UUID) {
+        guard discussionPassagePicker?.id == pickerID else { return }
+        discussionPassagePicker = nil
+    }
     func requestAddDiscussion() {
         guard discussionPassagePicker == nil, canEditDiscussions, rendered?.discussionText != nil else { return }
         discussionSelectionRequest = currentDiscussionVersion

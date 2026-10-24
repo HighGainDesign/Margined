@@ -144,7 +144,7 @@ import XCTest
         let unit = try XCTUnwrap(picker.projection.units.first { $0.text == "Café bold passage." })
         XCTAssertNil(f.reader.discussions.selection)
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
-        f.reader.confirmDiscussionPassage(unit.id)
+        f.reader.confirmDiscussionPassage(unit.id, pickerID: picker.id)
         XCTAssertNil(f.reader.discussionPassagePicker)
         let key = try XCTUnwrap(f.reader.discussions.selection)
         XCTAssertEqual(f.reader.discussions.drafts[key]?.target?.exact, "Café bold passage.")
@@ -163,13 +163,103 @@ import XCTest
         let replacement = Data(try MarkdownSource.decode(f.original).replacingOccurrences(of: "Before.", with: "Before updated externally.").utf8)
         try replacement.write(to: f.file, options: .atomic)
         await f.reader.refresh(); await f.reader.waitForRendering()
-        f.reader.confirmDiscussionPassage(unit.id)
+        f.reader.confirmDiscussionPassage(unit.id, pickerID: picker.id)
         XCTAssertNil(f.reader.discussions.selection)
         XCTAssertTrue(f.reader.discussions.drafts.isEmpty)
         XCTAssertNotNil(f.reader.discussionError)
         XCTAssertEqual(try Data(contentsOf: f.file), replacement)
-        f.reader.cancelDiscussionPassage()
+        f.reader.cancelDiscussionPassage(pickerID: picker.id)
         XCTAssertNil(f.reader.discussionPassagePicker)
+    }
+
+    func testOldPassageConfirmationCannotStartADraftInAnotherDocument() async throws {
+        try await checkOldPickerAction(confirm: true)
+    }
+
+    func testOldPassageCancellationCannotDismissAnotherDocumentsPicker() async throws {
+        try await checkOldPickerAction(confirm: false)
+    }
+
+    private func checkOldPickerAction(confirm: Bool) async throws {
+        let f = try await fixture()
+        f.reader.requestAddDiscussion()
+        let offered = await poll { f.reader.discussionPassagePicker != nil }
+        XCTAssertTrue(offered)
+        let old = try XCTUnwrap(f.reader.discussionPassagePicker)
+        let oldUnit = try XCTUnwrap(old.projection.units.first { $0.text == "Café bold passage." })
+        // Capture exactly the request identity held by the old native sheet.
+        let oldAction = {
+            if confirm { f.reader.confirmDiscussionPassage(oldUnit.id, pickerID: old.id) }
+            else { f.reader.cancelDiscussionPassage(pickerID: old.id) }
+        }
+        f.reader.cancelDiscussionPassage(pickerID: old.id)
+        let dismissed = await poll { f.host.presentedViewController == nil }
+        XCTAssertTrue(dismissed, "The original native picker must finish dismissal before replacing the file")
+        guard dismissed else { return }
+        let second = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        let data = Data("# Other\n\nDifferent nearby text.\n\nAn unrelated new passage.\n\nAfter.\n".utf8)
+        try data.write(to: second)
+        defer { try? FileManager.default.removeItem(at: second) }
+        await f.reader.open(url: second); await f.reader.waitForRendering()
+        let loaded = await pollAsync {
+            try await f.web.evaluateJavaScript("document.querySelector('main')?.textContent.includes('An unrelated new passage.')===true") as? Bool == true
+        }
+        XCTAssertTrue(loaded)
+        f.reader.requestAddDiscussion()
+        let currentOffered = await poll { f.reader.discussionPassagePicker != nil }
+        XCTAssertTrue(currentOffered)
+        let current = try XCTUnwrap(f.reader.discussionPassagePicker)
+        let currentUnit = try XCTUnwrap(current.projection.units.first { $0.text == "An unrelated new passage." })
+        XCTAssertEqual(oldUnit.id, currentUnit.id, "The case must reuse semantic unit IDs across two distinct documents")
+        oldAction()
+        XCTAssertEqual(f.reader.discussionPassagePicker?.id, current.id, "A delayed action from another sheet must leave the current picker open")
+        XCTAssertNil(f.reader.discussions.selection)
+        XCTAssertTrue(f.reader.discussions.drafts.isEmpty, "An old native action must never select text in a new file")
+        XCTAssertEqual(try Data(contentsOf: second), data)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        if f.reader.discussionPassagePicker?.id == current.id {
+            f.reader.confirmDiscussionPassage(currentUnit.id, pickerID: current.id)
+            let key = try XCTUnwrap(f.reader.discussions.selection)
+            XCTAssertEqual(f.reader.discussions.drafts[key]?.target?.exact, "An unrelated new passage.")
+        }
+        f.reader.discussions.discardDrafts(); await f.reader.close()
+    }
+
+    func testDiscardedComposersLateEditCannotChangeAnotherDocumentsReply() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Original document draft.", for: .thread("t-mobile"))
+        let mounted = await poll { self.editor(in: f.host.view)?.text == "Original document draft." }
+        XCTAssertTrue(mounted)
+        let oldEditor = try XCTUnwrap(self.editor(in: f.host.view))
+        let oldDelegate = try XCTUnwrap(oldEditor.delegate)
+        let second = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        try f.original.write(to: second)
+        defer { try? FileManager.default.removeItem(at: second) }
+        await f.reader.open(url: second)
+        XCTAssertTrue(f.reader.showDraftDiscardConfirmation)
+        await f.reader.confirmDiscardDrafts(); await f.reader.waitForRendering()
+        XCTAssertEqual(f.reader.fileURL, second)
+        let popped = await poll { self.editor(in: f.host.view) == nil }
+        XCTAssertTrue(popped, "Finish the old native destination before opening another file's same-ID thread")
+        guard popped else { return }
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Only the new document reply.", for: .thread("t-mobile"))
+        let remounted = await poll { self.editor(in: f.host.view)?.text == "Only the new document reply." }
+        XCTAssertTrue(remounted)
+        let newEditor = try XCTUnwrap(self.editor(in: f.host.view))
+        XCTAssertFalse(oldEditor === newEditor)
+        guard oldEditor !== newEditor else { return }
+        oldEditor.text = "Delayed text from the discarded document."
+        oldDelegate.textViewDidChange?(oldEditor)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Only the new document reply.", "A queued callback still holds the old editor's binding, not permission to alter the new file's draft")
+        f.reader.discussions.displayName = "Test Author"
+        f.reader.postDiscussion()
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.messages.count == 2 }
+        XCTAssertTrue(saved)
+        XCTAssertEqual(try DiscussionCodec.parse(MarkdownSource.read(second)).threads.first?.messages.last?.body, "Only the new document reply.")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        f.reader.discussions.discardDrafts(); await f.reader.close()
     }
 
     private enum FixtureFailure: Error { case documentDidNotLoad }
