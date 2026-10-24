@@ -3,6 +3,61 @@ import XCTest
 @testable import Margined
 
 @MainActor final class DiscussionCopyFlowTests: XCTestCase {
+    func testCopyAcceptanceImmediatelyFencesCloseAndFreezesTheConfirmedDraft() async throws {
+        let f = try await fixture(encoded: true); defer { cleanup(f) }
+        let document = try await openDocument(f.file)
+        let window = try XCTUnwrap(document.windowControllers.first?.window)
+        defer {
+            if let sheet = window.attachedSheet { window.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
+            close(document)
+        }
+        let reader = document.reader
+        let key = try draft(in: reader, body: "Draft at the Save confirmation.")
+        let hold = HeldCopyDestination(f.destination); defer { hold.release() }
+        try await waitUntil { hold.isHolding }
+        let operation = try ReaderDiscussionFiles.beginCopy(from: reader, to: f.destination)
+        XCTAssertTrue(reader.fileSaving, "Save must be accepted before scheduling any asynchronous work")
+        reader.discussions.setDraft("Newer text stays in the original.", for: key)
+        document.close()
+        await Task.yield()
+        XCTAssertTrue(window.isVisible)
+        XCTAssertNil(window.attachedSheet, "Close must wait for the accepted copy before offering Discard")
+        hold.release()
+        let copy: MarkdownDocument
+        do { copy = try await operation.value }
+        catch { XCTFail("An accepted copy must complete: \(error)"); return }
+        defer { close(copy) }
+        try await waitUntil { hold.isFinished && window.attachedSheet != nil }
+        XCTAssertEqual(copy.reader.discussions.drafts[key]?.body, "Draft at the Save confirmation.")
+        XCTAssertEqual(reader.discussions.drafts[key]?.body, "Newer text stays in the original.")
+        XCTAssertEqual(try Data(contentsOf: f.destination), f.data)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.data)
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        try XCTUnwrap(sheet.defaultButtonCell?.controlView as? NSButton).performClick(nil)
+        try await waitUntil { window.attachedSheet == nil }
+        XCTAssertTrue(window.isVisible)
+    }
+
+    func testAcceptedCopyKeepsDisplayedBytesAcrossAnImmediateExternalRefresh() async throws {
+        let f = try await fixture(encoded: true); defer { cleanup(f) }
+        let key = try draft(in: f.reader, body: "Copy this confirmed draft.")
+        let operation = try ReaderDiscussionFiles.beginCopy(from: f.reader, to: f.destination)
+        let changed = "# Updated by an agent\n\nBefore.\n\nPassage.\n\nAfter.\n"
+        var incoming = Data([0xff, 0xfe]); incoming.append(try XCTUnwrap(changed.data(using: .utf16LittleEndian)))
+        try incoming.write(to: f.file, options: .atomic)
+        f.reader.installLoadedSnapshot(try SourceFileEdit.capture(f.file))
+        f.reader.source = changed; f.reader.render()
+        let copy: MarkdownDocument
+        do { copy = try await operation.value }
+        catch { XCTFail("Refreshing the original must not invalidate an accepted snapshot copy: \(error)"); return }
+        defer { close(copy) }
+        XCTAssertEqual(try Data(contentsOf: f.destination), f.data, "The new file must contain the bytes displayed when Save was confirmed")
+        XCTAssertEqual(try Data(contentsOf: f.file), incoming)
+        XCTAssertEqual(copy.reader.discussions.drafts[key]?.body, "Copy this confirmed draft.")
+        XCTAssertEqual(f.reader.discussions.drafts[key]?.body, "Copy this confirmed draft.")
+        try await settle(f.reader)
+    }
+
     func testEncodedCopyOpensIndependentDocumentAndKeepsDraftUntilExplicitPost() async throws {
         let f = try await fixture(encoded: true)
         defer { cleanup(f) }
