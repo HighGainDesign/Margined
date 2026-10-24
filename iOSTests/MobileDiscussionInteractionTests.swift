@@ -74,6 +74,64 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
+    func testFirstPostKeepsTheSavedConversationOpenAndCanReply() async throws {
+        let f = try await fixture()
+        _ = try await f.web.callAsyncJavaScript("""
+        const paragraph=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.includes('bold'));
+        const range=document.createRange();range.selectNodeContents(paragraph);
+        getSelection().removeAllRanges();getSelection().addRange(range);return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        f.reader.requestAddDiscussion()
+        let selected = await poll { f.reader.discussions.selection != nil }
+        XCTAssertTrue(selected)
+        let draft = try XCTUnwrap(f.reader.discussions.selection)
+        f.reader.discussions.displayName = "Test Author"
+        f.reader.discussions.setDraft("The first saved note.", for: draft)
+        f.reader.postDiscussion()
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.count == 1 }
+        XCTAssertTrue(saved, "The first post must finish its real coordinated file save")
+        let thread = try XCTUnwrap(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first)
+        XCTAssertEqual(thread.messages.first?.body, "The first saved note.")
+        XCTAssertEqual(f.reader.discussionRoute, .thread(thread.id), "The saved conversation must replace its now-empty new-draft route")
+        XCTAssertEqual(f.reader.discussions.selection, .thread(thread.id))
+        let mounted = await poll { self.editor(in: f.host.view) != nil }
+        XCTAssertTrue(mounted)
+        let reply = try XCTUnwrap(self.editor(in: f.host.view))
+        reply.text = "A reply from the mounted composer."
+        reply.delegate?.textViewDidChange?(reply)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread(thread.id)]?.body, "A reply from the mounted composer.")
+        XCTAssertNil(f.reader.discussions.drafts[draft], "Typing the reply must not recreate the old new-thread composer")
+        f.reader.postDiscussion()
+        let replied = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.messages.count == 2 }
+        XCTAssertTrue(replied)
+        XCTAssertEqual(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.count, 1)
+        XCTAssertTrue(try MarkdownSource.read(f.file).hasPrefix(try MarkdownSource.decode(f.original)))
+    }
+
+    func testExternalResolveKeepsTheUnpostedReplyReachableInTheRegularMargin() async throws {
+        let f = try await fixture(withThread: true)
+        f.window.frame.size = CGSize(width: 1_024, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let regular = await poll { f.reader.discussionUsesMargin }
+        XCTAssertTrue(regular, "The fixture must actually use the measured regular-width margin")
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this reply while another author resolves.", for: .thread("t-mobile"))
+        let before = await poll { self.editor(in: f.host.view)?.text == "Keep this reply while another author resolves." }
+        XCTAssertTrue(before)
+        let parsed = try DiscussionCodec.parse(MarkdownSource.read(f.file))
+        let replacement = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for:
+            .resolve(threadID: "t-mobile", author: "Other Author", created: "2026-10-24T10:00:00Z"), in: parsed),
+            to: Data(contentsOf: f.file), expectedSource: parsed.source)
+        try replacement.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        XCTAssertEqual(f.reader.discussions.filter, .open)
+        XCTAssertEqual(f.reader.rendered?.discussions?.threads.first?.state, .resolved)
+        let retained = await poll { self.editor(in: f.host.view)?.text == "Keep this reply while another author resolves." }
+        XCTAssertTrue(retained, "A filter-changing refresh must not remove the only visible route to an unposted reply")
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this reply while another author resolves.")
+        XCTAssertEqual(try Data(contentsOf: f.file), replacement, "Refresh and retained draft presentation must not write")
+    }
+
     private enum FixtureFailure: Error { case documentDidNotLoad }
     private struct Fixture {
         let reader: MobileReaderState

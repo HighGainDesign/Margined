@@ -132,6 +132,13 @@ final class MobileReaderState {
                 }
                 guard revision == externalRevision, access.snapshot == saved else { throw SourceFileEdit.Failure.changed }
                 try discussions.saved(operation, as: saved.sourceSnapshot)
+                if operation.kind == .post, discussions.selection == operation.key,
+                   discussions.drafts[operation.key] == nil {
+                    discussions.selection = .thread(operation.threadID)
+                    // Promote only the destination still being read. Back or a
+                    // different thread opened during the save keeps its place.
+                    if discussionRoute == operation.key { discussionRoute = .thread(operation.threadID) }
+                }
                 if operation.kind == .importDiscussions { discardDiscussionImport() }
                 discussionSaving = false; apply(saved)
             } catch {

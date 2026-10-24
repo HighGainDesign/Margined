@@ -22,10 +22,10 @@ struct MobileDiscussionList: View {
                     }
                 }
             }
-            ForEach(reader.filteredDiscussionThreads, id: \.id) { thread in
+            ForEach(reader.inspectorDiscussionThreads, id: \.id) { thread in
                 Button { reader.openDiscussion(thread.id) } label: { MobileDiscussionSummary(reader: reader, thread: thread) }
             }
-            if newDrafts.isEmpty && reader.filteredDiscussionThreads.isEmpty {
+            if newDrafts.isEmpty && reader.inspectorDiscussionThreads.isEmpty {
                 Text("Select a passage to start a discussion. Comments and replies stay in this Markdown file.")
                     .foregroundStyle(.secondary)
             }
@@ -79,6 +79,10 @@ struct MobileDiscussionSummary: View {
                 Text("\(thread.messages.count) messages").font(.caption).foregroundStyle(.secondary)
                 if thread.state == .resolved { Text("Resolved").font(.caption) }
                 if reader.discussions.drafts[.thread(thread.id)]?.body.isEmpty == false { Text("Draft").font(.caption) }
+                if !reader.filteredDiscussionThreads.contains(where: { $0.id == thread.id }),
+                   reader.discussions.drafts[.thread(thread.id)]?.body.isEmpty == false {
+                    Text("Unposted reply outside this filter").font(.caption).foregroundStyle(.secondary)
+                }
             }
         }.frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(.primary)
     }
@@ -148,7 +152,7 @@ struct MobileDiscussionMargin: View {
                 Text("Unattached").tag(DiscussionSession.Filter.unattached)
             }
             GeometryReader { area in
-                let threads = reader.filteredDiscussionThreads
+                let threads = reader.inspectorDiscussionThreads
                 let indexed = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
                 let anchors = Dictionary(uniqueKeysWithValues: (reader.discussionMargin?.anchors ?? []).map { ($0.id, $0.top) })
                 let positions = DiscussionMarginLayout.cards(ids: threads.map(\.id), anchorTops: anchors,

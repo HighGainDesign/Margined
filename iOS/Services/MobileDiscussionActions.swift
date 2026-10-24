@@ -30,6 +30,12 @@ extension MobileReaderState {
             }
         }
     }
+    var inspectorDiscussionThreads: [DiscussionThread] {
+        let included = Set(filteredDiscussionThreads.map(\.id))
+        return (rendered?.discussions?.threads ?? []).filter {
+            included.contains($0.id) || discussions.drafts[.thread($0.id)]?.body.isEmpty == false
+        }
+    }
     func requestAddDiscussion() {
         guard canEditDiscussions, rendered?.discussionText != nil else { return }
         discussionSelectionRequest = currentDiscussionVersion
