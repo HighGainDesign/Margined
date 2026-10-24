@@ -31,6 +31,13 @@ overhead: an upper bound to a
 verified rendered frame, not exact display scan-out. Failed or incomplete cohorts
 are never summarized as successful.
 
+The fixed corpus includes short and long prose, tables, local images in two
+directories, math, Mermaid, matching prose with 20 discussions, and a 120-message
+conversation. Local assets and their hashes are retained with each cohort.
+Annotated cohorts currently measure reading with discussions collapsed; expanded
+inspectors, native note/anchor validation and separate parse/layout timings still
+need acceptance before publishing results.
+
 System Quick Look and iOS timings require separate native runs. Internal HTML
 packaging timings cannot stand in for system preview display.
 

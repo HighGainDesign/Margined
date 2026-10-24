@@ -1,5 +1,8 @@
 import importlib.util
 import pathlib
+import re
+import tempfile
+import xml.etree.ElementTree as ET
 import unittest
 
 MODULE = pathlib.Path(__file__).resolve().parents[1] / "benchmark-viewing.py"
@@ -56,7 +59,7 @@ class ViewingBenchmarkTests(unittest.TestCase):
 
     def test_fixture_corpus_is_repeatable_and_exercises_each_renderer(self):
         fixtures = benchmark.fixtures()
-        self.assertEqual(set(fixtures), {"prose", "tables", "math", "mermaid"})
+        self.assertEqual(set(fixtures), {"short", "prose", "long", "tables", "images", "math", "mermaid", "annotated", "long-discussion"})
         self.assertEqual(fixtures, benchmark.fixtures())
         for name, text in fixtures.items():
             self.assertTrue(text.startswith("# MARGINED-BENCHMARK-"))
@@ -66,6 +69,48 @@ class ViewingBenchmarkTests(unittest.TestCase):
         self.assertIn("| ---", fixtures["tables"])
         self.assertIn("$", fixtures["math"])
         self.assertIn("```mermaid", fixtures["mermaid"])
+
+    def test_annotated_cohort_keeps_matching_prose_and_exercises_multiple_authors(self):
+        fixtures = benchmark.fixtures()
+        self.assertIn("annotated", set(fixtures), "The benchmark must include the cost of saved discussions")
+        annotated = fixtures["annotated"]
+        prose = re.sub(r"<!-- margined:thread v1\n.*?\n-->\n?", "", annotated, flags=re.S)
+        self.assertEqual(prose.strip(), fixtures["prose"].replace("BENCHMARK-PROSE", "BENCHMARK-ANNOTATED").strip())
+        self.assertEqual(len(re.findall(r"^id: t-benchmark-", annotated, re.M)), 20)
+        self.assertEqual(len(re.findall(r"^    author:", annotated, re.M)), 80)
+        self.assertIn('author: "Alex"', annotated)
+        self.assertIn('author: "Sam"', annotated)
+
+    def test_local_image_cohort_stages_real_assets_in_multiple_directories(self):
+        self.assertTrue(callable(getattr(benchmark, "write_fixture", None)),
+                        "Native benchmark sessions must stage their fixture resources")
+        fixtures = benchmark.fixtures()
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = pathlib.Path(temporary)
+            source = benchmark.write_fixture(folder, fixtures["images"], benchmark.fixture_assets("images"))
+            self.assertEqual(source.read_text(), fixtures["images"])
+            images = re.findall(r"!\[[^]]*\]\(([^)]+)\)", source.read_text())
+            self.assertEqual(len(images), 12)
+            self.assertGreaterEqual(len({str(pathlib.Path(image).parent) for image in images}), 2)
+            for image in images:
+                asset = folder / image
+                self.assertTrue(asset.is_file())
+                root = ET.fromstring(asset.read_bytes())
+                self.assertEqual(root.tag, "{http://www.w3.org/2000/svg}svg")
+                self.assertEqual(root.attrib["viewBox"], "0 0 320 180")
+            self.assertEqual(benchmark.fixture_assets("prose"), {})
+            with self.assertRaises(ValueError):
+                benchmark.write_fixture(folder, "# Escaping asset", {"../outside.svg": b"outside"})
+            self.assertFalse((folder.parent / "outside.svg").exists())
+
+    def test_corpus_separates_short_long_and_long_conversation_loads(self):
+        fixtures = benchmark.fixtures()
+        self.assertTrue({"short", "long", "long-discussion"}.issubset(fixtures),
+                        "Short viewing and long-document/history costs need distinct cohorts")
+        self.assertLess(len(fixtures["short"].encode()), 1000)
+        self.assertGreater(len(fixtures["long"].encode()), 50000)
+        self.assertEqual(len(re.findall(r"^id: t-benchmark-", fixtures["long-discussion"], re.M)), 1)
+        self.assertEqual(len(re.findall(r"^    author:", fixtures["long-discussion"], re.M)), 120)
 
     def test_valid_child_result_preserves_raw_samples(self):
         payload = {"schema": 1, "status": "ok", "kind": "warm", "samples": self.rows(),

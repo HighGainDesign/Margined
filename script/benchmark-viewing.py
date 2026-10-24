@@ -28,7 +28,63 @@ def fixtures():
     mermaid = "# MARGINED-BENCHMARK-MERMAID-000\n\n" + "\n\n".join(
         f"## Flow {i}\n\n```mermaid\nflowchart LR\nA[Read {i}]-->B[Review {i}]-->C[Reply {i}]\n```"
         for i in range(3)) + "\n"
-    return {"prose": prose, "tables": tables, "math": math, "mermaid": mermaid}
+    short = "# MARGINED-BENCHMARK-SHORT-000\n\nA short document should open quickly. Read this paragraph, follow a [local link](#next), and check **formatted text**.\n\n## Next\n\nA second paragraph completes the example.\n"
+    long = "# MARGINED-BENCHMARK-LONG-000\n\n" + "\n\n".join(
+        f"## Long section {i}\n\nParagraph {i} follows a detailed local document. "
+        "Keep the reading position stable while navigating headings, searching text and reviewing an agent's saved changes. "
+        "**Formatted words** and ordinary [links](#long-section-0) remain readable."
+        for i in range(500)) + "\n"
+    images = "# MARGINED-BENCHMARK-IMAGES-000\n\n" + "\n\n".join(
+        f"## Figure {i}\n\n![Local figure {i}](" +
+        ("figures/blue.svg" if i % 2 == 0 else "reference/figures/green.svg") + ")"
+        for i in range(12)) + "\n"
+    annotated = prose.replace("BENCHMARK-PROSE", "BENCHMARK-ANNOTATED") + "\n" + "\n".join(
+        discussion_block(i, 4) for i in range(20))
+    conversation = prose.replace("BENCHMARK-PROSE", "BENCHMARK-LONG-DISCUSSION") + "\n" + discussion_block(0, 120)
+    return {"short": short, "prose": prose, "long": long, "tables": tables,
+            "images": images, "math": math, "mermaid": mermaid,
+            "annotated": annotated, "long-discussion": conversation}
+
+
+def discussion_block(index, message_count):
+    lines = ["<!-- margined:thread v1", f"id: t-benchmark-{index}", "state: open",
+             "target:", "  type: TextQuoteSelector", '  exact: "Section 0"',
+             '  prefix: ""', '  suffix: ""', '  section: "Section 0"', "messages:"]
+    for message in range(message_count):
+        lines.extend([f"  - id: m-benchmark-{index}-{message}",
+                      '    author: "Alex"' if message % 2 == 0 else '    author: "Sam"',
+                      '    created: "2026-10-24T12:00:00Z"'])
+        if message:
+            lines.append(f"    in-reply-to: m-benchmark-{index}-{message - 1}")
+        lines.extend(["    body: |", f"      Review message {message} in conversation {index}.",
+                      "      Keep saved discussions readable and portable in an ordinary Markdown file."])
+    return "\n".join(lines + ["-->", ""])
+
+
+def fixture_assets(name):
+    if name != "images":
+        return {}
+    return {
+        path: ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">'
+               f'<rect width="320" height="180" rx="16" fill="{color}"/>'
+               '<circle cx="160" cy="90" r="48" fill="white"/></svg>').encode()
+        for path, color in (("figures/blue.svg", "#286bd6"), ("reference/figures/green.svg", "#23815b"))
+    }
+
+
+def write_fixture(directory, text, assets):
+    destinations = []
+    for name, data in assets.items():
+        relative = Path(name)
+        if relative.is_absolute() or ".." in relative.parts or relative == Path("."):
+            raise ValueError("fixture asset must stay within the session directory")
+        destinations.append((directory / relative, data))
+    source = directory / "fixture.md"
+    source.write_text(text, encoding="utf-8")
+    for destination, data in destinations:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
+    return source
 
 
 def summarize(rows, expected_count, kind):
@@ -85,10 +141,9 @@ def monotonic_ns():
     return library.mach_absolute_time() * timebase.numer // timebase.denom
 
 
-def run_session(executable, directory, text, kind, count, expected_math=0, expected_diagrams=0):
+def run_session(executable, directory, text, kind, count, expected_math=0, expected_diagrams=0, assets=None):
     directory.mkdir()
-    source = directory / "fixture.md"
-    source.write_text(text, encoding="utf-8")
+    source = write_fixture(directory, text, assets or {})
     request = {"version": 1, "kind": kind, "sourceFile": source.name,
                "expectedMarker": text.splitlines()[0][2:], "sampleCount": count,
                "expectedMath": expected_math, "expectedDiagrams": expected_diagrams}
@@ -150,12 +205,14 @@ def main():
                 for session in range(args.samples if kind == "cold" else 1):
                     child = run_session(executable, output / f"{name}-{kind}-{session:03}", text, kind,
                                         1 if kind == "cold" else args.samples,
-                                        expected_math=24 if name == "math" else 0, expected_diagrams=3 if name == "mermaid" else 0)
+                                        expected_math=24 if name == "math" else 0, expected_diagrams=3 if name == "mermaid" else 0,
+                                        assets=fixture_assets(name))
                     children.append(child)
                     for row in child["samples"]:
                         rows.append(dict(row, index=len(rows)))
                 cohort = {"fixture": name, "kind": kind, "bytes": len(text.encode()),
                           "sha256": hashlib.sha256(text.encode()).hexdigest(), "samples": rows,
+                          "asset_sha256": {path: hashlib.sha256(data).hexdigest() for path, data in fixture_assets(name).items()},
                           "summary": summarize(rows, args.samples, kind), "sessions": children}
                 report["cohorts"].append(cohort)
                 print(name, kind, json.dumps(cohort["summary"]), flush=True)
