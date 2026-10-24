@@ -109,6 +109,50 @@ import XCTest
         XCTAssertTrue(try MarkdownSource.read(f.file).hasPrefix(try MarkdownSource.decode(f.original)))
     }
 
+    func testChangingTheComposerNameOnlyAffectsFutureSavedMessages() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.discussions.displayName = "Original Author"
+        f.reader.openDiscussion("t-mobile")
+        let available = await poll { self.nameField(in: f.host.view) != nil }
+        XCTAssertTrue(available, "A remembered author name must remain editable while composing")
+        guard available, let name = nameField(in: f.host.view) else { return }
+        XCTAssertEqual(name.text, "Original Author")
+        name.text = "Updated Author"; name.sendActions(for: .editingChanged)
+        let changed = await poll { f.reader.discussions.displayName == "Updated Author" }
+        XCTAssertTrue(changed)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original, "Editing the future author name must not rewrite saved comments")
+        let editor = try XCTUnwrap(self.editor(in: f.host.view))
+        editor.text = "A reply under the updated name."; editor.delegate?.textViewDidChange?(editor)
+        f.reader.postDiscussion()
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.messages.count == 2 }
+        XCTAssertTrue(saved)
+        let thread = try XCTUnwrap(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first)
+        XCTAssertEqual(thread.messages.map(\.author), ["Reviewer", "Updated Author"])
+        XCTAssertEqual(thread.messages.map(\.body), ["A portable note.", "A reply under the updated name."])
+    }
+
+    func testDiscardedNameFieldsLateEditCannotRenameTheNextDocumentsAuthor() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.discussions.displayName = "Original Author"; f.reader.openDiscussion("t-mobile")
+        let available = await poll { self.nameField(in: f.host.view) != nil }
+        XCTAssertTrue(available, "The native composer must expose its remembered author name")
+        guard available, let oldField = nameField(in: f.host.view) else { return }
+        let second = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        try f.original.write(to: second); defer { try? FileManager.default.removeItem(at: second) }
+        await f.reader.open(url: second); await f.reader.waitForRendering()
+        f.reader.discussions.displayName = "Next Author"; f.reader.openDiscussion("t-mobile")
+        let mounted = await poll { self.nameField(in: f.host.view)?.text == "Next Author" }
+        XCTAssertTrue(mounted)
+        let current = try XCTUnwrap(nameField(in: f.host.view))
+        XCTAssertFalse(current === oldField)
+        oldField.text = "Stale Author"; oldField.sendActions(for: .editingChanged)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        XCTAssertEqual(f.reader.discussions.displayName, "Next Author")
+        XCTAssertEqual(current.text, "Next Author")
+        XCTAssertEqual(try Data(contentsOf: second), f.original)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
     func testExternalResolveKeepsTheUnpostedReplyReachableInTheRegularMargin() async throws {
         let f = try await fixture(withThread: true)
         f.window.frame.size = CGSize(width: 1_024, height: 780)
@@ -827,6 +871,11 @@ import XCTest
     private func webView(in view: UIView) -> WKWebView? {
         if let web = view as? WKWebView { return web }
         return view.subviews.lazy.compactMap { self.webView(in: $0) }.first
+    }
+    private func nameField(in view: UIView) -> UITextField? {
+        if view is WKWebView { return nil }
+        if let field = view as? UITextField, field.placeholder == "Your name" { return field }
+        return view.subviews.lazy.compactMap { self.nameField(in: $0) }.first
     }
     private func editor(in view: UIView) -> UITextView? {
         if view is WKWebView { return nil }

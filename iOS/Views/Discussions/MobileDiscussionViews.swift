@@ -126,7 +126,6 @@ private struct MobileDiscussionComposerFields: View {
     @Bindable var reader: MobileReaderState
     let key: DiscussionSession.DraftKey
     private let documentContext: UUID
-    @State private var editingName = false
     @MainActor init(reader: MobileReaderState, key: DiscussionSession.DraftKey) {
         self.reader = reader; self.key = key; documentContext = reader.documentGeneration
     }
@@ -138,13 +137,11 @@ private struct MobileDiscussionComposerFields: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if editingName || reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("This name is saved in the Markdown file. It is not a verified identity.")
-                    .font(.caption).foregroundStyle(.secondary)
-                TextField("Your name", text: Binding(get: { reader.discussions.displayName },
-                    set: { if isCurrent { reader.discussions.displayName = $0 } }))
-                    .textFieldStyle(.roundedBorder).textInputAutocapitalization(.words).onSubmit { editingName = false }
-            } else { Text("Reply as \(reader.discussions.displayName)").font(.caption).foregroundStyle(.secondary) }
+            Text("This name is saved in the Markdown file. It is not a verified identity.")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("Your name", text: Binding(get: { reader.discussions.displayName },
+                set: { if isCurrent { reader.discussions.displayName = $0 } }))
+                .textFieldStyle(.roundedBorder).textInputAutocapitalization(.words)
             TextEditor(text: bodyBinding).frame(minHeight: 90, maxHeight: 150)
                 .padding(5).background(.background, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
@@ -161,7 +158,6 @@ private struct MobileDiscussionComposerFields: View {
                     .disabled(!isCurrent || reader.discussionDecision?.key == key || reader.fileSaving || reader.isRendering || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .onAppear { if reader.discussions.displayName.isEmpty { editingName = true } }
     }
 }
 
