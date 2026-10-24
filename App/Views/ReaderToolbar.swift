@@ -51,6 +51,19 @@ struct ReaderToolbar: View {
 
             }
 
+            Button { reader.showDiscussions.toggle() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                    Text("Discussions")
+                    if let count = reader.rendered?.discussions?.threads.count, count > 0 {
+                        Text(count.formatted()).font(.caption.weight(.semibold)).monospacedDigit()
+                    }
+                }
+            }
+            .fixedSize().tint(reader.showDiscussions ? .accentColor : .secondary)
+            .accessibilityLabel("Discussions")
+            .help("Show or hide discussions stored in this Markdown file")
+
             Spacer(minLength: 8)
 
             if reader.isStreamingPreview {

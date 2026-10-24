@@ -101,3 +101,11 @@ a:focus-visible, [tabindex="-1"]:focus-visible { outline: 2px solid var(--link);
 @media print { .margined-diagram details { display: none; } .margined-math-display { overflow: visible; } }
 
 @media print { :root[data-appearance] { --alert-note: #1764bf; --alert-tip: #258043; --alert-important: #8654c4; --alert-warning: #9a6700; --alert-caution: #c43b3b; } }
+
+/* App-owned margin decorations keep the document head stable during refresh. */
+.margined-note-layer{position:absolute;left:0;top:0;width:100%;height:0;pointer-events:none;z-index:2;color:GrayText}
+.margined-note-line,.margined-note-connector{position:absolute;box-sizing:border-box;pointer-events:none;border-bottom:1px dotted currentColor}
+.margined-note-selected{color:Highlight;border-bottom-style:solid;border-bottom-width:2px}
+.margined-note-fill{position:absolute;background:Highlight;opacity:.10;pointer-events:none}
+.margined-note-button{position:absolute;box-sizing:border-box;pointer-events:auto;width:24px;height:24px;border:1px solid currentColor;border-radius:5px;background:Canvas;color:inherit;font:12px -apple-system,sans-serif;padding:1px;cursor:pointer}
+.margined-note-button:focus-visible{outline:2px solid Highlight;outline-offset:2px}

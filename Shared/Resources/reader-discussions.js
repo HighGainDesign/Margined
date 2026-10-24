@@ -149,6 +149,7 @@ if (operation==='project') {
     return {text:value.text,barriers:value.barriers,units:value.units.map(({id,kind,text,location,length,section,raw})=>({id,kind,text,location,length,section,rawLength:raw.length}))};
 }
 if (operation==='selection') return selectionPayload(project());
+if (operation==='decorate' || operation==='goTo') return marginedDiscussionLayout();
 if (operation!=='configure') return false;
 window.__marginedDiscussions?.abort.abort();
 const state={token,sourceID,allowed:new Set(allowedThreadIDs),abort:new AbortController(),pending:null};

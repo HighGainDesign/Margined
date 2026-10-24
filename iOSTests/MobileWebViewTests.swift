@@ -94,12 +94,13 @@ final class MobileWebViewTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = web.frame
         window.rootViewController = controller
-        window.isHidden = false
+        window.makeKeyAndVisible()
         window.layoutIfNeeded()
         defer { window.isHidden = true; window.rootViewController = nil }
         XCTAssertNotNil(web.window)
         let paragraphs = (0..<100).map { "<p id='line-\($0)'>A paragraph to keep a stable reading anchor.</p>" }.joined()
         let html = "<!doctype html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>body{margin:0;font-size:16px}p{margin:1em 0}img{max-width:100%}</style></head><body><main id='document'>\(paragraphs)<img id='picture' width='120' height='60' alt='Authored size'></main></body></html>"
+        traceMobileTestWebView(web, phase: "dynamic-before-load")
         web.loadHTMLString(html, baseURL: nil)
         try await waitForDocument(web)
         try await present(web)
@@ -252,7 +253,7 @@ final class MobileWebViewTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 390, height: 650)
         window.rootViewController = host
-        window.isHidden = false
+        window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil; playback.stop() }
         host.loadViewIfNeeded(); host.view.layoutIfNeeded()
         var candidate: WKWebView?
@@ -262,6 +263,7 @@ final class MobileWebViewTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(25))
         }
         let web = try XCTUnwrap(candidate)
+        traceMobileTestWebView(web, phase: "hosted-before-token-wait")
         try await waitForToken(web)
         try await Task.sleep(for: .milliseconds(300))
 
@@ -317,6 +319,7 @@ final class MobileWebViewTests: XCTestCase {
                token != previous { return }
             try await Task.sleep(for: .milliseconds(25))
         }
+        traceMobileTestWebView(web, phase: "token-timeout")
         XCTFail("WebKit did not show the current document")
         throw URLError(.timedOut)
     }
@@ -350,6 +353,7 @@ final class MobileWebViewTests: XCTestCase {
             if !web.isLoading, (try? await web.callAsyncJavaScript("return !!document.getElementById('line-35');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool) == true { return }
             try await Task.sleep(for: .milliseconds(25))
         }
+        traceMobileTestWebView(web, phase: "document-timeout")
         XCTFail("WebKit did not finish the test document")
         throw URLError(.timedOut)
     }
@@ -405,4 +409,12 @@ private struct HostedWebReader: View {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { complete() }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { complete(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { complete(error) }
+}
+
+@MainActor
+private func traceMobileTestWebView(_ view: WKWebView, phase: String) {
+    let active = UIApplication.shared.applicationState == .active
+    let foreground = view.window?.windowScene?.activationState == .foregroundActive
+    let detail = "appActive=\(active) attached=\(view.window != nil) foreground=\(foreground) key=\(view.window?.isKeyWindow == true)"
+    FileHandle.standardError.write(Data("WebKitTest mobile \(phase) \(detail) loading=\(view.isLoading) progress=\(view.estimatedProgress)\n".utf8))
 }

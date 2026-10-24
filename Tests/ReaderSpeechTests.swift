@@ -6,6 +6,33 @@ import XCTest
 
 @MainActor
 final class ReaderSpeechTests: XCTestCase {
+    func testSourceInspectionKeepsStopReadingAvailableForItsOwner() async throws {
+        let reader = makeReader()
+        reader.source = "# Original\n\nA passage being read.\n"
+        reader.render(); try await settle(reader)
+        reader.speech.start()
+        defer { reader.stop() }
+        XCTAssertEqual(reader.speech.session.status, .playing)
+
+        reader.inspectDiscussionSource()
+        let window = try XCTUnwrap(NSApp.windows.first {
+            $0.isVisible && $0.windowController is ReaderDiscussionSourceWindow
+        })
+        defer { window.close() }
+        XCTAssertEqual(reader.speech.session.status, .playing, "Inspecting source must not stop playback")
+        let controller = try XCTUnwrap(window.windowController)
+        let item = NSMenuItem(title: "Stop Reading", action: NSSelectorFromString("stopSpeech:"), keyEquivalent: "")
+        let validation = controller as? any NSMenuItemValidation
+        XCTAssertTrue(validation?.validateMenuItem(item) == true,
+            "The source controller must keep Stop available for its owner")
+        let action = try XCTUnwrap(item.action)
+        if controller.responds(to: action) {
+            XCTAssertTrue(NSApp.sendAction(action, to: controller, from: item))
+        } else { XCTFail("The source window must handle Stop Reading") }
+        XCTAssertEqual(reader.speech.session.status, .idle, "Stop in the source window must stop its owner")
+        XCTAssertFalse(validation?.validateMenuItem(item) == true)
+    }
+
     func testPlaybackHoldsLatestFileUntilExplicitShowLatestEvenAfterStop() async throws {
         let reader = makeReader(); defer { reader.stop() }
         reader.fileURL = URL(fileURLWithPath: "/tmp/speech-held.md")

@@ -81,14 +81,31 @@ struct ReaderView: View {
             }
             GeometryReader { geometry in
                 let beside = geometry.size.width >= 840 + (reader.showOutline ? 220 : 0)
-                // Keep the document at the same structural path in both layouts.
-                // Opening or relocating review must not recreate its WKWebView.
+                let font = (reader.discussionMargin?.bodyFont ?? 16) * reader.zoom
+                let insets = (reader.discussionMargin?.horizontalInsets ?? 88) * reader.zoom
+                let outlineWidth = reader.showOutline ? 220.0 : 0
+                let minimumDocumentWidth = DiscussionMarginLayout.minimumDocumentWidth(bodyFont: font, horizontalInsets: insets, outlineWidth: outlineWidth)
+                let marginFits = DiscussionMarginLayout.canShowMargin(width: geometry.size.width, bodyFont: font, horizontalInsets: insets, outlineWidth: outlineWidth)
+                let compactDiscussion = reader.showDiscussions && !marginFits
+                // The reader stays at one structural path across inspector switches
+                // and compact navigation, retaining WebKit's page/reading position.
                 VSplitView {
                     HSplitView {
-                        documentPane.frame(minWidth: beside && reader.showChanges ? 360 : 0,
-                                           minHeight: reader.showChanges ? 180 : 0)
+                        ZStack {
+                            documentPane
+                                .opacity(compactDiscussion ? 0 : 1)
+                                .allowsHitTesting(!compactDiscussion)
+                                .accessibilityHidden(compactDiscussion)
+                            if compactDiscussion { DiscussionInspector(reader: reader, aligned: false).background(.bar) }
+                        }
+                        .frame(minWidth: reader.showDiscussions && marginFits ? minimumDocumentWidth : (beside && reader.showChanges ? 360 : 0),
+                               minHeight: reader.showChanges ? 180 : 0)
                         if reader.showChanges && beside {
                             reviewPanel.frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
+                        }
+                        if reader.showDiscussions && marginFits {
+                            DiscussionInspector(reader: reader, aligned: true).background(.bar)
+                                .frame(minWidth: 340, idealWidth: 380, maxWidth: 460)
                         }
                     }
                     if reader.showChanges && !beside {
@@ -110,6 +127,12 @@ struct ReaderView: View {
         .background(ReaderWindowContext(reader: reader).frame(width: 0, height: 0).accessibilityHidden(true))
         .frame(minWidth: 480, minHeight: 300)
         .preferredColorScheme(documentAppearance == .system ? nil : (documentAppearance == .dark ? .dark : .light))
+        .sheet(isPresented: Binding(get: { reader.discussionImportPreview != nil }, set: { if !$0 { reader.discardDiscussionImport() } })) {
+            if let preview = reader.discussionImportPreview { DiscussionImportView(reader: reader, preview: preview) }
+        }
+        .sheet(item: $reader.discussionPassagePicker) { request in
+            DiscussionPassagePickerView(reader: reader, request: request)
+        }
         .task { reader.documentAppearance = documentAppearance; await reader.watchFile() }
         .onChange(of: documentAppearance) { reader.documentAppearance = documentAppearance; reader.render() }
         .onChange(of: reader.wide) { reader.render() }
@@ -141,7 +164,7 @@ struct ReaderView: View {
         HStack(spacing: 0) {
             if reader.showOutline { outline; Divider() }
             if let rendered = reader.rendered {
-                MarkdownWebView(reader: reader, html: rendered.html, speechRequestID: reader.existingSpeech?.startRequest?.id, speechElementID: reader.existingSpeech?.session.isActive == true ? reader.existingSpeech?.session.currentSegment?.elementID : nil, speechFollowReading: reader.existingSpeech?.session.followReading ?? true, playbackHolding: reader.playbackHolding, checklistEnabled: reader.checklistMode, checklistSaving: reader.fileSaving, checklistRendering: reader.isRendering, checklistPromptPresented: reader.showChecklistConfirmation)
+                MarkdownWebView(reader: reader, html: rendered.html, discussionSelectionRequest: reader.discussionSelectionGeneration, discussionsVisible: reader.showDiscussions, discussionFilter: reader.discussions.filter, selectedDiscussion: reader.discussions.selection, discussionPassageRequest: reader.discussionPassageGeneration, speechRequestID: reader.existingSpeech?.startRequest?.id, speechElementID: reader.existingSpeech?.session.isActive == true ? reader.existingSpeech?.session.currentSegment?.elementID : nil, speechFollowReading: reader.existingSpeech?.session.followReading ?? true, playbackHolding: reader.playbackHolding, checklistEnabled: reader.checklistMode, checklistSaving: reader.fileSaving, checklistRendering: reader.isRendering, checklistPromptPresented: reader.showChecklistConfirmation)
             } else {
                 ProgressView("Rendering Markdown…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }

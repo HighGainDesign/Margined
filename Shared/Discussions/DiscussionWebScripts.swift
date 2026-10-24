@@ -6,7 +6,9 @@ enum DiscussionWebScripts {
     static let script: String = {
         guard let url = Bundle(for: DiscussionScriptBundle.self).url(forResource: "reader-discussions", withExtension: "js"),
               let source = try? String(contentsOf: url, encoding: .utf8) else { return "return null;" }
-        return source
+        guard let layoutURL = Bundle(for: DiscussionScriptBundle.self).url(forResource: "reader-discussion-layout", withExtension: "js"),
+              let layout = try? String(contentsOf: layoutURL, encoding: .utf8) else { return source }
+        return layout + "\n" + source
     }()
 }
 

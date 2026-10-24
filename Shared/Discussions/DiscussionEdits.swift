@@ -48,7 +48,8 @@ enum DiscussionEdits {
                 for (key, value) in [("type", target.type), ("exact", target.exact), ("prefix", target.prefix), ("suffix", target.suffix)] { edits += try editor.set(key, in: old, scalar: value) }
                 if let section = target.section { edits += try editor.set("section", in: old, scalar: section) }
                 else { edits += try editor.remove(["section"], from: old) }
-                let oldTarget = flow(old)
+                let oldValue = DiscussionYAML.value(old, source: bytes, offset: block.yamlOffset, context: .target)
+                let oldTarget = try DiscussionYAML.render(oldValue, newline: "\n", flow: true).trimmingCharacters(in: .newlines)
                 let historyFlow = "{target: \(oldTarget), author: \(quote(author)), created: \(quote(created))}"
                 func history(_ indent: Int) -> String {
                     let spaces = String(repeating: " ", count: indent)
@@ -111,13 +112,6 @@ enum DiscussionEdits {
             }
         }
         return value + "\""
-    }
-    private static func flow(_ node: RestrictedYAML.Node) -> String {
-        switch node.value {
-        case let .scalar(string, _): quote(string)
-        case let .sequence(items, _): "[" + items.map(flow).joined(separator: ", ") + "]"
-        case let .mapping(entries, _): "{" + entries.map { quote($0.key.string!) + ": " + flow($0.value) }.joined(separator: ", ") + "}"
-        }
     }
     private static func renderTarget(_ target: DiscussionTarget) -> String {
         let fields = [("type", target.type), ("exact", target.exact), ("prefix", target.prefix), ("suffix", target.suffix)] + (target.section.map { [("section", $0)] } ?? [])

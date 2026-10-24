@@ -77,7 +77,7 @@ enum DiscussionYAML {
             data.append(buffer, count: count); return 1
         }
     }
-    static func render(_ value: Value, newline: String) throws -> String {
+    static func render(_ value: Value, newline: String, flow: Bool = false) throws -> String {
         var emitter = yaml_emitter_t()
         guard yaml_emitter_initialize(&emitter) != 0 else { throw DiscussionReconciliation.Failure.invalidImport }
         defer { yaml_emitter_delete(&emitter) }
@@ -97,16 +97,19 @@ enum DiscussionYAML {
         func emit(_ value: Value) throws {
             switch value {
             case let .scalar(text, kind):
-                let bytes = Array(text.utf8) + [0]
+                // A flow collection cannot represent an empty plain scalar. The
+                // equivalent explicit null retains its YAML type in history.
+                let scalar = flow && kind == .plain && text.isEmpty ? "null" : text
+                let bytes = Array(scalar.utf8) + [0]
                 try bytes.withUnsafeBufferPointer { buffer in
                     try send { yaml_scalar_event_initialize($0, nil, nil, buffer.baseAddress, Int32(bytes.count - 1), kind == .plain ? 1 : 0, kind == .string ? 1 : 0, kind == .plain ? YAML_PLAIN_SCALAR_STYLE : YAML_DOUBLE_QUOTED_SCALAR_STYLE) }
                 }
             case let .sequence(items):
-                try send { yaml_sequence_start_event_initialize($0, nil, nil, 1, YAML_BLOCK_SEQUENCE_STYLE) }
+                try send { yaml_sequence_start_event_initialize($0, nil, nil, 1, flow ? YAML_FLOW_SEQUENCE_STYLE : YAML_BLOCK_SEQUENCE_STYLE) }
                 for item in items { try emit(item) }
                 try send { yaml_sequence_end_event_initialize($0) }
             case let .mapping(entries):
-                try send { yaml_mapping_start_event_initialize($0, nil, nil, 1, YAML_BLOCK_MAPPING_STYLE) }
+                try send { yaml_mapping_start_event_initialize($0, nil, nil, 1, flow ? YAML_FLOW_MAPPING_STYLE : YAML_BLOCK_MAPPING_STYLE) }
                 for entry in entries { try emit(entry.key); try emit(entry.value) }
                 try send { yaml_mapping_end_event_initialize($0) }
             }

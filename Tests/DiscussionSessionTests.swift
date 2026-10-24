@@ -211,4 +211,77 @@ final class DiscussionSessionTests: XCTestCase {
         XCTAssertEqual(session.drafts[key]?.body, "One note only.", "An uncertain save never silently drops the draft")
     }
 
+    @MainActor func testReopenAndReattachKeepUnpostedDraftThroughSaveAndUndo() throws {
+        let source = """
+        Before. Old. Replacement. After.
+
+        <!-- margined:thread v1
+        id: t1
+        state: resolved
+        resolved-by: Original
+        resolved: "2026-10-23T10:00:00Z"
+        target: {type: TextQuoteSelector, exact: Old., prefix: Before., suffix: Replacement.}
+        messages:
+          - id: m1
+            author: Original
+            created: "2026-10-23T09:00:00Z"
+            body: First note.
+        -->
+        """
+        let session = DiscussionSession(), key = DiscussionSession.DraftKey.thread("t1")
+        session.displayName = "Reviewer"; session.selection = key
+        session.setDraft("Keep this reply across metadata changes.", for: key)
+        let url = URL(fileURLWithPath: "/Document.md")
+        var snapshot = SourceFileEdit.Snapshot(url: url, data: Data(source.utf8), identity: .init(device: 1, inode: 1))
+        let reopened = try session.prepareReopen(threadID: "t1", in: DiscussionCodec.parse(source), snapshot: snapshot)
+        snapshot = .init(url: url, data: reopened.replacement, identity: .init(device: 1, inode: 2))
+        try session.saved(reopened, as: snapshot)
+        let document = try DiscussionCodec.parse(snapshot.source)
+        XCTAssertEqual(document.threads.first?.state, .open)
+        XCTAssertNil(document.threads.first?.resolvedBy)
+        XCTAssertEqual(document.threads.first?.messages.map(\.author), ["Original"])
+        XCTAssertEqual(session.drafts[key]?.body, "Keep this reply across metadata changes.")
+        let projection = try DiscussionText.project(html: "<p>Before. Old. Replacement. After.</p>", source: document.source)
+        let selected = try XCTUnwrap(projection.selection((projection.text as NSString).range(of: "Replacement."), renderID: "current"))
+        let reattached = try session.prepareReattach(threadID: "t1", selection: selected, projection: projection, in: document, snapshot: snapshot)
+        snapshot = .init(url: url, data: reattached.replacement, identity: .init(device: 1, inode: 3))
+        try session.saved(reattached, as: snapshot)
+        let updated = try DiscussionCodec.parse(snapshot.source)
+        XCTAssertEqual(updated.threads.first?.target.exact, "Replacement.")
+        XCTAssertEqual(updated.threads.first?.attachmentHistory.first?.target.exact, "Old.")
+        XCTAssertEqual(updated.threads.first?.attachmentHistory.first?.author, "Reviewer")
+        XCTAssertEqual(session.drafts[key]?.body, "Keep this reply across metadata changes.")
+        let undo = try session.prepareUndo(snapshot: snapshot)
+        XCTAssertEqual(undo.replacement, reopened.replacement)
+        XCTAssertEqual(session.drafts[key]?.body, "Keep this reply across metadata changes.")
+    }
+    @MainActor func testReattachRejectsStaleSelectionAndRequiresRecordedAuthor() throws {
+        let source = """
+        Old. Replacement.
+
+        <!-- margined:thread v1
+        id: t1
+        state: open
+        target: {type: TextQuoteSelector, exact: Old., prefix: "", suffix: Replacement.}
+        messages:
+          - id: m1
+            author: Original
+            created: "2026-10-23T09:00:00Z"
+            body: First note.
+        -->
+        """
+        let document = try DiscussionCodec.parse(source)
+        let projection = try DiscussionText.project(html: "<p>Old. Replacement.</p>", source: source)
+        let selected = try XCTUnwrap(projection.selection((projection.text as NSString).range(of: "Replacement."), renderID: "r"))
+        let snapshot = SourceFileEdit.Snapshot(url: URL(fileURLWithPath: "/Document.md"), data: Data(source.utf8), identity: .init(device: 1, inode: 1))
+        let session = DiscussionSession()
+        XCTAssertThrowsError(try session.prepareReattach(threadID: "t1", selection: selected, projection: projection, in: document, snapshot: snapshot)) {
+            XCTAssertEqual($0 as? DiscussionSession.Failure, .displayNameRequired)
+        }
+        session.displayName = "Reviewer"
+        let newerProjection = try DiscussionText.project(html: "<p>Old. Replacement.</p>", source: source + "Agent edit.")
+        XCTAssertThrowsError(try session.prepareReattach(threadID: "t1", selection: selected, projection: newerProjection, in: document, snapshot: snapshot))
+        XCTAssertNil(session.pending)
+    }
+
 }

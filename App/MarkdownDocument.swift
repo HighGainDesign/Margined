@@ -13,6 +13,15 @@ final class MarkdownDocument: NSDocument {
 
     nonisolated override init() { super.init() }
 
+    init(savedCopy snapshot: SourceFileEdit.Snapshot) throws {
+        super.init()
+        let text = try snapshot.source
+        fileURL = snapshot.url
+        fileType = "net.daringfireball.markdown"
+        loadedSource.withLock { $0 = LoadedSource(text: text, url: snapshot.url,
+            title: snapshot.url.lastPathComponent, snapshot: snapshot) }
+    }
+
     init(preview: PreviewRequest) {
         super.init()
         reader.source = preview.text

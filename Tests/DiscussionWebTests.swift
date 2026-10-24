@@ -1,6 +1,11 @@
 import Foundation
 import SwiftSoup
 import WebKit
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 import XCTest
 #if os(iOS)
 @testable import MarginediOS
@@ -17,13 +22,39 @@ final class DiscussionWebTests: XCTestCase {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 700, height: 700), configuration: configuration)
+        #if os(iOS)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let controller = UIViewController(); controller.view = view
+        let window = UIWindow(windowScene: scene)
+        window.frame = view.frame; window.rootViewController = controller
+        window.makeKeyAndVisible()
+        addTeardownBlock { await MainActor.run { window.isHidden = true; window.rootViewController = nil } }
+        #else
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view; window.makeKeyAndOrderFront(nil)
+        addTeardownBlock { await MainActor.run { window.contentView = nil; window.close() } }
+        #endif
+        XCTAssertNotNil(view.window, "Native geometry requires a window-hosted WebView")
         let ready = expectation(description: "document navigation finished")
         let navigation = DiscussionTestNavigation(ready)
         view.navigationDelegate = navigation
-        view.loadHTMLString("<html><head><meta charset='utf-8'><meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'\"></head><body><main id='document'>" + body + "</main></body></html>", baseURL: nil)
+        let cssURL = try XCTUnwrap(Bundle.main.url(forResource: "reader", withExtension: "css"))
+        let css = try String(contentsOf: cssURL, encoding: .utf8)
+        traceDiscussionTestWebView(view, phase: "before-load")
+        view.loadHTMLString("<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'\"><style>" + css + "</style></head><body><main id='document'>" + body + "</main></body></html>", baseURL: nil)
         await fulfillment(of: [ready], timeout: 10)
+        traceDiscussionTestWebView(view, phase: "after-navigation-wait")
         withExtendedLifetime(navigation) {}
+        try await present(view)
         return view
+    }
+    private func present(_ view: WKWebView) async throws {
+        let configuration = WKSnapshotConfiguration()
+        configuration.afterScreenUpdates = true
+        let image = try await view.takeSnapshot(configuration: configuration)
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertGreaterThan(image.size.height, 0)
     }
     private func call(_ operation: String, in view: WKWebView, projection: DiscussionTextProjection) async throws -> Any? {
         try await view.callAsyncJavaScript(DiscussionWebScripts.script,
@@ -98,6 +129,69 @@ final class DiscussionWebTests: XCTestCase {
         }
     }
 
+    private func decorationArguments(_ projection: DiscussionTextProjection, quote: String, ids: [String]) throws -> [String: Any] {
+        let selected = try XCTUnwrap(projection.selection((projection.text as NSString).range(of: quote), renderID: "r"))
+        let anchors: [[String: Any]] = ids.map { id in
+            ["id": id, "location": selected.range.location, "length": selected.range.length,
+             "startUnit": selected.domRange.start.unit, "startOffset": selected.domRange.start.offset,
+             "endUnit": selected.domRange.end.unit, "endOffset": selected.domRange.end.offset]
+        }
+        return ["operation": "configure", "token": "r", "sourceID": projection.sourceID,
+            "allowedThreadIDs": ids, "anchors": anchors, "expectedText": projection.text,
+            "visible": true, "selectedID": ids.first ?? "", "markerLabel": "Open discussion"]
+    }
+    func testPassageDecorationsUseActualGeometryWithoutChangingTextFocusOrScroll() async throws {
+        let body = "<h1 tabindex='-1'>Plan</h1>" + String(repeating: "<p>Padding paragraph.</p>", count: 25) + "<p>Cafe<em>́</em> <strong>bold</strong> passage.</p>"
+        let projection = try DiscussionText.project(html: body, source: "geometry")
+        let view = try await browser(body)
+        var arguments = try decorationArguments(projection, quote: "Café bold passage.", ids: ["t1", "t2"])
+        _ = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world)
+        _ = try await view.callAsyncJavaScript("window.scrollTo({top:200,behavior:'instant'});document.querySelector('h1').focus({preventScroll:true});return true;", arguments: [:], in: nil, contentWorld: world)
+        try await present(view)
+        let before = try await view.evaluateJavaScript("window.scrollY") as? Double
+        XCTAssertGreaterThan(before ?? 0, 0, "The requested initial scroll must be presented before comparing it")
+        arguments["operation"] = "decorate"
+        let geometry = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world) as? [String: Any]
+        XCTAssertEqual((geometry?["anchors"] as? [[String: Any]])?.compactMap { $0["id"] as? String }, ["t1", "t2"])
+        XCTAssertGreaterThan(geometry?["bodyFont"] as? Double ?? 0, 0)
+        let count = try await view.evaluateJavaScript("document.querySelectorAll('[data-margined-thread]').length") as? Int
+        XCTAssertEqual(count, 1, "Two threads on one passage share an accessible marker")
+        let projected = try await call("project", in: view, projection: projection) as? [String: Any]
+        XCTAssertEqual(projected?["text"] as? String, projection.text)
+        try await present(view)
+        let after = try await view.evaluateJavaScript("window.scrollY") as? Double
+        XCTAssertEqual(after, before)
+        let focused = try await view.evaluateJavaScript("document.activeElement.localName") as? String
+        XCTAssertEqual(focused, "h1")
+        arguments["visible"] = false
+        _ = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world)
+        let hidden = try await view.evaluateJavaScript("document.querySelectorAll('[data-margined-thread]').length") as? Int
+        XCTAssertEqual(hidden, 0)
+    }
+    func testOnlyExplicitGoToPassageScrollsToTheCurrentAllowedAnchor() async throws {
+        let body = "<h1>Plan</h1>" + String(repeating: "<p>Padding paragraph.</p>", count: 45) + "<p>Target passage.</p>"
+        let projection = try DiscussionText.project(html: body, source: "go-to")
+        let view = try await browser(body)
+        var arguments = try decorationArguments(projection, quote: "Target passage.", ids: ["t1"])
+        _ = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world)
+        arguments["operation"] = "decorate"
+        _ = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world)
+        try await present(view)
+        let before = try await view.evaluateJavaScript("window.scrollY") as? Double
+        XCTAssertEqual(before, 0)
+        arguments["operation"] = "goTo"; arguments["threadID"] = "unknown"; arguments["focus"] = true
+        let forbidden = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world) as? Bool
+        XCTAssertEqual(forbidden, false)
+        arguments["threadID"] = "t1"
+        let moved = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world) as? Bool
+        XCTAssertEqual(moved, true)
+        try await present(view)
+        let after = try await view.evaluateJavaScript("window.scrollY") as? Double
+        XCTAssertGreaterThan(after ?? 0, 0)
+        let focused = try await view.evaluateJavaScript("document.activeElement.textContent") as? String
+        XCTAssertEqual(focused, "Target passage.")
+    }
+
     func testSyntheticMarkerClickDoesNotSendADiscussionAction() async throws {
         let projection = try DiscussionText.project(html: "<p>Text.</p>", source: "marker")
         let view = try await browser("<p>Text.</p>")
@@ -118,7 +212,10 @@ final class DiscussionWebTests: XCTestCase {
 private final class DiscussionTestNavigation: NSObject, WKNavigationDelegate {
     private let ready: XCTestExpectation
     init(_ ready: XCTestExpectation) { self.ready = ready }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { ready.fulfill() }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { traceDiscussionTestWebView(webView, phase: "did-start") }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { traceDiscussionTestWebView(webView, phase: "did-commit") }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { traceDiscussionTestWebView(webView, phase: "did-finish"); ready.fulfill() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { traceDiscussionTestWebView(webView, phase: "process-terminated") }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { XCTFail(error.localizedDescription); ready.fulfill() }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { XCTFail(error.localizedDescription); ready.fulfill() }
 }
@@ -127,4 +224,14 @@ private final class DiscussionTestReceiver: NSObject, WKScriptMessageHandler {
     private let received: XCTestExpectation
     init(_ received: XCTestExpectation) { self.received = received }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) { received.fulfill() }
+}
+
+@MainActor
+private func traceDiscussionTestWebView(_ view: WKWebView, phase: String) {
+    #if os(iOS)
+    let active = UIApplication.shared.applicationState == .active
+    let foreground = view.window?.windowScene?.activationState == .foregroundActive
+    let detail = "appActive=\(active) attached=\(view.window != nil) foreground=\(foreground) key=\(view.window?.isKeyWindow == true)"
+    FileHandle.standardError.write(Data("WebKitTest discussion \(phase) \(detail) loading=\(view.isLoading) progress=\(view.estimatedProgress)\n".utf8))
+    #endif
 }

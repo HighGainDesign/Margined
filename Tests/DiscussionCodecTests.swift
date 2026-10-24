@@ -212,6 +212,35 @@ final class DiscussionCodecTests: XCTestCase {
         XCTAssertEqual(try DiscussionCodec.parse(twice).threads.first?.attachmentHistory.map(\.author), ["A", "B"])
     }
 
+    func testReattachmentHistoryPreservesUnknownTargetScalarTypes() throws {
+        let source = """
+        Original. Replacement.
+
+        <!-- margined:thread v1
+        id: t1
+        state: open
+        target: {type: TextQuoteSelector, exact: Original., prefix: "", suffix: Replacement., opaque: {flag: true, quoted: "true", empty: }}
+        messages:
+          - id: m1
+            author: Original
+            created: "2026-10-23T10:00:00Z"
+            body: Note.
+        -->
+        """
+        let document = try DiscussionCodec.parse(source)
+        let target = DiscussionTarget(type: "TextQuoteSelector", exact: "Replacement.", prefix: "Original.", suffix: "", section: nil)
+        let edits = try DiscussionEdits.splices(for: .reattach(threadID: "t1", target: target, author: "Reviewer", created: "2026-10-23T11:00:00Z"), in: document)
+        let data = try MarkdownSourceEdits.apply(edits, to: Data(source.utf8), expectedSource: source)
+        let updated = try DiscussionCodec.parse(MarkdownSource.decode(data))
+        let history = try XCTUnwrap(updated.blocks.first?.syntax?["attachment-history"]?.items?.first?["target"]?["opaque"])
+        if case .scalar(_, .plain)? = history["flag"]?.value {} else { XCTFail("History changed a boolean into a string") }
+        if case .scalar(_, .doubleQuoted)? = history["quoted"]?.value {} else { XCTFail("History lost a quoted string's type") }
+        if case .scalar(_, .plain)? = history["empty"]?.value {} else { XCTFail("History changed null into an empty string") }
+        XCTAssertEqual(updated.threads.first?.attachmentHistory.first?.target.exact, "Original.")
+        XCTAssertEqual(updated.threads.first?.target.exact, "Replacement.")
+        XCTAssertEqual(updated.threads.first?.messages.first?.body, "Note.")
+    }
+
     func testNewBlockRoundTripsLiteralDelimitersUnicodeAndTrailingNewlines() throws {
         for body in ["Plain **Markdown**.\n", "No trailing newline", "Two\n\n", "<!-- literal -->\n--!>\n🐈\n", "Tabs\tand \"quotes\"\n\\escape\n"] {
             let message = DiscussionMessage(id: "m-new", author: "A --> B", created: "2026-10-23T11:00:00Z", body: body, inReplyTo: nil)

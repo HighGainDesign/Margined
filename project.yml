@@ -283,6 +283,7 @@ targets:
       - Tests/DiscussionSessionTests.swift
       - Tests/DiscussionCodecTests.swift
       - Tests/DiscussionReconciliationTests.swift
+      - Tests/DiscussionMarginTests.swift
       - Tests/DiscussionAnchorTests.swift
       - Tests/DiscussionWebTests.swift
       - Tests/DiscussionRenderingTests.swift

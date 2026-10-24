@@ -15,7 +15,7 @@ final class DiscussionSession {
         let revision: UUID
     }
     struct Pending: Sendable {
-        enum Kind: Sendable { case post, state, importDiscussions, undo, redo }
+        enum Kind: Sendable { case post, state, metadata, importDiscussions, undo, redo }
         let kind: Kind
         let id: UUID
         let key: DraftKey
@@ -159,7 +159,7 @@ final class DiscussionSession {
         guard pending?.id == operation.id, snapshot.url == operation.expected.url,
               snapshot.data == operation.replacement else { throw Failure.staleSource }
         switch operation.kind {
-        case .post, .state, .importDiscussions:
+        case .post, .state, .metadata, .importDiscussions:
             if let historySnapshot, historySnapshot != operation.expected { undo.removeAll() }
             undo.append(History(before: operation.expected.data, after: snapshot.data, threadID: operation.threadID))
             // Keep at least the latest edit; one record is bounded by the
@@ -168,7 +168,7 @@ final class DiscussionSession {
                 undo.removeFirst()
             }
             redo.removeAll()
-            if operation.kind != .importDiscussions {
+            if operation.kind != .importDiscussions && operation.kind != .metadata {
                 postedThreads[operation.key] = operation.threadID
                 failedAttempts[operation.key] = nil
                 origins[operation.key] = nil
@@ -195,6 +195,17 @@ final class DiscussionSession {
         guard pending?.key != key else { return }
         drafts[key] = nil; origins[key] = nil; failedAttempts[key] = nil
     }
+    /// Fork only document-owned draft state. Filesystem-bound Undo never moves
+    /// to a new document, and an existing destination session is never replaced.
+    func copyDrafts(to destination: DiscussionSession) throws {
+        guard pending == nil, destination.pending == nil else { throw Failure.busy }
+        guard destination.drafts.isEmpty, destination.undo.isEmpty, destination.redo.isEmpty else { throw Failure.unavailable }
+        destination.displayName = displayName
+        destination.visible = visible; destination.filter = filter; destination.selection = selection
+        destination.drafts = drafts; destination.origins = origins
+        destination.postedThreads = postedThreads; destination.failedAttempts = failedAttempts
+    }
+
     func resetDocument() {
         drafts.removeAll(); origins.removeAll(); failedAttempts.removeAll(); postedThreads.removeAll()
         undo.removeAll(); redo.removeAll(); historySnapshot = nil
@@ -237,6 +248,32 @@ final class DiscussionSession {
         pending = value; saveError = nil
         return value
     }
+    func prepareReopen(threadID: String, in document: DiscussionDocument, snapshot: SourceFileEdit.Snapshot?) throws -> Pending {
+        try prepareMetadata(.reopen(threadID: threadID), threadID: threadID, document: document, snapshot: snapshot)
+    }
+    func prepareReattach(threadID: String, selection: DiscussionSelection, projection: DiscussionTextProjection,
+                         in document: DiscussionDocument, snapshot: SourceFileEdit.Snapshot?) throws -> Pending {
+        let author = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !author.isEmpty else { throw Failure.displayNameRequired }
+        let sourceID = SHA256.hash(data: Data(document.source.utf8)).map { String(format: "%02x", $0) }.joined()
+        guard projection.sourceID == sourceID, selection.sourceID == sourceID,
+              projection.selection(selection.range, renderID: selection.renderID) == selection else { throw Failure.staleSource }
+        return try prepareMetadata(.reattach(threadID: threadID, target: selection.target, author: author,
+            created: ISO8601DateFormatter().string(from: Date())), threadID: threadID, document: document, snapshot: snapshot)
+    }
+    private func prepareMetadata(_ operation: DiscussionOperation, threadID: String, document: DiscussionDocument,
+                                 snapshot: SourceFileEdit.Snapshot?) throws -> Pending {
+        guard pending == nil else { throw Failure.busy }
+        guard let snapshot else { throw Failure.savedCopyRequired }
+        guard try snapshot.source.utf8.elementsEqual(document.source.utf8) else { throw Failure.staleSource }
+        let edits = try DiscussionEdits.splices(for: operation, in: document)
+        let replacement = try MarkdownSourceEdits.apply(edits, to: snapshot.data, expectedSource: document.source)
+        let value = Pending(kind: .metadata, id: UUID(), key: .thread(threadID), revision: UUID(), expected: snapshot,
+                            replacement: replacement, threadID: threadID, messageID: nil)
+        pending = value; saveError = nil
+        return value
+    }
+
     func prepareImport(_ preview: DiscussionImportPreview, snapshot: SourceFileEdit.Snapshot?,
                        choices: [String: DiscussionReconciliation.Choice] = [:]) throws -> Pending? {
         guard pending == nil else { throw Failure.busy }

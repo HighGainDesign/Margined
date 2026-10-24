@@ -8,6 +8,7 @@ struct ReaderNavigation: Equatable {
     }
     enum ReturnTarget: Equatable {
         case outline(String)
+        case discussion(String)
         case review
         case find
     }

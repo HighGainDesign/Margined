@@ -16,9 +16,143 @@ final class ReaderState {
     private(set) var discussionSaving = false
     var discussionError: String?
     private(set) var discussionCopyOffered = false
-    var fileSaving: Bool { checklistSaving || discussionSaving }
+    var discussionCopySaving = false
+    var discussionExportedURL: URL?
+    var fileSaving: Bool { checklistSaving || discussionSaving || discussionCopySaving }
     var canUndoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canUndo(snapshot: sourceSnapshot) }
     var canRedoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canRedo(snapshot: sourceSnapshot) }
+
+    var showDiscussions: Bool {
+        get { discussions.visible }
+        set {
+            if newValue { showChanges = false }
+            if discussions.visible != newValue { focusIntentGeneration += 1 }
+            discussions.visible = newValue
+            if newValue, discussions.selection == nil, let first = rendered?.discussions?.threads.first {
+                discussions.selection = .thread(first.id)
+            }
+        }
+    }
+    var discussionReopenReply: ReaderDiscussionReopenReply?
+    var discussionResolution: ReaderDiscussionResolution?
+    var discussionReattachment: ReaderDiscussionReattachment?
+    @ObservationIgnored var discussionSelectionRequest: ReaderDiscussionSelectionRequest?
+    @ObservationIgnored var discussionAuthorRequest: ReaderDiscussionAuthorRequest?
+    @ObservationIgnored var discussionAcceptedAction: ReaderDiscussionAcceptedAction?
+    var currentDiscussionVersion: ReaderDiscussionVersion { .init(context: sourceContext, snapshot: sourceSnapshot) }
+    func matchesDiscussionVersion(_ value: ReaderDiscussionVersion) -> Bool { value.context == sourceContext && value.snapshot == sourceSnapshot }
+
+    private(set) var discussionMargin: DiscussionMarginSnapshot?
+    private(set) var discussionPassageID: String?
+    var discussionPassageGeneration = 0
+    func goToDiscussion(_ threadID: String) {
+        guard rendered?.discussionText?.anchorResults[threadID]?.status == .attached else { return }
+        openDiscussion(threadID)
+        navigationReturnTarget = .discussion(threadID)
+        discussionPassageID = threadID; discussionPassageGeneration += 1; focusIntentGeneration += 1
+    }
+    func acceptDiscussionMargin(_ value: DiscussionMarginSnapshot) {
+        guard value.sourceID == rendered?.discussionText?.sourceID else { return }
+        if discussionMargin != value { discussionMargin = value }
+    }
+
+    var discussionPassagePicker: ReaderDiscussionPassagePicker?
+    private(set) var discussionCardFocusGeneration = 0
+    private(set) var discussionCardFocusIntent: Int?
+    var inspectorDiscussionThreads: [DiscussionThread] {
+        let included = Set(filteredDiscussionThreads.map(\.id))
+        return (rendered?.discussions?.threads ?? []).filter {
+            included.contains($0.id) || discussions.drafts[.thread($0.id)]?.body.isEmpty == false
+        }
+    }
+    func confirmDiscussionPassage(_ unitID: Int) {
+        guard let picker = discussionPassagePicker else { return }
+        guard matchesDiscussionVersion(picker.request.version), !hasPendingFileUpdate,
+              picker.projection.sourceID == rendered?.discussionText?.sourceID else {
+            discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+        }
+        guard readyForDiscussionAction() else { return }
+        guard let unit = picker.projection.units.first(where: { $0.id == unitID }),
+              let selection = picker.projection.selection(unit.range, renderID: "passage-picker-" + picker.id.uuidString) else {
+            discussionError = DiscussionSession.Failure.unavailable.localizedDescription; return
+        }
+        discussionSelectionRequest = picker.request
+        discussionPassagePicker = nil
+        acceptNewDiscussionSelection(selection)
+    }
+    func cancelDiscussionPassage() { discussionPassagePicker = nil }
+    func selectNextDiscussion(backwards: Bool = false) {
+        let threads = filteredDiscussionThreads
+        guard !isRendering, !threads.isEmpty else { return }
+        let index: Int
+        if case let .thread(id) = discussions.selection, let current = threads.firstIndex(where: { $0.id == id }) {
+            index = (current + (backwards ? -1 : 1) + threads.count) % threads.count
+        } else { index = backwards ? threads.count - 1 : 0 }
+        openDiscussion(threads[index].id)
+        focusSelectedDiscussion()
+    }
+    func focusSelectedDiscussion() {
+        guard case let .thread(id) = discussions.selection,
+              inspectorDiscussionThreads.contains(where: { $0.id == id }) else { return }
+        focusIntentGeneration += 1
+        discussionCardFocusIntent = focusIntentGeneration
+        discussionCardFocusGeneration += 1
+    }
+
+    var showDiscussionAuthorPrompt = false
+    var discussionSelectionGeneration = 0
+    var discussionComposerFocusGeneration = 0
+    func requestAddDiscussion() {
+        guard discussionPassagePicker == nil, readyForDiscussionAction(), rendered?.discussionText != nil else { return }
+        discussionSelectionRequest = .init(intent: .add, version: currentDiscussionVersion)
+        discussionSelectionGeneration += 1
+    }
+    func acceptNewDiscussionSelection(_ selection: DiscussionSelection?) {
+        guard let request = discussionSelectionRequest else { return }
+        discussionSelectionRequest = nil
+        guard matchesDiscussionVersion(request.version), !isRendering else {
+            discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+        }
+        guard let projection = rendered?.discussionText else { return }
+        guard let selection else {
+            showDiscussions = true; discussionError = nil
+            discussionPassagePicker = .init(request: request, projection: projection)
+            return
+        }
+        switch request.intent {
+        case let .reattach(id): proposeDiscussionReattachment(id, selection: selection)
+        case .add:
+            do {
+                _ = try discussions.beginDraft(selection, in: projection)
+                showDiscussions = true; discussionError = nil
+                discussionComposerFocusGeneration += 1
+            } catch { discussionError = error.localizedDescription }
+        }
+    }
+    var filteredDiscussionThreads: [DiscussionThread] {
+        (rendered?.discussions?.threads ?? []).filter { thread in
+            switch discussions.filter {
+            case .all: true
+            case .open: thread.state == .open
+            case .resolved: thread.state == .resolved
+            case .unattached: rendered?.discussionText?.anchorResults[thread.id]?.status != .attached
+            }
+        }
+    }
+    func openDiscussion(_ threadID: String) {
+        guard let thread = rendered?.discussions?.threads.first(where: { $0.id == threadID }) else { return }
+        let included: Bool
+        switch discussions.filter {
+        case .all: included = true
+        case .open: included = thread.state == .open
+        case .resolved: included = thread.state == .resolved
+        case .unattached: included = rendered?.discussionText?.anchorResults[threadID]?.status != .attached
+        }
+        if !included { discussions.filter = .all }
+        discussions.selection = .thread(threadID); showDiscussions = true
+    }
+    func confirmDiscussionAuthor(_ name: String) { finishDiscussionAuthor(name) }
+    func cancelDiscussionAuthor() { discussionAuthorRequest = nil; showDiscussionAuthorPrompt = false }
 
     private(set) var discussionImportPreview: DiscussionImportPreview?
     private(set) var discussionImportLoading = false
@@ -74,11 +208,22 @@ final class ReaderState {
         discussionCopyOffered = false
         do {
             let operation = try discussions.preparePost(in: document, snapshot: sourceSnapshot, reopenResolved: reopenResolved)
+            if reopenResolved, let decision = discussionReopenReply, decision.key == operation.key {
+                discussionAcceptedAction = .init(kind: .reopenReply, decisionID: decision.id, operationID: operation.id)
+            }
             ReaderPreferences.defaults.set(discussions.displayName, forKey: "discussionDisplayName")
             commitDiscussion(operation)
         } catch {
-            discussionError = error.localizedDescription
-            if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+            if (error as? DiscussionSession.Failure) == .displayNameRequired, let key = discussions.selection {
+                requestDiscussionAuthor(.post(key, reopenResolved))
+            } else if (error as? DiscussionSession.Failure) == .reopenRequired,
+                      let key = discussions.selection, let draft = discussions.drafts[key] {
+                discussionReopenReply = .init(key: key, version: currentDiscussionVersion, draftRevision: draft.revision)
+                discussionError = nil
+            } else {
+                discussionError = error.localizedDescription
+                if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+            }
         }
     }
     func undoDiscussion() {
@@ -97,18 +242,24 @@ final class ReaderState {
         guard fileURL != nil, !isStreamingPreview else { offerDiscussionCopy(); return }
         do {
             if let operation = try discussions.prepareResolve(threadID: threadID, in: document, snapshot: sourceSnapshot, choice: choice) {
+                if let decision = discussionResolution, decision.threadID == threadID {
+                    discussionAcceptedAction = .init(kind: .resolve, decisionID: decision.id, operationID: operation.id)
+                }
                 commitDiscussion(operation)
             }
         } catch {
-            discussionError = error.localizedDescription
-            if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+            if (error as? DiscussionSession.Failure) == .displayNameRequired { requestDiscussionAuthor(.resolve(threadID, choice)) }
+            else {
+                discussionError = error.localizedDescription
+                if (error as? DiscussionSession.Failure) == .savedCopyRequired { discussionCopyOffered = true }
+            }
         }
     }
-    private func offerDiscussionCopy() {
+    func offerDiscussionCopy() {
         discussionCopyOffered = true
         discussionError = DiscussionSession.Failure.savedCopyRequired.localizedDescription
     }
-    private func commitDiscussion(_ operation: DiscussionSession.Pending) {
+    func commitDiscussion(_ operation: DiscussionSession.Pending) {
         guard !fileSaving, fileURL == operation.expected.url, sourceSnapshot == operation.expected else {
             discussions.failed(operation, error: SourceFileEdit.Failure.changed)
             discussionError = SourceFileEdit.Failure.changed.localizedDescription
@@ -125,6 +276,7 @@ final class ReaderState {
                 }
                 guard revision == externalFileRevision else { throw SourceFileEdit.Failure.changed }
                 try discussions.saved(operation, as: saved)
+                didSaveDiscussionAction(operation)
                 if operation.kind == .importDiscussions { discardDiscussionImport() }
                 sourceSnapshot = saved
                 discussionSaving = false
@@ -166,6 +318,9 @@ final class ReaderState {
             speechModel?.close(discardHold: true)
             _ = sourceGate.close(); sourceGate = SourceFileGate()
             discardDiscussionImport()
+            discussionMargin = nil; discussionPassageID = nil
+            resetDiscussionActions()
+            discussionCardFocusIntent = nil
             sourceSnapshot = nil; pendingDiskSnapshot = nil; discussionCopyOffered = false
             sourceContext = UUID(); renderedContext = nil
             externalFileRevision += 1
@@ -194,7 +349,12 @@ final class ReaderState {
             if newValue { findFocusGeneration += 1; focusIntentGeneration += 1 }
         }
     }
-    var showChanges = false { didSet { if showChanges != oldValue { focusIntentGeneration += 1 } } }
+    var showChanges = false {
+        didSet {
+            if showChanges { discussions.visible = false }
+            if showChanges != oldValue { focusIntentGeneration += 1 }
+        }
+    }
     var searchText = "" { didSet { if searchText != oldValue { announcements.cancel(topic: .search) } } }
     var searchBackwards = false
     var searchGeneration = 0
@@ -304,6 +464,12 @@ final class ReaderState {
         case .find: showFind = true
         case .outline: showOutline = true
         case .review: showChanges = true
+        case let .discussion(id):
+            guard rendered?.discussions?.threads.contains(where: { $0.id == id }) == true else {
+                navigationReturnTarget = nil; return
+            }
+            openDiscussion(id)
+            focusSelectedDiscussion()
         }
         returnFocusGeneration += 1
     }
@@ -720,6 +886,9 @@ final class ReaderState {
     func changeZoom(by amount: Double) { zoom = min(2.0, max(0.6, zoom + amount)) }
 
     func stop() {
+        resetDiscussionActions()
+        discussionCardFocusIntent = nil
+        discussionMargin = nil; discussionPassageID = nil
         discardDiscussionImport()
         classifyUpdateTask?.cancel()
         sourceContext = UUID()
