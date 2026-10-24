@@ -47,12 +47,7 @@ actor MarkdownRenderer {
     func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), previousDiscussionProjection: DiscussionTextProjection? = nil, previousDiscussions: DiscussionDocument? = nil) async throws -> RenderedMarkdown {
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
-        if stylesheet == nil {
-            guard let cssURL = Bundle(for: RendererBundleMarker.self).url(forResource: "reader", withExtension: "css") else {
-                throw ReaderError.rendererUnavailable
-            }
-            stylesheet = try String(contentsOf: cssURL, encoding: .utf8)
-        }
+        try loadStylesheet()
         let discussions = try DiscussionCodec.parse(source)
         let proseSource = discussions.readingSource
         let document = try parse(proseSource, loadRemoteImages: loadRemoteImages)
@@ -85,6 +80,63 @@ actor MarkdownRenderer {
         let tasks = mapTasks ? try MarkdownTasks.attach(to: document, source: source) : []
         // Typeset after semantic review/speech, so generated artwork never changes
         // comparison identity or duplicates MathML tokens in Read Aloud.
+        try await typeset(document)
+        // Serialize the sanitized DOM itself, including newly attached task metadata.
+        // Source reuse can retain an input tag without its new attributes.
+        let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        let countSource = discussions.blocks.allSatisfy(\.hasCertainExtent) ? proseSource : discussions.wordCountSource
+        let count = countSource.split(whereSeparator: \.isWhitespace).count
+        let html = htmlDocument(body, title: title, wide: wide, loadRemoteImages: loadRemoteImages,
+                                appearance: appearance, language: language)
+        return RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
+    }
+
+    /// Comment bodies use the same Apex/sanitizer and artwork stages as prose.
+    /// They are independent Markdown fragments, never nested document discussions.
+    func renderDiscussion(_ thread: DiscussionThread, loadRemoteImages: Bool = false,
+                          appearance: DocumentAppearance = .system, documentLanguage: String? = nil,
+                          prepareSpeech: Bool = false, locale: Locale = .current,
+                          timeZone: TimeZone = .current) async throws -> RenderedMarkdown {
+        try Task.checkCancellation()
+        try loadStylesheet()
+        var remaining = MarkdownSource.maximumBytes
+        var bodies: [Document] = []
+        for message in thread.messages {
+            try Task.checkCancellation()
+            let count = message.body.utf8.count + message.author.utf8.count + message.created.utf8.count
+            guard count <= remaining else { throw ReaderError.tooLarge }
+            remaining -= count
+            bodies.append(try parse(message.body, loadRemoteImages: loadRemoteImages))
+        }
+        let document = try DiscussionRendering.document(thread, bodies: bodies, locale: locale, timeZone: timeZone)
+        let semanticSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
+        let speech = prepareSpeech
+            ? try SpeechDocumentBuilder.prepare(document, source: semanticSource, language: language, options: SpeechOptions())
+            : nil
+        let headings = try document.select("h1, h2, h3, h4, h5, h6").array().map {
+            MarkdownHeading(id: try $0.attr("id"), title: try $0.text(), level: Int($0.tagName().dropFirst()) ?? 1)
+        }
+        let wordCount = try document.body()?.text().split(whereSeparator: \.isWhitespace).count ?? 0
+        // Apply one shared bound to the complete history, not one per message.
+        try await typeset(document)
+        let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        return RenderedMarkdown(html: htmlDocument(body, title: String(localized: "Discussion"), wide: true,
+            loadRemoteImages: loadRemoteImages, appearance: appearance, language: language,
+            extraBodyClass: "discussion-history", documentLabel: String(localized: "Discussion history")), headings: headings, wordCount: wordCount,
+            documentLanguage: language, speech: speech)
+    }
+
+    private func loadStylesheet() throws {
+        if stylesheet == nil {
+            guard let cssURL = Bundle(for: RendererBundleMarker.self).url(forResource: "reader", withExtension: "css") else {
+                throw ReaderError.rendererUnavailable
+            }
+            stylesheet = try String(contentsOf: cssURL, encoding: .utf8)
+        }
+    }
+
+    private func typeset(_ document: Document) async throws {
         for (index, expression) in try document.select("span.margined-math").array().enumerated() {
             let tex = try expression.text(trimAndNormaliseWhitespace: false)
             try expression.attr("data-margined-math-source", tex)
@@ -106,22 +158,22 @@ actor MarkdownRenderer {
             try pre.remove()
             try details.appendChild(pre)
         }
-        // Serialize the sanitized DOM itself, including newly attached task metadata.
-        // Source reuse can retain an input tag without its new attributes.
-        let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
-        let countSource = discussions.blocks.allSatisfy(\.hasCertainExtent) ? proseSource : discussions.wordCountSource
-        let count = countSource.split(whereSeparator: \.isWhitespace).count
+    }
+
+    private func htmlDocument(_ body: String, title: String, wide: Bool, loadRemoteImages: Bool,
+                              appearance: DocumentAppearance, language: String?, extraBodyClass: String = "",
+                              documentLabel: String = String(localized: "Markdown document")) -> String {
+        let bodyClass = ([wide ? "wide" : "", extraBodyClass].filter { !$0.isEmpty }).joined(separator: " ")
         let languageAttribute = language.map { " lang=\"\($0)\"" } ?? ""
-        let html = """
+        return """
         <!doctype html><html\(languageAttribute) data-appearance="\(appearance.rawValue)"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="referrer" content="no-referrer">
         <meta name="color-scheme" content="\(appearance.colorScheme)">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src margined-resource: data:\(loadRemoteImages ? " https:" : ""); base-uri 'none'; form-action 'none'">
         <title>\(Self.escapeHTML(title))</title><style>\(stylesheet ?? "")</style></head>
-        <body class="\(wide ? "wide" : "")"><main id="document" dir="auto" aria-label="\(Self.escapeHTML(String(localized: "Markdown document")))">\(body)</main></body></html>
+        <body class="\(bodyClass)"><main id="document" dir="auto" aria-label="\(Self.escapeHTML(documentLabel))">\(body)</main></body></html>
         """
-        return RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
     }
 
     private func parse(_ source: String, loadRemoteImages: Bool) throws -> Document {

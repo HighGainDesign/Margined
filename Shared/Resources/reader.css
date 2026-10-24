@@ -109,3 +109,11 @@ a:focus-visible, [tabindex="-1"]:focus-visible { outline: 2px solid var(--link);
 .margined-note-fill{position:absolute;background:Highlight;opacity:.10;pointer-events:none}
 .margined-note-button{position:absolute;box-sizing:border-box;pointer-events:auto;width:24px;height:24px;border:1px solid currentColor;border-radius:5px;background:Canvas;color:inherit;font:12px -apple-system,sans-serif;padding:1px;cursor:pointer}
 .margined-note-button:focus-visible{outline:2px solid Highlight;outline-offset:2px}
+
+
+/* Expanded histories share the reader's colors, typography and print rules. */
+.discussion-history main { max-width: none; padding: 0; }
+.discussion-history h1 { font-size: 1.3em; }
+.discussion-history header h3 { font-size: 1em; margin: .5em 0 .2em; letter-spacing: normal; }
+.discussion-history header p { color: var(--muted); font-size: .85em; margin: .2em 0; }
+.discussion-history article + article { border-block-start: 1px solid var(--line); margin-block-start: 20px; padding-block-start: 12px; }

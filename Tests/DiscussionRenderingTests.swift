@@ -59,4 +59,139 @@ final class DiscussionRenderingTests: XCTestCase {
         XCTAssertEqual(rendered.discussions?.blocks.first?.hasCertainExtent, false)
     }
 
+
+    func testConversationRendersRichBodiesWithTheDocumentsReadOnlyResourcePolicy() async throws {
+        let body = """
+        | Task | State |
+        | --- | --- |
+        | Review | Ready |
+
+        Inline math: $x^2$.
+
+        ```mermaid
+        flowchart LR
+          A[Read] --> B[Reply]
+        ```
+
+        ![Local](images/chart.png)
+
+        ![Remote](https://example.com/tracker.png)
+
+        - [ ] A task inside a comment.
+        """
+        let rendered = try await MarkdownRenderer.shared.renderDiscussion(conversation(body))
+        let document = try SwiftSoup.parse(rendered.html)
+        let available = try document.select("article[data-message-id=m-first]").size() == 1
+        XCTAssertTrue(available, "A conversation must render its saved message bodies, not an empty placeholder")
+        guard available else { return }
+        XCTAssertEqual(try document.select("table tbody td").text(), "Review Ready")
+        XCTAssertEqual(try document.select("span.margined-math math").size(), 1)
+        XCTAssertEqual(try document.select("figure.margined-diagram img[src^='data:image/svg+xml;base64,']").size(), 1)
+        XCTAssertEqual(try document.select("img[alt=Local]").attr("src"), "margined-resource://local/images%2Fchart%2Epng")
+        XCTAssertFalse(try document.select("img[alt=Remote]").hasAttr("src"))
+        XCTAssertEqual(try document.select("input[type=checkbox]:not([disabled])").size(), 0)
+        XCTAssertTrue(rendered.tasks.isEmpty)
+        XCTAssertNil(rendered.discussions)
+        XCTAssertNil(rendered.discussionText)
+        let allowed = try await MarkdownRenderer.shared.renderDiscussion(conversation(body), loadRemoteImages: true)
+        let remote = try SwiftSoup.parse(allowed.html).select("img[alt=Remote]")
+        XCTAssertEqual(try remote.attr("src"), "https://example.com/tracker.png")
+        XCTAssertEqual(try remote.attr("referrerpolicy"), "no-referrer")
+    }
+
+    func testConversationEscapesMetadataAndSeparatesEachMessagesMarkdownBoundary() async throws {
+        let author = #"<img src=x onerror="alert(1)"> **Alex**"#
+        let thread = conversation("```swift\nAn unfinished code fence.", second: "**A formatted reply.**", firstAuthor: author)
+        let rendered = try await MarkdownRenderer.shared.renderDiscussion(thread,
+            locale: Locale(identifier: "en_US"), timeZone: TimeZone(secondsFromGMT: 0)!)
+        let document = try SwiftSoup.parse(rendered.html)
+        let available = try document.select("article").size() == 2
+        XCTAssertTrue(available, "Each saved message must retain an independent body and literal metadata")
+        guard available else { return }
+        let first = try document.select("article[data-message-id=m-first]")
+        let second = try document.select("article[data-message-id=m-second]")
+        XCTAssertTrue(try first.select("header").text().contains(author))
+        XCTAssertEqual(try document.select("header img, script, [onerror], iframe").size(), 0)
+        XCTAssertEqual(try first.select("pre code").text(), "An unfinished code fence.")
+        XCTAssertEqual(try second.select("strong").text(), "A formatted reply.")
+        XCTAssertEqual(try first.select("time").attr("datetime"), "2026-10-23T10:00:00Z")
+        XCTAssertTrue(try first.select("time").text().contains("2026"))
+        XCTAssertNotEqual(try first.select("time").text(), "2026-10-23T10:00:00Z")
+        XCTAssertTrue(try second.select("header a").text().contains(author))
+        let replyTarget = try second.select("header a").attr("href")
+        XCTAssertTrue(replyTarget.hasPrefix("#"))
+        XCTAssertEqual(try first.attr("id"), String(replyTarget.dropFirst()))
+    }
+
+    func testConversationDoesNotRecursivelyParseExamplesAndKeepsBodyLinksLocal() async throws {
+        let example = """
+        ## Same heading
+
+        [Within this message](#same-heading)
+
+        ```md
+        <!-- margined:thread v1
+        id: t-example
+        state: open
+        target:
+          type: TextQuoteSelector
+          exact: "Example only."
+          prefix: ""
+          suffix: ""
+        messages:
+          - id: m-example
+            author: "Example Author"
+            created: "2026-10-23T10:00:00Z"
+            body: |
+              A code example, not another conversation.
+        -->
+        ```
+        """
+        let rendered = try await MarkdownRenderer.shared.renderDiscussion(conversation(example, second: "## Same heading\n\n[Another local link](#same-heading)"))
+        let document = try SwiftSoup.parse(rendered.html)
+        let available = try document.select("article").size() == 2
+        XCTAssertTrue(available, "Discussion example syntax must remain inside its original message")
+        guard available else { return }
+        XCTAssertNil(rendered.discussions)
+        XCTAssertNil(rendered.discussionText)
+        XCTAssertTrue(try document.select("pre code").text().contains("margined:thread v1"))
+        var headingIDs = Set<String>()
+        for article in try document.select("article").array() {
+            let heading = try article.select("h2").attr("id")
+            XCTAssertFalse(heading.isEmpty)
+            XCTAssertTrue(headingIDs.insert(heading).inserted, "Equal headings in separate messages must not duplicate DOM destinations")
+            let links = try article.select("a").array()
+            XCTAssertEqual(try links.last?.attr("href"), "#" + heading)
+        }
+    }
+
+    func testExplicitConversationSpeechIncludesAuthorsRepliesAndFormattedBody() async throws {
+        let thread = conversation("Read this comment.", second: "**Only this reply.**")
+        let rendered = try await MarkdownRenderer.shared.renderDiscussion(thread,
+            documentLanguage: "en", prepareSpeech: true)
+        let available = rendered.speech?.segments.isEmpty == false
+        XCTAssertTrue(available, "Explicit conversation playback must have its own semantic speech content")
+        guard available, let speech = rendered.speech else { return }
+        let text = speech.segments.map(\.text).joined(separator: " ")
+        XCTAssertTrue(text.contains("Alex"))
+        XCTAssertTrue(text.contains("Sam"))
+        XCTAssertTrue(text.contains("Read this comment."))
+        XCTAssertTrue(text.contains("Only this reply."))
+        XCTAssertFalse(text.contains("m-first"))
+        XCTAssertFalse(text.contains("m-second"))
+        XCTAssertFalse(text.contains("**"))
+        XCTAssertNil(rendered.discussions)
+        XCTAssertTrue(rendered.tasks.isEmpty)
+    }
+
+    private func conversation(_ body: String, second: String? = nil, firstAuthor: String = "Alex") -> DiscussionThread {
+        var messages = [DiscussionMessage(id: "m-first", author: firstAuthor, created: "2026-10-23T10:00:00Z", body: body, inReplyTo: nil)]
+        if let second {
+            messages.append(.init(id: "m-second", author: "Sam", created: "2026-10-23T10:30:00Z", body: second, inReplyTo: "m-first"))
+        }
+        return DiscussionThread(id: "t-conversation", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "Review this sentence.", prefix: "", suffix: "", section: nil),
+            messages: messages, resolvedBy: nil, resolved: nil, attachmentHistory: [])
+    }
+
 }
