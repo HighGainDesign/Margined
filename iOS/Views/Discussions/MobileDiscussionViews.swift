@@ -235,6 +235,12 @@ struct MobileDiscussionPassagePickerView: View {
     @State private var selected: Int?
     @Environment(\.dismiss) private var dismiss
     private var stale: Bool { !reader.matchesDiscussionVersion(picker.version) || reader.hasPendingFileUpdate }
+    private var explanation: String {
+        switch picker.request.intent {
+        case .add: String(localized: "Choose the text to discuss. Your comment stays unposted until you choose Post.")
+        case .reattach: String(localized: "Choose replacement text. You will compare the old and new passages before attaching.")
+        }
+    }
     private var units: [DiscussionTextUnit] {
         guard !query.isEmpty else { return picker.projection.units }
         return picker.projection.units.filter {
@@ -244,7 +250,7 @@ struct MobileDiscussionPassagePickerView: View {
     var body: some View {
         List {
             Section {
-                Text("Choose the text to discuss. Your comment stays unposted until you choose Post.")
+                Text(explanation)
                     .foregroundStyle(.secondary)
             }
             Section {
@@ -310,6 +316,13 @@ struct MobileDiscussionControls: View {
                 if thread.state == .open { reader.requestResolveDiscussion(thread.id) }
                 else { reader.reopenDiscussion(thread.id) }
             }.buttonStyle(.bordered).disabled(!reader.canEditDiscussions)
+            Button("Reattach…", systemImage: "link") {
+                guard reader.matchesDiscussionVersion(version) else {
+                    reader.discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+                }
+                reader.requestReattachDiscussion(thread.id)
+            }.buttonStyle(.bordered).disabled(!reader.canEditDiscussions)
+                .accessibilityHint("Select replacement text in the document, or choose a passage from a list.")
             Spacer()
         }
     }
@@ -329,7 +342,7 @@ private struct MobileDiscussionDecisionCard: View {
     let reader: MobileReaderState
     let decision: MobileDiscussionDecision
     private var stale: Bool {
-        !reader.matchesDiscussionVersion(decision.version) || reader.discussions.drafts[decision.key]?.revision != decision.draftRevision
+        !reader.matchesDiscussionVersion(decision.version) || (decision.checksDraftRevision && reader.discussions.drafts[decision.key]?.revision != decision.draftRevision)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -350,6 +363,14 @@ private struct MobileDiscussionDecisionCard: View {
                 Button("Cancel") { reader.cancelDiscussionDecision(decision.id) }
                 Button("Reopen and Reply") { reader.confirmDiscussionReopenReply(decision.id) }
                     .buttonStyle(.borderedProminent).disabled(stale || !reader.canEditDiscussions)
+            case let .reattach(_, old, selected):
+                Text("Attach this discussion to a new passage?").font(.headline).accessibilityAddTraits(.isHeader)
+                quote("Previous passage", old.exact)
+                quote("New passage", selected.target.exact)
+                Text("The previous passage stays in the discussion’s history.").font(.caption).foregroundStyle(.secondary)
+                Button("Cancel") { reader.cancelDiscussionDecision(decision.id) }
+                Button("Attach to Selection") { reader.confirmDiscussionReattachment(decision.id) }
+                    .buttonStyle(.borderedProminent).disabled(stale || !reader.canEditDiscussions)
             }
             if stale {
                 Label("The document or reply changed. Close this confirmation and try again.", systemImage: "exclamationmark.triangle")
@@ -359,5 +380,12 @@ private struct MobileDiscussionDecisionCard: View {
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
         .disabled(reader.fileSaving)
+    }
+    private func quote(_ title: LocalizedStringKey, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ScrollView { Text(verbatim: text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                .frame(maxHeight: 110)
+        }
     }
 }

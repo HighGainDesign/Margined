@@ -16,7 +16,7 @@ final class MobileReaderState {
     var discussionDecision: MobileDiscussionDecision?
     var discussionPassagePicker: MobileDiscussionPassagePicker?
     var discussionSelectionGeneration = 0
-    var discussionSelectionRequest: MobileDiscussionVersion?
+    var discussionSelectionRequest: MobileDiscussionSelectionRequest?
     var discussionMargin: DiscussionMarginSnapshot?
     var discussionUsesMargin = false
     var currentDiscussionVersion: MobileDiscussionVersion {

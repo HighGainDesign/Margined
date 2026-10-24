@@ -339,6 +339,95 @@ import XCTest
         XCTAssertNotNil(f.reader.discussionError)
     }
 
+    func testActualSelectionReattachmentRequiresConfirmationAndPreservesDraftAndHistory() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile"); f.reader.discussions.displayName = "Test Author"
+        f.reader.discussions.setDraft("Keep my unsent reply.", for: .thread("t-mobile"))
+        _ = try await f.web.callAsyncJavaScript("""
+        const paragraph=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent==='Before.');
+        const range=document.createRange();range.selectNodeContents(paragraph);
+        getSelection().removeAllRanges();getSelection().addRange(range);return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        f.reader.requestReattachDiscussion("t-mobile")
+        let offered = await poll { f.reader.discussionDecision != nil }
+        XCTAssertTrue(offered, "Reattachment needs an old/new quote comparison before writing")
+        guard let decision = f.reader.discussionDecision else { return }
+        if case let .reattach(id, old, selected) = decision.kind {
+            XCTAssertEqual(id, "t-mobile"); XCTAssertEqual(old.exact, "Café bold passage.")
+            XCTAssertEqual(selected.target.exact, "Before.")
+        } else { XCTFail("Expected reattachment comparison") }
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        f.reader.confirmDiscussionReattachment(decision.id)
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.target.exact == "Before." }
+        XCTAssertTrue(saved)
+        let thread = try XCTUnwrap(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first)
+        XCTAssertEqual(thread.messages.map(\.body), ["A portable note."])
+        XCTAssertEqual(thread.attachmentHistory.first?.target.exact, "Café bold passage.")
+        XCTAssertEqual(thread.attachmentHistory.first?.author, "Test Author")
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my unsent reply.")
+        XCTAssertNil(f.reader.discussionDecision)
+        f.reader.undoDiscussion()
+        _ = await poll { !f.reader.fileSaving && !f.reader.isRendering }
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my unsent reply.")
+    }
+
+    func testReattachmentWithoutSelectionUsesTheNativePassagePicker() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile"); f.reader.discussions.displayName = "Test Author"
+        _ = try await f.web.evaluateJavaScript("getSelection().removeAllRanges();true")
+        f.reader.requestReattachDiscussion("t-mobile")
+        let offered = await poll { f.reader.discussionPassagePicker != nil }
+        XCTAssertTrue(offered, "Reattach must offer accessible semantic passages when nothing is selected")
+        guard let picker = f.reader.discussionPassagePicker else { return }
+        let unit = try XCTUnwrap(picker.projection.units.first { $0.text == "Before." })
+        f.reader.confirmDiscussionPassage(unit.id, pickerID: picker.id)
+        let decision = try XCTUnwrap(f.reader.discussionDecision)
+        if case let .reattach(_, old, selected) = decision.kind {
+            XCTAssertEqual(old.exact, "Café bold passage."); XCTAssertEqual(selected.target.exact, "Before.")
+        } else { XCTFail("Choosing a replacement must compare the quotes, not start a new discussion") }
+        XCTAssertTrue(f.reader.discussions.drafts.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        f.reader.cancelDiscussionDecision(decision.id)
+        XCTAssertNil(f.reader.discussionDecision)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testReattachmentRejectsStaleSourceAndOldDecisionsButKeepsNewTyping() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile"); f.reader.discussions.displayName = "Test Author"
+        f.reader.discussions.setDraft("My original draft.", for: .thread("t-mobile"))
+        _ = try await f.web.evaluateJavaScript("getSelection().removeAllRanges();true")
+        f.reader.requestReattachDiscussion("t-mobile")
+        let offered = await poll { f.reader.discussionPassagePicker != nil }
+        XCTAssertTrue(offered)
+        guard let picker = f.reader.discussionPassagePicker else { return }
+        let unit = try XCTUnwrap(picker.projection.units.first { $0.text == "Before." })
+        f.reader.confirmDiscussionPassage(unit.id, pickerID: picker.id)
+        let old = try XCTUnwrap(f.reader.discussionDecision)
+        try f.original.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.reader.confirmDiscussionReattachment(old.id)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertNotNil(f.reader.discussionError)
+        f.reader.cancelDiscussionDecision(old.id)
+        f.reader.requestReattachDiscussion("t-mobile")
+        let currentOffered = await poll { f.reader.discussionPassagePicker != nil }
+        XCTAssertTrue(currentOffered)
+        let currentPicker = try XCTUnwrap(f.reader.discussionPassagePicker)
+        let currentUnit = try XCTUnwrap(currentPicker.projection.units.first { $0.text == "Before." })
+        f.reader.confirmDiscussionPassage(currentUnit.id, pickerID: currentPicker.id)
+        let current = try XCTUnwrap(f.reader.discussionDecision)
+        f.reader.confirmDiscussionReattachment(old.id); f.reader.cancelDiscussionDecision(old.id)
+        XCTAssertEqual(f.reader.discussionDecision?.id, current.id)
+        f.reader.discussions.setDraft("New typing stays with my reply.", for: .thread("t-mobile"))
+        f.reader.confirmDiscussionReattachment(current.id)
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.target.exact == "Before." }
+        XCTAssertTrue(saved)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "New typing stays with my reply.")
+        XCTAssertEqual(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first?.attachmentHistory.count, 1)
+    }
+
     private enum FixtureFailure: Error { case documentDidNotLoad }
     private struct Fixture {
         let reader: MobileReaderState

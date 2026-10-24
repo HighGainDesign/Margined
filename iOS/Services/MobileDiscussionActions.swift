@@ -4,21 +4,28 @@ struct MobileDiscussionVersion {
     let context: UUID
     let snapshot: SourceFileEdit.Snapshot?
 }
+struct MobileDiscussionSelectionRequest {
+    enum Intent { case add, reattach(String) }
+    let intent: Intent
+    let version: MobileDiscussionVersion
+}
 struct MobileDiscussionPassagePicker: Identifiable {
     let id = UUID()
-    let version: MobileDiscussionVersion
+    let request: MobileDiscussionSelectionRequest
     let projection: DiscussionTextProjection
+    var version: MobileDiscussionVersion { request.version }
 }
 struct MobileDiscussionDecision: Identifiable {
-    enum Kind { case resolve(String, UUID?), reopenReply(DiscussionSession.DraftKey, UUID) }
+    enum Kind { case resolve(String, UUID?), reopenReply(DiscussionSession.DraftKey, UUID), reattach(String, DiscussionTarget, DiscussionSelection) }
     let id = UUID()
     let version: MobileDiscussionVersion
     let kind: Kind
     var key: DiscussionSession.DraftKey {
-        switch kind { case let .resolve(id, _): .thread(id); case let .reopenReply(key, _): key }
+        switch kind { case let .resolve(id, _): .thread(id); case let .reopenReply(key, _): key; case let .reattach(id, _, _): .thread(id) }
     }
+    var checksDraftRevision: Bool { if case .reattach = kind { return false }; return true }
     var draftRevision: UUID? {
-        switch kind { case let .resolve(_, revision): revision; case let .reopenReply(_, revision): revision }
+        switch kind { case let .resolve(_, revision): revision; case let .reopenReply(_, revision): revision; case .reattach: nil }
     }
 }
 enum MobileDiscussionRoute: Hashable { case list, thread(DiscussionSession.DraftKey) }
@@ -67,13 +74,41 @@ extension MobileReaderState {
               let selection = picker.projection.selection(unit.range, renderID: "passage-picker-" + picker.id.uuidString) else {
             discussionError = DiscussionSession.Failure.unavailable.localizedDescription; return
         }
-        discussionSelectionRequest = picker.version
+        discussionSelectionRequest = picker.request
         discussionPassagePicker = nil
         acceptNewDiscussionSelection(selection)
     }
     func cancelDiscussionPassage(pickerID: UUID) {
         guard discussionPassagePicker?.id == pickerID else { return }
         discussionPassagePicker = nil
+    }
+    func requestReattachDiscussion(_ threadID: String) {
+        guard discussionPassagePicker == nil, canEditDiscussions,
+              rendered?.discussions?.threads.contains(where: { $0.id == threadID }) == true else { return }
+        guard fileURL != nil else { offerDiscussionCopy(); return }
+        discussionDecision = nil
+        discussionSelectionRequest = .init(intent: .reattach(threadID), version: currentDiscussionVersion)
+        discussionSelectionGeneration += 1
+    }
+    func proposeDiscussionReattachment(_ threadID: String, selection: DiscussionSelection) {
+        guard canEditDiscussions, let projection = rendered?.discussionText,
+              let thread = rendered?.discussions?.threads.first(where: { $0.id == threadID }),
+              projection.selection(selection.range, renderID: selection.renderID) == selection else {
+            discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+        }
+        discussionDecision = .init(version: currentDiscussionVersion, kind: .reattach(threadID, thread.target, selection))
+        openDiscussion(threadID); discussionError = nil
+    }
+    func confirmDiscussionReattachment(_ decisionID: UUID) {
+        guard let decision = discussionDecision, decision.id == decisionID,
+              case let .reattach(threadID, _, selection) = decision.kind,
+              canConfirmDiscussionDecision(decision),
+              let document = rendered?.discussions, let projection = rendered?.discussionText else { return }
+        do {
+            let operation = try discussions.prepareReattach(threadID: threadID, selection: selection,
+                projection: projection, in: document, snapshot: decision.version.snapshot)
+            commitDiscussion(operation, decisionID: decisionID)
+        } catch { discussionError = error.localizedDescription }
     }
     func requestResolveDiscussion(_ threadID: String) {
         guard canEditDiscussions, rendered?.discussions?.threads.contains(where: { $0.id == threadID && $0.state == .open }) == true else { return }
@@ -105,7 +140,7 @@ extension MobileReaderState {
         guard matchesDiscussionVersion(decision.version) else {
             discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return false
         }
-        guard discussions.drafts[decision.key]?.revision == decision.draftRevision else {
+        guard !decision.checksDraftRevision || discussions.drafts[decision.key]?.revision == decision.draftRevision else {
             discussionError = String(localized: "Your reply changed. Review it before confirming again."); return false
         }
         return true
@@ -119,24 +154,28 @@ extension MobileReaderState {
     }
     func requestAddDiscussion() {
         guard discussionPassagePicker == nil, canEditDiscussions, rendered?.discussionText != nil else { return }
-        discussionSelectionRequest = currentDiscussionVersion
+        discussionSelectionRequest = .init(intent: .add, version: currentDiscussionVersion)
         discussionSelectionGeneration += 1
     }
     func acceptNewDiscussionSelection(_ selection: DiscussionSelection?) {
-        guard let version = discussionSelectionRequest else { return }
+        guard let request = discussionSelectionRequest else { return }
         discussionSelectionRequest = nil
-        guard matchesDiscussionVersion(version), canEditDiscussions, let projection = rendered?.discussionText else {
+        guard matchesDiscussionVersion(request.version), canEditDiscussions, let projection = rendered?.discussionText else {
             discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
         }
         guard let selection else {
             discussionError = nil
-            discussionPassagePicker = .init(version: version, projection: projection)
+            discussionPassagePicker = .init(request: request, projection: projection)
             return
         }
-        do {
-            let key = try discussions.beginDraft(selection, in: projection)
-            inspector = .discussions; discussionRoute = key; discussionError = nil
-        } catch { discussionError = error.localizedDescription }
+        switch request.intent {
+        case let .reattach(threadID): proposeDiscussionReattachment(threadID, selection: selection)
+        case .add:
+            do {
+                let key = try discussions.beginDraft(selection, in: projection)
+                inspector = .discussions; discussionRoute = key; discussionError = nil
+            } catch { discussionError = error.localizedDescription }
+        }
     }
     func openDiscussion(_ threadID: String) {
         guard rendered?.discussions?.threads.contains(where: { $0.id == threadID }) == true else { return }
