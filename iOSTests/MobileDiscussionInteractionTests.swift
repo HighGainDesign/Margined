@@ -428,6 +428,124 @@ import XCTest
         XCTAssertEqual(try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads.first?.attachmentHistory.count, 1)
     }
 
+    func testNativeCopyPickerShowsAReadOnlyPreviewBeforeExplicitImport() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep my local reply.", for: .thread("t-mobile"))
+        let other = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        let incoming = try incomingCopy(f.original, conflict: false); try incoming.write(to: other)
+        defer { try? FileManager.default.removeItem(at: other) }
+        f.reader.requestReviewAnotherCopy()
+        XCTAssertNotNil(f.reader.discussionCopyRequest, "Review Another Copy must start a version-fenced native file choice")
+        guard f.reader.discussionCopyRequest != nil else { return }
+        let mounted = await poll { self.documentPicker(in: f.host) != nil }
+        XCTAssertTrue(mounted)
+        let picker = try XCTUnwrap(documentPicker(in: f.host))
+        XCTAssertFalse(picker.allowsMultipleSelection)
+        picker.delegate?.documentPicker?(picker, didPickDocumentsAt: [other])
+        let reviewed = await poll { f.reader.discussionImportReview != nil }
+        XCTAssertTrue(reviewed)
+        let review = try XCTUnwrap(f.reader.discussionImportReview)
+        XCTAssertEqual(review.preview.items.first?.kind, .replies)
+        XCTAssertEqual(f.reader.fileURL, f.file)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertEqual(try Data(contentsOf: other), incoming)
+        f.reader.confirmDiscussionImport(review.id)
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.first?.messages.count == 2 }
+        XCTAssertTrue(saved)
+        XCTAssertTrue(f.reader.source.hasPrefix("# Plan\n"))
+        XCTAssertFalse(f.reader.source.contains("# Other copy prose"))
+        XCTAssertEqual(try Data(contentsOf: other), incoming)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my local reply.")
+        XCTAssertNil(f.reader.discussionImportReview)
+        f.reader.undoDiscussion(); _ = await poll { !f.reader.fileSaving && !f.reader.isRendering }
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testOldFilePickerSelectionCannotReviewIntoAnotherDocument() async throws {
+        let f = try await fixture(withThread: true)
+        let other = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        try incomingCopy(f.original, conflict: false).write(to: other)
+        defer { try? FileManager.default.removeItem(at: other) }
+        f.reader.requestReviewAnotherCopy()
+        XCTAssertNotNil(f.reader.discussionCopyRequest)
+        guard let request = f.reader.discussionCopyRequest else { return }
+        let second = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        try f.original.write(to: second); defer { try? FileManager.default.removeItem(at: second) }
+        await f.reader.open(url: second); await f.reader.waitForRendering()
+        await f.reader.completeDiscussionCopyPicker(other, request: request)
+        XCTAssertEqual(f.reader.fileURL, second)
+        XCTAssertNil(f.reader.discussionImportPreview)
+        XCTAssertNil(f.reader.discussionImportReview)
+        XCTAssertEqual(try Data(contentsOf: second), f.original)
+        f.reader.discussions.discardDrafts(); await f.reader.close()
+    }
+
+    func testConflictingCopyRequiresAChoiceAndCanRemainSeparate() async throws {
+        let f = try await fixture(withThread: true)
+        let other = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        let incoming = try incomingCopy(f.original, conflict: true); try incoming.write(to: other)
+        defer { try? FileManager.default.removeItem(at: other) }
+        f.reader.requestReviewAnotherCopy()
+        XCTAssertNotNil(f.reader.discussionCopyRequest)
+        guard f.reader.discussionCopyRequest != nil else { return }
+        let mounted = await poll { self.documentPicker(in: f.host) != nil }; XCTAssertTrue(mounted)
+        let picker = try XCTUnwrap(documentPicker(in: f.host))
+        picker.delegate?.documentPicker?(picker, didPickDocumentsAt: [other])
+        let reviewed = await poll { f.reader.discussionImportReview != nil }; XCTAssertTrue(reviewed)
+        let review = try XCTUnwrap(f.reader.discussionImportReview)
+        XCTAssertEqual(review.preview.items.first?.kind, .conflict)
+        XCTAssertEqual(review.preview.current.threads.first?.messages.first?.body, "A portable note.")
+        XCTAssertEqual(review.preview.incoming.threads.first?.messages.first?.body, "Incoming conflicting comment.")
+        f.reader.confirmDiscussionImport(review.id)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertNotNil(f.reader.discussionError)
+        f.reader.confirmDiscussionImport(review.id, choices: ["t-mobile": .keepSeparate])
+        let saved = await poll { !f.reader.fileSaving && !f.reader.isRendering && f.reader.rendered?.discussions?.threads.count == 2 }; XCTAssertTrue(saved)
+        let threads = try DiscussionCodec.parse(MarkdownSource.read(f.file)).threads
+        XCTAssertEqual(Set(threads.flatMap(\.messages).map(\.body)), ["A portable note.", "Incoming conflicting comment."])
+        XCTAssertEqual(Set(threads.flatMap(\.messages).map(\.id)).count, 2)
+        XCTAssertEqual(try Data(contentsOf: other), incoming)
+    }
+
+    func testImportReviewRejectsOldCallbacksAndReplacedCurrentFile() async throws {
+        let f = try await fixture(withThread: true)
+        let other = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        try incomingCopy(f.original, conflict: false).write(to: other)
+        defer { try? FileManager.default.removeItem(at: other) }
+        f.reader.requestReviewAnotherCopy()
+        XCTAssertNotNil(f.reader.discussionCopyRequest)
+        guard let request = f.reader.discussionCopyRequest else { return }
+        await f.reader.completeDiscussionCopyPicker(other, request: request)
+        let old = try XCTUnwrap(f.reader.discussionImportReview)
+        f.reader.cancelDiscussionImportReview(old.id)
+        _ = await poll { f.host.presentedViewController == nil }
+        f.reader.requestReviewAnotherCopy()
+        let currentRequest = try XCTUnwrap(f.reader.discussionCopyRequest)
+        await f.reader.completeDiscussionCopyPicker(other, request: currentRequest)
+        let current = try XCTUnwrap(f.reader.discussionImportReview)
+        f.reader.cancelDiscussionImportReview(old.id); f.reader.confirmDiscussionImport(old.id)
+        XCTAssertEqual(f.reader.discussionImportReview?.id, current.id)
+        try f.original.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.reader.confirmDiscussionImport(current.id)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertNotNil(f.reader.discussionError)
+    }
+
+    private func incomingCopy(_ data: Data, conflict: Bool) throws -> Data {
+        let source = try MarkdownSource.decode(data).replacingOccurrences(of: "# Plan\n", with: "# Other copy prose\n")
+        if conflict { return Data(source.replacingOccurrences(of: "A portable note.", with: "Incoming conflicting comment.").utf8) }
+        let document = try DiscussionCodec.parse(source)
+        let message = DiscussionMessage(id: "m-incoming", author: "Guest", created: "2026-10-24T10:00:00Z", body: "A reply from another copy.", inReplyTo: "m-mobile")
+        return try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .reply(threadID: "t-mobile", message: message, reopenResolved: false), in: document), to: Data(source.utf8), expectedSource: source)
+    }
+    private func documentPicker(in controller: UIViewController) -> UIDocumentPickerViewController? {
+        if let picker = controller as? UIDocumentPickerViewController { return picker }
+        if let presented = controller.presentedViewController, let picker = documentPicker(in: presented) { return picker }
+        return controller.children.lazy.compactMap { self.documentPicker(in: $0) }.first
+    }
+
     private enum FixtureFailure: Error { case documentDidNotLoad }
     private struct Fixture {
         let reader: MobileReaderState

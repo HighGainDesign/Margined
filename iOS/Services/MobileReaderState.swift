@@ -14,6 +14,8 @@ final class MobileReaderState {
     var inspector: Inspector?
     var discussionRoute: DiscussionSession.DraftKey?
     var discussionDecision: MobileDiscussionDecision?
+    var discussionCopyRequest: MobileDiscussionCopyRequest?
+    var discussionImportReview: MobileDiscussionImportReview?
     var discussionPassagePicker: MobileDiscussionPassagePicker?
     var discussionSelectionGeneration = 0
     var discussionSelectionRequest: MobileDiscussionSelectionRequest?
@@ -73,6 +75,7 @@ final class MobileReaderState {
     func discardDiscussionImport() {
         discussionImportRequest = UUID()
         discussionImportPreview = nil; discussionImportSnapshot = nil; discussionImportLoading = false
+        discussionImportReview = nil
     }
 
     func postDiscussion(reopenResolved: Bool = false, decisionID: UUID? = nil) {
@@ -321,6 +324,7 @@ final class MobileReaderState {
         discardDiscussionImport()
         inspector = nil; discussionRoute = nil; discussionSelectionRequest = nil; discussionMargin = nil
         discussionPassagePicker = nil; discussionDecision = nil
+        discussionCopyRequest = nil
         discussions.resetDocument(); discussionSaving = false; discussionError = nil; discussionCopyOffered = false
         pendingTransition = nil; showDraftDiscardConfirmation = false
         fileURL = nil; snapshot = nil; pendingSnapshot = nil

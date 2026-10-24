@@ -4,6 +4,8 @@ struct MobileDiscussionList: View {
     @Bindable var reader: MobileReaderState
     var body: some View {
         List {
+            if reader.discussionImportLoading { ProgressView("Reading discussions…") }
+            if let error = reader.discussionError { Label(error, systemImage: "exclamationmark.triangle").textSelection(.enabled) }
             Section {
                 Picker("Show discussions", selection: Binding(get: { reader.discussions.filter }, set: { reader.discussions.filter = $0 })) {
                     Text("Open").tag(DiscussionSession.Filter.open)
@@ -31,6 +33,9 @@ struct MobileDiscussionList: View {
             }
         }
         .navigationTitle("Discussions").navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) {
+            Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
+        } }
     }
     private var newDrafts: [DiscussionSession.DraftKey] {
         reader.discussions.drafts.keys.filter { if case .new = $0 { return true }; return false }
@@ -171,6 +176,9 @@ struct MobileDiscussionMargin: View {
                 Spacer()
                 Button("Hide discussions", systemImage: "xmark") { reader.hideDiscussions() }.labelStyle(.iconOnly)
             }
+            Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
+            if reader.discussionImportLoading { ProgressView("Reading discussions…") }
+            if let error = reader.discussionError { Label(error, systemImage: "exclamationmark.triangle").font(.footnote) }
             Picker("Show discussions", selection: Binding(get: { reader.discussions.filter }, set: { reader.discussions.filter = $0 })) {
                 Text("Open").tag(DiscussionSession.Filter.open)
                 Text("All").tag(DiscussionSession.Filter.all)

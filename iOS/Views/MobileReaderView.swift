@@ -71,6 +71,7 @@ struct MobileReaderView: View {
                     Button("Add Discussion from Selection", systemImage: "plus.bubble") { reader.requestAddDiscussion() }
                         .disabled(reader.isRendering || reader.fileSaving)
                     Button("Discussions", systemImage: "bubble.left.and.bubble.right") { reader.inspector = .discussions }
+                    MobileDiscussionFileActions(reader: reader)
                     Button("Find…", systemImage: "magnifyingglass") { showFind.toggle() }
                     Button("Read Aloud", systemImage: "speaker.wave.2") { showPlayer = true; reader.startSpeech() }
                     if reader.fileURL != nil {
