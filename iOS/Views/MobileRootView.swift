@@ -21,7 +21,7 @@ struct MobileRootView: View {
         Group {
             if reader.hasDocument {
                 MobileDocumentWorkspace(reader: reader, openFolder: { pickFolder() },
-                    closeFile: { Task { await reader.close() } })
+                    closeFile: { Task { await reader.close() } }).id(reader.id)
             } else {
                 NavigationStack { libraryView.navigationTitle("Margined").navigationBarTitleDisplayMode(.inline) }
             }
@@ -75,6 +75,19 @@ struct MobileRootView: View {
                 if url.isFileURL { await open(url) }
                 else { await reader.openPreview(url: url) }
             }
+        }
+        .onChange(of: reader.discussionCopyOpenRequest) { _, request in
+            guard let request else { return }
+            let original = reader
+            do {
+                if let copy = try original.takeDiscussionCopyToOpen(request) {
+                    reader = copy
+                    Task {
+                        await original.close()
+                        if let url = copy.fileURL { try? await library.remember(url) }
+                    }
+                }
+            } catch { original.discussionError = error.localizedDescription }
         }
         .onChange(of: scenePhase) { _, phase in
             Task { await reader.setPresented(phase == .active) }

@@ -16,6 +16,10 @@ final class MobileReaderState {
     var discussionDecision: MobileDiscussionDecision?
     var discussionCopyRequest: MobileDiscussionCopyRequest?
     var discussionImportReview: MobileDiscussionImportReview?
+    var discussionExport: MobileDiscussionExport?
+    var discussionExportResult: MobileDiscussionExportResult?
+    var discussionCopyOpenRequest: UUID?
+    private(set) var discussionCopySaving = false
     var discussionPassagePicker: MobileDiscussionPassagePicker?
     var discussionSelectionGeneration = 0
     var discussionSelectionRequest: MobileDiscussionSelectionRequest?
@@ -27,7 +31,7 @@ final class MobileReaderState {
     private(set) var discussionSaving = false
     var discussionError: String?
     private(set) var discussionCopyOffered = false
-    var fileSaving: Bool { checklistSaving || discussionSaving }
+    var fileSaving: Bool { checklistSaving || discussionSaving || discussionCopySaving }
     var canUndoDiscussion: Bool { canEditDiscussions && discussions.canUndo(snapshot: snapshot?.sourceSnapshot) }
     var canRedoDiscussion: Bool { canEditDiscussions && discussions.canRedo(snapshot: snapshot?.sourceSnapshot) }
     private(set) var discussionImportPreview: DiscussionImportPreview?
@@ -322,6 +326,7 @@ final class MobileReaderState {
         playback.documentWillChange(ownerID: id)
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
         discardDiscussionImport()
+        if let export = discussionExport { cancelDiscussionExport(export.id) }
         inspector = nil; discussionRoute = nil; discussionSelectionRequest = nil; discussionMargin = nil
         discussionPassagePicker = nil; discussionDecision = nil
         discussionCopyRequest = nil
@@ -581,6 +586,15 @@ final class MobileReaderState {
         if hasPendingFileUpdate { playback.notePendingVersion(ownerID: id) }
     }
     func waitForRendering() async { await renderTask?.value }
+    func makeDiscussionCopyReader() -> MobileReaderState { MobileReaderState(playback: playback, defaults: defaults) }
+    func performDiscussionFileSave(_ action: @escaping @MainActor () async -> Void) {
+        // Set the gate before creating the task: close/open must wait for an accepted save.
+        discussionCopySaving = true
+        saveTask = Task { [self] in
+            await action()
+            discussionCopySaving = false
+        }
+    }
     func waitForSaving() async { await saveTask?.value }
     private struct Consent { let leaseID: UUID; let source: String; let task: MarkdownTask; let checked: Bool }
     private struct Operation { let task: MarkdownTask; let marker: UInt8 }

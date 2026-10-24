@@ -11,22 +11,24 @@ struct MobileDiscussionImportReview: Identifiable {
     let incomingName: String
 }
 enum MobileDiscussionSheet: Identifiable {
-    case passage(MobileDiscussionPassagePicker), importReview(MobileDiscussionImportReview)
-    var id: UUID { switch self { case let .passage(value): value.id; case let .importReview(value): value.id } }
+    case passage(MobileDiscussionPassagePicker), importReview(MobileDiscussionImportReview), export(MobileDiscussionExport)
+    var id: UUID { switch self { case let .passage(value): value.id; case let .importReview(value): value.id; case let .export(value): value.id } }
 }
 extension MobileReaderState {
     var discussionSheet: MobileDiscussionSheet? {
         if let passage = discussionPassagePicker { return .passage(passage) }
         if let review = discussionImportReview { return .importReview(review) }
+        if let export = discussionExport { return .export(export) }
         return nil
     }
     func dismissDiscussionSheet(_ id: UUID) {
         if discussionPassagePicker?.id == id { cancelDiscussionPassage(pickerID: id) }
         else if discussionImportReview?.id == id { cancelDiscussionImportReview(id) }
+        else if discussionExport?.id == id { cancelDiscussionExport(id) }
     }
     func requestReviewAnotherCopy() {
         guard canEditDiscussions, !discussionImportLoading, discussionPassagePicker == nil,
-              discussionCopyRequest == nil, discussionImportReview == nil else { return }
+              discussionCopyRequest == nil, discussionImportReview == nil, discussionExport == nil else { return }
         inspector = .discussions; discussionRoute = nil
         guard fileURL != nil else { offerDiscussionCopy(); return }
         discardDiscussionImport(); discussionDecision = nil; discussionError = nil

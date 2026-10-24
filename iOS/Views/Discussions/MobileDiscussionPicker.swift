@@ -97,6 +97,9 @@ struct MobileDiscussionSheetPresenter: View {
                 case let .importReview(review):
                     NavigationStack { MobileDiscussionImportView(reader: reader, review: review) }
                         .interactiveDismissDisabled(reader.fileSaving)
+                case let .export(export):
+                    NavigationStack { MobileDiscussionExportView(reader: reader, export: export) }
+                        .interactiveDismissDisabled(reader.fileSaving)
                 }
             }
             .task { if reader.discussionSheet?.id == sheet.id { presented = true } }

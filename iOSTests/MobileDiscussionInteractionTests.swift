@@ -533,6 +533,138 @@ import XCTest
         XCTAssertNotNil(f.reader.discussionError)
     }
 
+    func testSnapshotCopyMovesLatestDraftOnlyWhenExplicitlyOpened() async throws {
+        let f = try await fixture()
+        var previewURL = URLComponents(string: "margined://preview")!
+        previewURL.queryItems = [.init(name: "text", value: try MarkdownSource.decode(f.original)), .init(name: "title", value: "Snapshot")]
+        await f.reader.openPreview(url: try XCTUnwrap(previewURL.url))
+        await f.reader.waitForRendering()
+        let projection = try XCTUnwrap(f.reader.rendered?.discussionText)
+        let unit = try XCTUnwrap(projection.units.first { $0.text.contains("bold passage") })
+        let selection = try XCTUnwrap(projection.selection(unit.range, renderID: "copy-test"))
+        let key = try f.reader.discussions.beginDraft(selection, in: projection)
+        f.reader.discussions.displayName = "Copy Author"
+        f.reader.discussions.setDraft("Unposted before saving.", for: key)
+        f.reader.requestDiscussionExport(.savedCopy)
+        XCTAssertNotNil(f.reader.discussionExport, "A read-only snapshot must offer a native new-copy flow")
+        guard let export = f.reader.discussionExport else { return }
+        let target = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        defer { try? FileManager.default.removeItem(at: target) }
+        f.reader.createDiscussionExport(export.id, at: target)
+        XCTAssertTrue(f.reader.fileSaving, "Save must be accepted synchronously before close or navigation")
+        await f.reader.waitForSaving()
+        let result = try XCTUnwrap(f.reader.discussionExportResult)
+        XCTAssertEqual(try Data(contentsOf: target), f.original)
+        XCTAssertNil(f.reader.fileURL)
+        XCTAssertEqual(f.reader.discussions.drafts[key]?.body, "Unposted before saving.")
+        f.reader.discussions.setDraft("A newer reply before moving.", for: key)
+        let copy = try XCTUnwrap(f.reader.takeDiscussionCopyToOpen(result.id))
+        defer { Task { @MainActor in copy.discussions.discardDrafts(); await copy.close() } }
+        XCTAssertEqual(copy.fileURL, target)
+        XCTAssertEqual(copy.discussions.drafts[key]?.body, "A newer reply before moving.")
+        XCTAssertFalse(f.reader.discussions.hasUnpostedDrafts)
+        XCTAssertEqual(copy.discussions.draftAnchor(for: key)?.status, .attached)
+        copy.postDiscussion(); await copy.waitForSaving(); await copy.waitForRendering()
+        XCTAssertEqual(try DiscussionCodec.parse(MarkdownSource.read(target)).threads.first?.messages.first?.body, "A newer reply before moving.")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testNativeExportModesPreserveSourceEncodingAndDrafts() async throws {
+        let f = try await fixture(withThread: true)
+        let encoded = Data([0xff, 0xfe]) + (try MarkdownSource.decode(f.original)).data(using: .utf16LittleEndian)!
+        try encoded.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.reader.discussions.setDraft("Never export this unsaved reply.", for: .thread("t-mobile"))
+        for kind in [MobileDiscussionExport.Kind.markdown, .clean, .conversation] {
+            f.reader.requestDiscussionExport(kind)
+            XCTAssertNotNil(f.reader.discussionExport, "Each labeled export must prepare its real document payload")
+            guard let export = f.reader.discussionExport else { return }
+            let target = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+            defer { try? FileManager.default.removeItem(at: target) }
+            if kind == .clean { XCTAssertEqual(export.removedBlocks, 1) }
+            f.reader.createDiscussionExport(export.id, at: target); await f.reader.waitForSaving()
+            let written = try Data(contentsOf: target), text = try MarkdownSource.decode(written)
+            switch kind {
+            case .markdown: XCTAssertEqual(written, encoded)
+            case .clean:
+                XCTAssertTrue(written.starts(with: [0xff, 0xfe]))
+                XCTAssertTrue(try DiscussionCodec.parse(text).blocks.isEmpty)
+                XCTAssertTrue(text.contains("Cafe\u{301} **bold** passage."))
+            case .conversation:
+                XCTAssertTrue(text.contains("A portable note."))
+                XCTAssertTrue(text.contains("Reviewer"))
+                XCTAssertFalse(text.contains("<!-- margined:thread"))
+            case .savedCopy: XCTFail("This case tests exported files, not reader handoff")
+            }
+            XCTAssertFalse(text.contains("Never export this unsaved reply."))
+            XCTAssertEqual(try Data(contentsOf: f.file), encoded)
+            XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Never export this unsaved reply.")
+            f.reader.cancelDiscussionExport(export.id)
+        }
+    }
+
+    func testExportNeverOverwritesAnExistingDestination() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.discussions.setDraft("Keep my reply after failure.", for: .thread("t-mobile"))
+        f.reader.requestDiscussionExport(.savedCopy)
+        XCTAssertNotNil(f.reader.discussionExport)
+        guard let export = f.reader.discussionExport else { return }
+        let target = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        let other = Data("A different existing file.\n".utf8); try other.write(to: target)
+        defer { try? FileManager.default.removeItem(at: target) }
+        f.reader.createDiscussionExport(export.id, at: target); await f.reader.waitForSaving()
+        XCTAssertEqual(try Data(contentsOf: target), other)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertNotNil(f.reader.discussionError)
+        XCTAssertNil(f.reader.discussionExportResult)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my reply after failure.")
+        XCTAssertEqual(f.reader.discussionExport?.id, export.id)
+    }
+
+    func testOldExportCallbackCannotSaveOrDismissAnotherDocument() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.requestDiscussionExport(.clean)
+        XCTAssertNotNil(f.reader.discussionExport)
+        guard let old = f.reader.discussionExport else { return }
+        let second = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        let target = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        try f.original.write(to: second)
+        defer { try? FileManager.default.removeItem(at: second); try? FileManager.default.removeItem(at: target) }
+        await f.reader.open(url: second); await f.reader.waitForRendering()
+        f.reader.requestDiscussionExport(.markdown)
+        let current = try XCTUnwrap(f.reader.discussionExport)
+        f.reader.cancelDiscussionExport(old.id)
+        f.reader.createDiscussionExport(old.id, at: target); await f.reader.waitForSaving()
+        XCTAssertEqual(f.reader.discussionExport?.id, current.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertEqual(try Data(contentsOf: second), f.original)
+        f.reader.cancelDiscussionExport(current.id)
+        f.reader.requestDiscussionExport(.clean)
+        let review = try XCTUnwrap(f.reader.discussionExport)
+        try f.original.write(to: second, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.reader.createDiscussionExport(review.id, at: target); await f.reader.waitForSaving()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertNotNil(f.reader.discussionError)
+    }
+
+    func testCloseDrainsAnAcceptedNewCopySave() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.requestDiscussionExport(.savedCopy)
+        XCTAssertNotNil(f.reader.discussionExport)
+        guard let export = f.reader.discussionExport else { return }
+        let target = f.file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".md")
+        defer { try? FileManager.default.removeItem(at: target) }
+        f.reader.createDiscussionExport(export.id, at: target)
+        XCTAssertTrue(f.reader.fileSaving)
+        await f.reader.close()
+        XCTAssertEqual(try Data(contentsOf: target), f.original)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        XCTAssertFalse(f.reader.hasDocument)
+        XCTAssertFalse(f.reader.fileSaving)
+        XCTAssertNil(f.reader.discussionExportResult)
+    }
+
     private func incomingCopy(_ data: Data, conflict: Bool) throws -> Data {
         let source = try MarkdownSource.decode(data).replacingOccurrences(of: "# Plan\n", with: "# Other copy prose\n")
         if conflict { return Data(source.replacingOccurrences(of: "A portable note.", with: "Incoming conflicting comment.").utf8) }
