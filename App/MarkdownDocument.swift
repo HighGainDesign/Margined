@@ -79,10 +79,14 @@ final class MarkdownDocument: NSDocument {
         reader.title = loaded.title
         reader.installLoadedSnapshot(loaded.snapshot)
         let controller = NSHostingController(rootView: ReaderView(reader: reader))
-        let window = NSWindow(contentViewController: controller)
+        let size = NSSize(width: 920, height: 760)
+        // Avoid fitting SwiftUI content at a transient size before resizing it.
+        controller.view.setFrameSize(size)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
         window.title = reader.title
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 920, height: 760))
         window.minSize = NSSize(width: 480, height: 320)
         window.center()
         addWindowController(NSWindowController(window: window))

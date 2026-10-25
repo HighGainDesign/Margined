@@ -123,6 +123,19 @@ class NativeObserverContract(unittest.TestCase):
         self.assertLess(statistics.median(navigation_ms), 20,
                         'Warm documents should avoid fresh WebKit startup: ' + str(statistics.median(navigation_ms)))
 
+    def test_warm_window_opening_avoids_initial_fitting(self):
+        _, payload, _ = self.launch('collapsed', threads=0, fixture='prose', kind='warm', samples=20)
+        rows = payload['samples']
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len({row['pid'] for row in rows}), 1)
+        frame_ms = [(row['frame_ns'] - row['request_ns']) / 1_000_000 for row in rows]
+        window_ms = [(row['opening_lifecycle']['window_finished_ns']
+                      - row['opening_lifecycle']['window_started_ns']) / 1_000_000 for row in rows]
+        self.assertLess(statistics.median(frame_ms), 140,
+                        'Window sizing must improve complete warm opening: ' + str(statistics.median(frame_ms)))
+        self.assertLess(statistics.median(window_ms), 20,
+                        'Initial window setup should avoid content fitting: ' + str(statistics.median(window_ms)))
+
     def test_wrong_discussion_expectation_cannot_yield_a_fast_success(self):
         code, payload, _ = self.launch('expanded', threads=19, require_ready=False)
         self.assertNotEqual(code, 0, 'A wrong note count must reject the sample')

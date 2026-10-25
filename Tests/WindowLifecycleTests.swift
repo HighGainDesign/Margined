@@ -24,6 +24,15 @@ final class WindowLifecycleTests: XCTestCase {
         XCTAssertFalse(welcome.isVisible)
 
         let reader = try XCTUnwrap(document.windowControllers.first?.window)
+        XCTAssertEqual(reader.contentView?.bounds.size, NSSize(width: 920, height: 760))
+        XCTAssertEqual(reader.minSize, NSSize(width: 480, height: 320))
+        XCTAssertEqual(reader.title, "Reader check")
+        XCTAssertTrue(reader.styleMask.contains([.titled, .closable, .miniaturizable, .resizable]))
+        XCTAssertFalse(reader.isReleasedWhenClosed, "The document controller owns the window")
+        reader.setContentSize(NSSize(width: 700, height: 600))
+        reader.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertEqual(reader.contentView?.bounds.size, NSSize(width: 700, height: 600),
+                       "The reader must remain freely resizable")
         reader.miniaturize(nil)
         XCTAssertTrue(app.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
         XCTAssertFalse(reader.isMiniaturized)

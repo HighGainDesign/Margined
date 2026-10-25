@@ -747,7 +747,7 @@ final class ReaderState {
         let initialRead = sourceSnapshot == nil && !hasPendingFileUpdate ? fileURL.map { url in
             sourceGate.enqueue { try SourceFileEdit.read(url) }
         } : nil
-        renderTask = Task { [weak self] in
+        let operation: @MainActor @Sendable () async -> Void = { [weak self] in
             #if MARGINED_BENCHMARK
             ViewingBenchmarkSession.current?.recordOpening("render_task_started_ns", source: text)
             #endif
@@ -793,6 +793,13 @@ final class ReaderState {
                 self?.errorMessage = error.localizedDescription
                 self?.isRendering = false
             }
+        }
+        if #available(macOS 26.0, *) {
+            // Submit to the renderer actor before window presentation queues
+            // more main-actor work. Parsing still runs off the main actor.
+            renderTask = Task.immediate(operation: operation)
+        } else {
+            renderTask = Task(operation: operation)
         }
     }
 
