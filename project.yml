@@ -144,7 +144,10 @@ targets:
   MarginedTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [Tests]
+    sources:
+      - path: Tests
+      - path: Benchmarks/Fixtures
+        buildPhase: resources
     dependencies:
       - target: Margined
     settings:

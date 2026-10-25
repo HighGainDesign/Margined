@@ -47,6 +47,26 @@ final class ViewingBenchmarkMetricsTests: XCTestCase {
         XCTAssertThrowsError(try request.validatedSource(manifestURL: root.appendingPathComponent("request.json")))
     }
 
+    func testBenchmarkConversationsAttachToTheirReadablePassage() async throws {
+        let bundle = Bundle(for: ViewingBenchmarkMetricsTests.self)
+        for (name, threadCount, messageCount) in [("annotated", 20, 80), ("long-discussion", 1, 120)] {
+            let url = try XCTUnwrap(bundle.url(forResource: name + "-benchmark", withExtension: "md"))
+            let source = try String(contentsOf: url, encoding: .utf8)
+            let output = try await MarkdownRenderer.shared.render(source)
+            let document = try XCTUnwrap(output.discussions)
+            let projection = try XCTUnwrap(output.discussionText)
+            XCTAssertTrue(document.diagnostics.isEmpty, name)
+            XCTAssertEqual(document.threads.count, threadCount, name)
+            XCTAssertEqual(document.threads.reduce(0) { $0 + $1.messages.count }, messageCount, name)
+            XCTAssertEqual(projection.anchorResults.values.filter { $0.status == .attached }.count,
+                           threadCount, "The timed fixture must include attached conversations: " + name)
+            for thread in document.threads where projection.anchorResults[thread.id]?.status == .attached {
+                let range = try XCTUnwrap(projection.anchorResults[thread.id]?.range)
+                XCTAssertEqual((projection.text as NSString).substring(with: range), thread.target.exact)
+            }
+        }
+    }
+
     func testMonotonicStagesProduceSeparateMillisecondDurations() throws {
         let value = try ViewingBenchmarkMeasurement(index: 0, pid: 42, requestNS: 1_000_000,
             renderReadyNS: 4_000_000, frameNS: 9_500_000)

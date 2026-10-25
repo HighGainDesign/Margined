@@ -88,6 +88,13 @@ class ViewingBenchmarkTests(unittest.TestCase):
         self.assertIn('author: "Alex"', annotated)
         self.assertIn('author: "Sam"', annotated)
 
+    def test_native_contract_uses_the_actual_timed_conversation_inputs(self):
+        resources = MODULE.parents[1] / "Benchmarks" / "Fixtures"
+        for name in ("annotated", "long-discussion"):
+            with self.subTest(fixture=name):
+                self.assertEqual((resources / (name + "-benchmark.md")).read_text(), benchmark.fixtures()[name],
+                                 "Native anchor acceptance must exercise the inputs the timer actually opens")
+
     def test_local_image_cohort_stages_real_assets_in_multiple_directories(self):
         self.assertTrue(callable(getattr(benchmark, "write_fixture", None)),
                         "Native benchmark sessions must stage their fixture resources")

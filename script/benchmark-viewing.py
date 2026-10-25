@@ -49,7 +49,7 @@ def fixtures():
 def discussion_block(index, message_count):
     lines = ["<!-- margined:thread v1", f"id: t-benchmark-{index}", "state: open",
              "target:", "  type: TextQuoteSelector", '  exact: "Section 0"',
-             '  prefix: ""', '  suffix: ""', '  section: "Section 0"', "messages:"]
+             '  prefix: ""', '  suffix: "Read a local Markdown document,"', '  section: "Section 0"', "messages:"]
     for message in range(message_count):
         lines.extend([f"  - id: m-benchmark-{index}-{message}",
                       '    author: "Alex"' if message % 2 == 0 else '    author: "Sam"',
