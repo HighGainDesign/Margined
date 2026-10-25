@@ -121,6 +121,22 @@ def capture_provenance(app, source_root):
     return {"working_source": identified(dict(source, base=base)), "app_bundle": identified(bundle)}
 
 
+PHASE_KEYS = ("note_parse_ns", "markdown_parse_ns", "projection_ns", "anchor_ns",
+              "reading_metadata_ns", "review_tasks_ns", "artwork_ns", "serialization_ns")
+
+
+def phase_durations(row):
+    phases = row.get("render_phases")
+    total, layout = row.get("renderer_total_ns"), row.get("layout_ready_ns")
+    if (not isinstance(phases, dict) or set(phases) != set(PHASE_KEYS)
+            or any(type(value) is not int or value < 0 for value in phases.values())
+            or type(total) is not int or total < sum(phases.values())
+            or total > row["render_ready_ns"] - row["request_ns"]
+            or type(layout) is not int or not row["render_ready_ns"] <= layout <= row["frame_ns"]):
+        raise ValueError("missing or impossible renderer/layout phase measurements")
+    return dict(phases, renderer_ns=total, layout_wait_ns=layout-row["render_ready_ns"])
+
+
 def summarize(rows, expected_count, kind):
     if type(expected_count) is not int or not 1 <= expected_count <= 100 or kind not in ("cold", "warm", "refresh"):
         raise ValueError("invalid cohort request")
@@ -150,15 +166,51 @@ def summarize(rows, expected_count, kind):
         raise ValueError("cold/warm process reuse contract violated")
     def stats(values):
         return {"median": statistics.median(values), "p95": sorted(values)[math.ceil(len(values)*.95)-1]}
-    return {"samples": len(rows), "render_ms": stats(render), "frame_ms": stats(frame), "geometry": rows[0]["geometry"]}
+    result = {"samples": len(rows), "render_ms": stats(render), "frame_ms": stats(frame), "geometry": rows[0]["geometry"]}
+    if any("render_phases" in row for row in rows):
+        durations = [phase_durations(row) for row in rows]
+        result["phases_ms"] = {key.removesuffix("_ns"): stats([d[key]/1_000_000 for d in durations]) for key in PHASE_KEYS}
+        result["renderer_ms"] = stats([d["renderer_ns"]/1_000_000 for d in durations])
+        result["layout_wait_ms"] = stats([d["layout_wait_ns"]/1_000_000 for d in durations])
+    return result
 
 
 def read_result(payload, kind, count):
+    presentation = payload.get("presentation", "collapsed")
+    boundary = "verified-discussion-frame-v1" if presentation == "expanded" else "verified-frame-v1"
     if (payload.get("schema") != 1 or payload.get("status") != "ok" or payload.get("kind") != kind
-            or payload.get("configuration") != "Release" or payload.get("boundary") != "verified-frame-v1"):
+            or payload.get("configuration") != "Release" or payload.get("boundary") != boundary
+            or presentation not in ("collapsed", "expanded")):
         raise ValueError("child did not produce a valid optimized verified-frame result: " + str(payload.get("error", "invalid metadata")))
     rows = payload.get("samples", [])
     summarize(rows, count, "warm" if kind == "cold" else kind)
+    # Preserve the original collapsed baseline format; the new producer declares
+    # presentation and must supply complete phase and discussion evidence.
+    if "presentation" not in payload:
+        return rows
+    keys = ("thread_count", "message_count", "attached_count")
+    expected = payload.get("expected_discussions")
+    if (not isinstance(expected, dict) or set(expected) != set(keys)
+            or any(type(value) is not int or value < 0 for value in expected.values())
+            or expected["attached_count"] > expected["thread_count"]):
+        raise ValueError("missing or invalid discussion expectation")
+    for row in rows:
+        phase_durations(row)
+        layout = row.get("discussion_layout")
+        if (not isinstance(layout, dict) or any(type(layout.get(key)) is not int or layout.get(key) != expected[key] for key in keys)):
+            raise ValueError("discussion census differs from expectation")
+        if presentation == "expanded":
+            geometry, history = row["geometry"], layout.get("history_geometry", {})
+            if (expected["thread_count"] == 0 or layout.get("laid_out_cards") != expected["thread_count"]
+                    or type(layout.get("laid_out_cards")) is not int
+                    or not isinstance(layout.get("history_thread"), str) or not layout["history_thread"]
+                    or type(layout.get("history_messages")) is not int or not 1 <= layout["history_messages"] <= expected["message_count"]
+                    or geometry["viewportWidth"] > geometry["windowWidth"] - 300
+                    or not isinstance(history, dict)
+                    or any(type(history.get(key)) not in (int, float) or not math.isfinite(history.get(key)) or history.get(key) <= 0
+                           for key in ("windowWidth", "windowHeight", "viewportWidth", "viewportHeight", "backingScale"))
+                    or history["windowWidth"] != geometry["windowWidth"] or history["backingScale"] != geometry["backingScale"]):
+                raise ValueError("incomplete native discussion sidebar/history")
     return rows
 
 
@@ -175,12 +227,14 @@ def monotonic_ns():
     return library.mach_absolute_time() * timebase.numer // timebase.denom
 
 
-def run_session(executable, directory, text, kind, count, expected_math=0, expected_diagrams=0, assets=None):
+def run_session(executable, directory, text, kind, count, expected_math=0, expected_diagrams=0, assets=None, presentation="collapsed", expected_discussions=(0, 0, 0, 0)):
     directory.mkdir()
     source = write_fixture(directory, text, assets or {})
     request = {"version": 1, "kind": kind, "sourceFile": source.name,
                "expectedMarker": text.splitlines()[0][2:], "sampleCount": count,
-               "expectedMath": expected_math, "expectedDiagrams": expected_diagrams}
+               "expectedMath": expected_math, "expectedDiagrams": expected_diagrams,
+               "presentation": presentation, "expectedThreads": expected_discussions[0],
+               "expectedMessages": expected_discussions[1], "expectedAttached": expected_discussions[2]}
     manifest = directory / "request.json"
     manifest.write_text(json.dumps(request), encoding="utf-8")
     environment = dict(os.environ, MARGINED_BENCHMARK_REQUEST=str(manifest), MARGINED_TEST_PREFERENCES="1")
@@ -203,6 +257,11 @@ def run_session(executable, directory, text, kind, count, expected_math=0, expec
     if exit_code != 0:
         raise RuntimeError("benchmark failed: " + str(payload.get("error", exit_code)))
     read_result(payload, kind, count)
+    expected = dict(zip(("thread_count", "message_count", "attached_count"), expected_discussions[:3]))
+    if payload.get("presentation") != presentation or payload.get("expected_discussions") != expected:
+        raise ValueError("native result does not match the requested presentation/census")
+    if presentation == "expanded" and any(row["discussion_layout"]["history_messages"] != expected_discussions[3] for row in payload["samples"]):
+        raise ValueError("selected native history differs from fixture expectation")
     return payload
 
 
@@ -213,7 +272,10 @@ def main():
     parser.add_argument("--samples", type=int, default=20, choices=range(1, 101), metavar="1..100")
     parser.add_argument("--cases", nargs="+", default=["cold", "warm", "refresh"], choices=["cold", "warm", "refresh"])
     parser.add_argument("--fixtures", nargs="+", default=list(fixtures()), choices=list(fixtures()))
+    parser.add_argument("--presentation", choices=["collapsed", "expanded"], default="collapsed")
     args = parser.parse_args()
+    if args.presentation == "expanded" and any(name not in ("annotated", "long-discussion") for name in args.fixtures):
+        parser.error("expanded presentation requires annotated or long-discussion fixtures")
     if sys.platform != "darwin":
         parser.error("this launcher measures the native Mac app")
     app = args.app.resolve()
@@ -226,7 +288,9 @@ def main():
         parser.error(str(error))
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    report = {"schema": 1, "status": "incomplete", "boundary": "verified-frame-v1",
+    report = {"schema": 1, "status": "incomplete",
+              "boundary": "verified-discussion-frame-v1" if args.presentation == "expanded" else "verified-frame-v1",
+              "presentation": args.presentation,
               "boundary_description": "Request to correct DOM, two animation frames and verified WebKit snapshot in a visible window of the active app; includes verification overhead. Not scan-out timing.",
               "hardware": {"machine": platform.machine(), "model": subprocess.check_output(["sysctl", "-n", "hw.model"], text=True).strip(), "os": platform.mac_ver()[0]},
               "app": {key: info.get(key) for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion")},
@@ -243,7 +307,8 @@ def main():
                     child = run_session(executable, output / f"{name}-{kind}-{session:03}", text, kind,
                                         1 if kind == "cold" else args.samples,
                                         expected_math=24 if name == "math" else 0, expected_diagrams=3 if name == "mermaid" else 0,
-                                        assets=fixture_assets(name))
+                                        assets=fixture_assets(name), presentation=args.presentation,
+                                        expected_discussions={"annotated": (20, 80, 20, 4), "long-discussion": (1, 120, 1, 120)}.get(name, (0, 0, 0, 0)))
                     children.append(child)
                     for row in child["samples"]:
                         rows.append(dict(row, index=len(rows)))

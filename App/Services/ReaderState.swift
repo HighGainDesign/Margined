@@ -760,7 +760,7 @@ final class ReaderState {
                 self?.errorMessage = nil
                 self?.isRendering = false
                 #if MARGINED_BENCHMARK
-                ViewingBenchmarkSession.current?.didRender(source: text)
+                ViewingBenchmarkSession.current?.didRender(source: text, output: output)
                 #endif
                 if let self {
                     if fileUpdateNeedsReviewReset && !sameReview { currentChangeIndex = -1 }

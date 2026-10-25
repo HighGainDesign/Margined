@@ -131,7 +131,12 @@ struct DiscussionInspector: View {
         }
         .font(.callout).padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .coordinateSpace(name: "discussion-margin")
-        .onPreferenceChange(DiscussionCardFrames.self) { frames = $0 }
+        .onPreferenceChange(DiscussionCardFrames.self) {
+            frames = $0
+            #if MARGINED_BENCHMARK
+            ViewingBenchmarkSession.current?.didLayoutDiscussions(reader: reader, frames: $0)
+            #endif
+        }
         .overlay { DiscussionConnectors(reader: reader, frames: frames, aligned: aligned) }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: Text("Add Discussion")) { reader.requestAddDiscussion() }

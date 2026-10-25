@@ -4,6 +4,7 @@ import Foundation
 /// with MARGINED_BENCHMARK; normal builds never consume benchmark manifests.
 struct ViewingBenchmarkRequest: Codable, Sendable {
     enum Kind: String, Codable, Sendable { case cold, warm, refresh }
+    enum Presentation: String, Codable, Sendable { case collapsed, expanded }
     let version: Int
     let kind: Kind
     let sourceFile: String
@@ -11,10 +12,16 @@ struct ViewingBenchmarkRequest: Codable, Sendable {
     let sampleCount: Int
     var expectedMath = 0
     var expectedDiagrams = 0
+    var presentation: Presentation? = nil
+    var expectedThreads: Int? = nil
+    var expectedMessages: Int? = nil
+    var expectedAttached: Int? = nil
 
     func validatedSource(manifestURL: URL) throws -> (url: URL, text: String) {
         guard version == 1, (1...100).contains(sampleCount),
               (0...200).contains(expectedMath), (0...20).contains(expectedDiagrams),
+              [expectedThreads, expectedMessages, expectedAttached].compactMap({ $0 }).allSatisfy({ (0...200_000).contains($0) }),
+              expectedAttached == nil || expectedThreads == nil || expectedAttached! <= expectedThreads!,
               kind != .cold || sampleCount == 1,
               manifestURL.isFileURL,
               !sourceFile.isEmpty, sourceFile == (sourceFile as NSString).lastPathComponent,
@@ -41,6 +48,10 @@ struct ViewingBenchmarkMeasurement: Codable, Sendable {
     let renderReadyNS: UInt64
     let frameNS: UInt64
     var geometry: [String: Double] = [:]
+    var renderPhases: [String: UInt64]? = nil
+    var rendererTotalNS: UInt64? = nil
+    var layoutReadyNS: UInt64? = nil
+    var discussionLayout: ViewingBenchmarkDiscussionLayout? = nil
 
     init(index: Int, pid: Int32, requestNS: UInt64, renderReadyNS: UInt64, frameNS: UInt64) throws {
         guard index >= 0, pid > 0, requestNS > 0,
@@ -54,7 +65,24 @@ struct ViewingBenchmarkMeasurement: Codable, Sendable {
     var frameMilliseconds: Double { Double(frameNS - requestNS) / 1_000_000 }
     enum CodingKeys: String, CodingKey {
         case index, pid, geometry
+        case renderPhases = "render_phases", rendererTotalNS = "renderer_total_ns"
+        case layoutReadyNS = "layout_ready_ns", discussionLayout = "discussion_layout"
         case requestNS = "request_ns", renderReadyNS = "render_ready_ns", frameNS = "frame_ns"
+    }
+}
+
+struct ViewingBenchmarkDiscussionLayout: Codable, Sendable {
+    let threadCount: Int
+    let messageCount: Int
+    let attachedCount: Int
+    var laidOutCards = 0
+    var historyThread: String? = nil
+    var historyMessages = 0
+    var historyGeometry: [String: Double]? = nil
+    enum CodingKeys: String, CodingKey {
+        case threadCount = "thread_count", messageCount = "message_count", attachedCount = "attached_count"
+        case laidOutCards = "laid_out_cards", historyThread = "history_thread"
+        case historyMessages = "history_messages", historyGeometry = "history_geometry"
     }
 }
 

@@ -38,9 +38,32 @@ are never summarized as successful.
 The fixed corpus includes short and long prose, tables, local images in two
 directories, math, Mermaid, matching prose with 20 discussions, and a 120-message
 conversation. Local assets and their hashes are retained with each cohort.
-Annotated cohorts currently measure reading with discussions collapsed; expanded
-inspectors, native note/anchor validation and separate parse/layout timings still
-need acceptance before publishing results.
+The native fixture contract verifies 20 attached threads/80 messages and one
+attached 120-message conversation. Run expanded cohorts separately:
+
+```sh
+python3 script/benchmark-viewing.py --app /path/to/Margined.app \
+  --output /tmp/margined-expanded --samples 20 \
+  --fixtures annotated long-discussion --presentation expanded
+```
+
+Expanded samples require stable native card frames, passage geometry and the
+selected history's actual message DOM, fonts and snapshot. Their boundary is
+`verified-discussion-frame-v1`; collapsed samples use `verified-frame-v1`.
+Reports retain elapsed wall time for note parsing, Markdown parsing, projection,
+anchors, reading metadata, review/tasks, artwork and serialization. Layout wait
+includes history preparation and readiness verification. Artwork can await another
+actor. These values are upper bounds with observation overhead.
+
+Check a new optimized observer against its regression contract before timing:
+
+```sh
+python3 script/check-viewing-observer.py --app /path/to/Margined.app \
+  --source-root . --output /tmp/margined-observer-check
+```
+
+Retain native results before claiming expanded-view performance. Invalid phase
+ordering, missing histories and unexpected discussion counts reject the run.
 
 System Quick Look and iOS timings require separate native runs. Internal HTML
 packaging timings cannot stand in for system preview display.

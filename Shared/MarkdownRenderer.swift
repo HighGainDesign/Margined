@@ -23,6 +23,10 @@ struct RenderedMarkdown: Sendable {
     var discussionActivity = DiscussionActivity()
     var documentLanguage: String? = nil
     var speech: SpeechDocument? = nil
+    #if MARGINED_BENCHMARK
+    var benchmarkPhases: [String: UInt64] = [:]
+    var benchmarkTotalNS: UInt64 = 0
+    #endif
 }
 
 /// Serializes native Apex conversions off the UI actor. App and Quick Look use
@@ -45,16 +49,40 @@ actor MarkdownRenderer {
     }
 
     func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), previousDiscussionProjection: DiscussionTextProjection? = nil, previousDiscussions: DiscussionDocument? = nil, includeDiscussionAppendix: Bool = false) async throws -> RenderedMarkdown {
+        #if MARGINED_BENCHMARK
+        let benchmarkStart = DispatchTime.now().uptimeNanoseconds
+        #endif
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
         try loadStylesheet()
+        #if MARGINED_BENCHMARK
+        var benchmarkLast = DispatchTime.now().uptimeNanoseconds
+        var benchmarkPhases: [String: UInt64] = [:]
+        func benchmarkMark(_ stage: String) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            benchmarkPhases[stage] = now - benchmarkLast
+            benchmarkLast = now
+        }
+        #endif
         let discussions = try DiscussionCodec.parse(source)
         let proseSource = discussions.readingSource
+        #if MARGINED_BENCHMARK
+        benchmarkMark("note_parse_ns")
+        #endif
         let document = try parse(proseSource, loadRemoteImages: loadRemoteImages)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("markdown_parse_ns")
+        #endif
         let targets = Dictionary(uniqueKeysWithValues: discussions.threads.map { ($0.id, $0.target) })
         var discussionText = try DiscussionText.project(document, source: source, targets: targets)
         discussionText.attachmentVersions = Dictionary(uniqueKeysWithValues: discussions.threads.map { ($0.id, $0.attachmentHistory.count) })
+        #if MARGINED_BENCHMARK
+        benchmarkMark("projection_ns")
+        #endif
         discussionText.anchorResults = DiscussionAnchors.resolve(document: discussions, current: discussionText, previous: previousDiscussionProjection)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("anchor_ns")
+        #endif
         // The semantic body is stable after a note-only update, unlike the full
         // source hash. Fingerprints still include code/math/image semantics.
         let speechSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
@@ -64,6 +92,9 @@ actor MarkdownRenderer {
         }
         let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
         let speech = prepareSpeech ? try SpeechDocumentBuilder.prepare(document, source: speechSource, language: language, options: speechOptions) : nil
+        #if MARGINED_BENCHMARK
+        benchmarkMark("reading_metadata_ns")
+        #endif
         var changes = ChangeSummary()
         let comparisonBaseline: [ReadingUnit]?
         if let reviewedUnits {
@@ -88,9 +119,15 @@ actor MarkdownRenderer {
                 anchors: discussionText.anchorResults, existingIDs: ids, locale: .current, timeZone: .current)
             try document.body()?.appendChild(appendix)
         }
+        #if MARGINED_BENCHMARK
+        benchmarkMark("review_tasks_ns")
+        #endif
         // Typeset after semantic review/speech, so generated artwork never changes
         // comparison identity or duplicates MathML tokens in Read Aloud.
         try await typeset(document)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("artwork_ns")
+        #endif
         // Serialize the sanitized DOM itself, including newly attached task metadata.
         // Source reuse can retain an input tag without its new attributes.
         let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
@@ -98,7 +135,18 @@ actor MarkdownRenderer {
         let count = countSource.split(whereSeparator: \.isWhitespace).count
         let html = htmlDocument(body, title: title, wide: wide, loadRemoteImages: loadRemoteImages,
                                 appearance: appearance, language: language)
-        return RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("serialization_ns")
+        #endif
+        let output = RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
+        #if MARGINED_BENCHMARK
+        var measured = output
+        measured.benchmarkPhases = benchmarkPhases
+        measured.benchmarkTotalNS = DispatchTime.now().uptimeNanoseconds - benchmarkStart
+        return measured
+        #else
+        return output
+        #endif
     }
 
     /// Preserve the displayed prose/artwork rather than rereading a newer file.
