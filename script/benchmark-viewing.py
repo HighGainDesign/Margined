@@ -87,6 +87,40 @@ def write_fixture(directory, text, assets):
     return source
 
 
+def capture_provenance(app, source_root):
+    """Record run-time source and bundle bytes; build-time source is pinned separately."""
+    def manifest(root, names):
+        files, links = {}, {}
+        for name in sorted(set(names)):
+            path = root / name
+            if path.is_symlink(): links[name] = os.readlink(path)
+            if path.is_file():
+                digest = hashlib.sha256()
+                with path.open("rb") as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""): digest.update(block)
+                files[name] = digest.hexdigest()
+            elif not path.is_symlink():
+                raise ValueError("source or bundle input is not a file: " + name)
+        return {"files": files, "symlinks": links}
+
+    def identified(value):
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        return dict(value, sha256=hashlib.sha256(encoded).hexdigest())
+
+    source_root = source_root.resolve(); app = app.resolve()
+    base = subprocess.check_output(["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True).strip()
+    names = subprocess.check_output(["git", "-C", str(source_root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+    source = manifest(source_root, [name.decode("utf-8") for name in names.split(b"\0") if name])
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    executable = info.get("CFBundleExecutable", "")
+    if (not executable or executable != Path(executable).name
+            or not (app / "Contents/MacOS" / executable).is_file()):
+        raise ValueError("app executable missing")
+    bundle = manifest(app, [path.relative_to(app).as_posix() for path in app.rglob("*")
+                            if path.is_file() or path.is_symlink()])
+    return {"working_source": identified(dict(source, base=base)), "app_bundle": identified(bundle)}
+
+
 def summarize(rows, expected_count, kind):
     if type(expected_count) is not int or not 1 <= expected_count <= 100 or kind not in ("cold", "warm", "refresh"):
         raise ValueError("invalid cohort request")
@@ -196,8 +230,11 @@ def main():
               "boundary_description": "Request to correct DOM, two animation frames and verified WebKit snapshot in a visible window of the active app; includes verification overhead. Not scan-out timing.",
               "hardware": {"machine": platform.machine(), "model": subprocess.check_output(["sysctl", "-n", "hw.model"], text=True).strip(), "os": platform.mac_ver()[0]},
               "app": {key: info.get(key) for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion")},
+              "host_load": {"before": list(os.getloadavg())},
               "cohorts": []}
+    source_root = Path(__file__).resolve().parents[1]
     try:
+        report["provenance"] = capture_provenance(app, source_root)
         for name in dict.fromkeys(args.fixtures):
             text = fixtures()[name]
             for kind in dict.fromkeys(args.cases):
@@ -216,11 +253,14 @@ def main():
                           "summary": summarize(rows, args.samples, kind), "sessions": children}
                 report["cohorts"].append(cohort)
                 print(name, kind, json.dumps(cohort["summary"]), flush=True)
+        if capture_provenance(app, source_root) != report["provenance"]:
+            raise ValueError("Source or app bundle changed during measurement; this run is incomplete.")
         report["status"] = "ok"
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         report["error"] = str(error)
         print(str(error), file=sys.stderr)
     finally:
+        report["host_load"]["after"] = list(os.getloadavg())
         (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return 0 if report["status"] == "ok" else 1
 

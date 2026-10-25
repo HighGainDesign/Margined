@@ -1,9 +1,16 @@
 import importlib.util
+import contextlib
+import io
+import hashlib
+import json
+import plistlib
+import subprocess
 import pathlib
 import re
 import tempfile
 import xml.etree.ElementTree as ET
 import unittest
+from unittest import mock
 
 MODULE = pathlib.Path(__file__).resolve().parents[1] / "benchmark-viewing.py"
 spec = importlib.util.spec_from_file_location("benchmark_viewing", MODULE)
@@ -111,6 +118,94 @@ class ViewingBenchmarkTests(unittest.TestCase):
         self.assertGreater(len(fixtures["long"].encode()), 50000)
         self.assertEqual(len(re.findall(r"^id: t-benchmark-", fixtures["long-discussion"], re.M)), 1)
         self.assertEqual(len(re.findall(r"^    author:", fixtures["long-discussion"], re.M)), 120)
+
+    def provenance_fixture(self, temporary):
+        folder = pathlib.Path(temporary)
+        source = folder / "Source"; source.mkdir()
+        (source / "reader.swift").write_text("initial source", encoding="utf-8")
+        (source / ".gitignore").write_text("cache/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(source), "-c", "core.hooksPath=/dev/null",
+                        "-c", "commit.gpgsign=false", "-c", "user.name=Benchmark Test",
+                        "-c", "user.email=benchmark@example.invalid", "commit", "-qm", "fixture"], check=True)
+        app = folder / "Margined.app"
+        (app / "Contents/MacOS").mkdir(parents=True)
+        (app / "Contents/Resources").mkdir()
+        (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Margined", "CFBundleVersion": "1"}))
+        (app / "Contents/MacOS/Margined").write_bytes(b"executable fixture one")
+        (app / "Contents/Resources/reader.css").write_text("body { color: black; }", encoding="utf-8")
+        return source, app
+
+    def test_provenance_records_exact_source_and_bundle_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, app = self.provenance_fixture(temporary)
+            (source / "new.md").write_text("uncommitted source", encoding="utf-8")
+            captured = benchmark.capture_provenance(app, source)
+            self.assertTrue({"working_source", "app_bundle"}.issubset(captured),
+                            "Viewing reports must identify the source tree and exact measured bundle")
+            self.assertEqual(captured["working_source"]["base"],
+                             subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip())
+            for name in ("reader.swift", "new.md"):
+                self.assertEqual(captured["working_source"]["files"][name], hashlib.sha256((source / name).read_bytes()).hexdigest())
+            self.assertEqual(captured["app_bundle"]["files"]["Contents/MacOS/Margined"],
+                             hashlib.sha256((app / "Contents/MacOS/Margined").read_bytes()).hexdigest())
+            self.assertEqual(captured, benchmark.capture_provenance(app, source))
+
+    def test_binary_and_resource_changes_cannot_share_an_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, app = self.provenance_fixture(temporary)
+            initial = benchmark.capture_provenance(app, source)
+            (app / "Contents/MacOS/Margined").write_bytes(b"different executable, same version")
+            binary = benchmark.capture_provenance(app, source)
+            self.assertNotEqual(initial, binary, "A version number alone cannot identify the measured executable")
+            (app / "Contents/Resources/reader.css").write_text("body { color: blue; }", encoding="utf-8")
+            self.assertNotEqual(binary, benchmark.capture_provenance(app, source),
+                                "Rendering resources are part of the measured app")
+
+    def test_source_changes_are_detected_while_ignored_build_files_are_excluded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, app = self.provenance_fixture(temporary)
+            initial = benchmark.capture_provenance(app, source)
+            (source / "cache").mkdir(); (source / "cache/generated").write_bytes(b"ignored")
+            self.assertEqual(initial, benchmark.capture_provenance(app, source))
+            (source / "reader.swift").write_text("changed source at the same HEAD", encoding="utf-8")
+            self.assertNotEqual(initial, benchmark.capture_provenance(app, source),
+                                "A Git revision alone does not identify uncommitted benchmark source")
+
+    def test_provenance_rejects_a_bundle_with_no_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, app = self.provenance_fixture(temporary)
+            (app / "Contents/MacOS/Margined").unlink()
+            with self.assertRaises(ValueError): benchmark.capture_provenance(app, source)
+
+    def test_report_records_provenance_and_rejects_an_app_changed_during_measurement(self):
+        original_output = subprocess.check_output
+        def system_output(command, **kwargs):
+            if command == ["sysctl", "-n", "hw.model"]: return "Test Mac\n"
+            return original_output(command, **kwargs)
+        for changed in (False, True):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as temporary:
+                _, app = self.provenance_fixture(temporary)
+                output = pathlib.Path(temporary) / "report"
+                def native_session(*args, **kwargs):
+                    if changed: (app / "Contents/MacOS/Margined").write_bytes(b"replaced while measuring")
+                    return {"schema": 1, "status": "ok", "kind": "warm", "samples": self.rows(count=1),
+                            "configuration": "Release", "boundary": "verified-frame-v1"}
+                argv = [str(MODULE), "--app", str(app), "--output", str(output),
+                        "--samples", "1", "--fixtures", "short", "--cases", "warm"]
+                with mock.patch.object(benchmark.sys, "argv", argv), mock.patch.object(benchmark.sys, "platform", "darwin"), \
+                     mock.patch.object(benchmark, "run_session", side_effect=native_session), \
+                     mock.patch.object(benchmark.subprocess, "check_output", side_effect=system_output), \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    result = benchmark.main()
+                report = json.loads((output / "report.json").read_text())
+                self.assertEqual(result, 1 if changed else 0)
+                if changed:
+                    self.assertNotEqual(report["status"], "ok", "Changed inputs cannot yield an accepted viewing report")
+                    self.assertIn("changed", report.get("error", "").lower())
+                else:
+                    self.assertIn("provenance", report)
 
     def test_valid_child_result_preserves_raw_samples(self):
         payload = {"schema": 1, "status": "ok", "kind": "warm", "samples": self.rows(),

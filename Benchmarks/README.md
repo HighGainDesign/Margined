@@ -16,8 +16,12 @@ python3 script/benchmark-viewing.py \
 Leave the screen unlocked and app windows unobstructed. Release all native
 computer-control sessions before timing; an active automation lease can prevent
 macOS from activating the measured app. Run without other builds or native QA,
-and record source/binary hashes and host load alongside each report. Do not
-relax the active-window guard to obtain a result. Reports retain synthetic
+with the same source pin retained from the optimized build. The launcher records
+source and app-file hashes, symlink targets, Git revision and host load before and
+after measurement; changed source or app contents invalidate the run. The source
+manifest identifies the working tree at run time, so retain the build-time pin to
+prove it matches the binary. Write reports under ignored `dist/` or outside the
+checkout. Do not relax the active-window guard. Reports retain synthetic
 fixtures, source hashes, raw samples, measured viewport/scale, machine/OS/app
 versions and median/p95. Missing math or diagram artwork invalidates a sample. Cold
 means a fresh app process, with OS caches retained; warm opens reuse a process.
