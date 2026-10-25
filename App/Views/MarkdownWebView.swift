@@ -187,7 +187,7 @@ struct MarkdownWebView: NSViewRepresentable {
                     speech.completeStart(request, elementID: result?["elementID"] as? String, offset: result?["offset"] as? Int ?? 0)
                 }
             }
-            let element = speech.session.isActive ? speech.session.currentSegment?.elementID : nil
+            let element = speech.conversationID == nil && speech.session.isActive ? speech.session.currentSegment?.elementID : nil
             let follow = speech.session.followReading
             let key = "\(element ?? "none"):\(follow)"
             guard speechHighlightKey != key else { return }

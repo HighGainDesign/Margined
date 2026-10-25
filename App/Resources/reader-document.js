@@ -86,6 +86,61 @@ if (operation === 'navigate') {
     if (kind !== 'reading') target.scrollIntoView({block:'start',behavior:focus ? 'instant' : 'auto'});
     return true;
 }
+// Keep the passage being read, rather than its old pixel offset, while a
+// live window resize reflows paragraphs. Cache before layout, because the
+// resize event arrives after WebKit has already changed line wrapping.
+if (operation === 'observeResize') {
+    window.marginedReadingResize?.stop();
+    const controller = new AbortController();
+    let width = innerWidth, height = innerHeight, pending = 0;
+    function sample() {
+        const box = main?.getBoundingClientRect();
+        const x = box ? Math.max(1, Math.min(innerWidth - 1, box.left + box.width / 2)) : innerWidth / 2;
+        // Point queries avoid scanning the whole document on each scroll.
+        // Margins and unusual layouts fall back to the semantic block search.
+        let node;
+        for (const y of [24, 64, 128]) {
+            if (y >= innerHeight) break;
+            const candidate = document.elementFromPoint(x, y)?.closest(selector);
+            if (candidate && main?.contains(candidate)) { node = candidate; break; }
+        }
+        node ??= visibleAnchor()?.candidates[0];
+        return {x:scrollX, y:scrollY, top:node?.getBoundingClientRect().top ?? 0,
+            focus:null, candidates:node ? [descriptor(node)] : []};
+    }
+    function stop() {
+        controller.abort();
+        if (pending) cancelAnimationFrame(pending);
+        pending = 0;
+    }
+    function current() {
+        return !controller.signal.aborted &&
+            document.documentElement.getAttribute('data-margined-mobile-token') === documentToken;
+    }
+    let saved = sample();
+    const options = {passive:true, signal:controller.signal};
+    window.addEventListener('scroll', () => {
+        if (!current()) { stop(); return; }
+        if (pending) cancelAnimationFrame(pending);
+        pending = requestAnimationFrame(() => {
+            pending = 0;
+            if (!current()) { stop(); return; }
+            // A scroll event can precede the resize event for the same layout.
+            if (innerWidth === width && innerHeight === height) saved = sample();
+        });
+    }, options);
+    window.addEventListener('resize', () => {
+        if (!current()) { stop(); return; }
+        if (innerWidth === width && innerHeight === height) return;
+        if (pending) cancelAnimationFrame(pending);
+        pending = 0;
+        restore(saved);
+        width = innerWidth; height = innerHeight;
+        saved = sample();
+    }, options);
+    window.marginedReadingResize = {stop};
+    return true;
+}
 if (operation === 'capture') return snapshot();
 if (operation === 'restore') { restore(position); return true; }
 if (operation !== 'update') return false;

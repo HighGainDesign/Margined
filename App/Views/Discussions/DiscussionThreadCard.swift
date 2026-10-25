@@ -65,7 +65,7 @@ struct DiscussionThreadCard: View {
         }
     }
     private var history: some View {
-        let context = reader.currentDiscussionVersion.context
+        let context = reader.currentDiscussionVersion.context, speech = reader.existingSpeech
         return DiscussionHistoryView(documentID: context, thread: thread, fileURL: reader.fileURL,
             appearance: reader.documentAppearance, loadRemoteImages: reader.loadRemoteImages,
             zoom: reader.zoom, imageGeneration: reader.imageReloadGeneration,
@@ -78,6 +78,21 @@ struct DiscussionThreadCard: View {
                 NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
                     if let error { NSApp.presentError(error) }
                 }
-            })
+            }, playback: DiscussionHistoryPlayback(session: speech?.session,
+                options: speech?.preferences.options ?? SpeechPreferences.shared.options,
+                conversationID: speech?.conversationID,
+                enabled: !reader.isRendering && !reader.fileSaving && !reader.showChecklistConfirmation,
+                pendingVersion: reader.hasPendingFileUpdate, preparing: speech?.isPreparing ?? false,
+                read: { reader.readConversation(thread: thread, document: $0, context: context) },
+                toggle: {
+                    guard reader.existingSpeech?.conversationID == thread.id, reader.existingSpeech?.session.isActive == true else { return }
+                    reader.speech.togglePlayback()
+                }, stop: {
+                    guard reader.existingSpeech?.conversationID == thread.id else { return }
+                    reader.speech.stop()
+                }, resumeDocument: {
+                    guard reader.existingSpeech?.conversationID == thread.id else { return }
+                    reader.speech.resumeSaved()
+                }, showLatest: { reader.speech.showLatest() }))
     }
 }

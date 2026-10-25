@@ -4,7 +4,17 @@ struct MobileReaderView: View {
     @Bindable var reader: MobileReaderState
     let openFolder: () -> Void
     let closeFile: () -> Void
+    var readingPage: MobileReadingPage? = nil
+    var viewport = CGSize.zero
+    var contentWidthChanged: (Double) -> Void = { _ in }
     @State private var showOutline = false
+    @Environment(\.dynamicTypeSize) private var textSize
+    @State private var contentWidth = 0.0
+    private var reviewUsesMargin: Bool {
+        !textSize.isAccessibilitySize && DiscussionMarginLayout.canShowMargin(width: contentWidth - 1,
+            bodyFont: reader.discussionMargin?.bodyFont ?? 16 * reader.zoom,
+            horizontalInsets: reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+    }
     private var showChanges: Bool {
         get { reader.inspector == .changes }
         nonmutating set {
@@ -14,7 +24,6 @@ struct MobileReaderView: View {
     }
     @State private var showFind = false
     @State private var showPlayer = false
-    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         HStack(spacing: 0) {
@@ -30,20 +39,25 @@ struct MobileReaderView: View {
                         Button("Open Image Folder…", action: openFolder).font(.caption)
                     }.padding(12).background(.bar)
                 }
-                MobileWebView(reader: reader)
+                MobileWebView(reader: reader, retainedPage: readingPage)
                 statusBar
-                if showPlayer || reader.playback.ownerID == reader.id { MobileSpeechPlayer(reader: reader) }
+                if showPlayer || reader.playback.ownerID == reader.id || reader.speechPreparing { MobileSpeechPlayer(reader: reader) }
             }
             if reader.inspector == .discussions, reader.discussionUsesMargin {
                 Divider()
                 MobileDiscussionMargin(reader: reader).frame(width: 340)
             }
-            if showChanges, sizeClass == .regular {
+            if showChanges, reviewUsesMargin {
                 Divider()
                 MobileChangesView(reader: reader, close: { showChanges = false }, reveal: { reader.showSelectedChange() })
                     .frame(width: 340)
             }
         }
+        // Measure inside navigation chrome: Duo may place its toolbar beside
+        // the content, reducing the width available for a document and inspector.
+        .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: reader.discussionUsesMargin || reader.discussionNavigationPath.isEmpty) { width in
+            contentWidth = width; contentWidthChanged(width)
+        })
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
                 Button("Close Document", systemImage: "xmark", action: closeFile)
@@ -74,6 +88,11 @@ struct MobileReaderView: View {
                     MobileDiscussionFileActions(reader: reader)
                     Button("Find…", systemImage: "magnifyingglass") { showFind.toggle() }
                     Button("Read Aloud", systemImage: "speaker.wave.2") { showPlayer = true; reader.startSpeech() }
+                    Section {
+                        Button("Print…", systemImage: "printer") { reader.requestPrint(includeDiscussions: false) }
+                        Button("Print with Discussions…", systemImage: "printer") { reader.requestPrint(includeDiscussions: true) }
+                            .disabled(reader.rendered?.discussions?.threads.isEmpty != false)
+                    }.disabled(reader.isRendering || reader.fileSaving || reader.printRequest != nil)
                     if reader.fileURL != nil {
                         Button(reader.fileUpdatesPaused ? "Resume Updates" : "Pause Updates", systemImage: reader.fileUpdatesPaused ? "play" : "pause") {
                             reader.setFileUpdatesPaused(!reader.fileUpdatesPaused)
@@ -104,7 +123,11 @@ struct MobileReaderView: View {
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showOutline = false } } }
             }
         }
-        .sheet(isPresented: Binding(get: { showChanges && sizeClass != .regular }, set: { showChanges = $0 })) {
+        .sheet(isPresented: Binding(get: { showChanges && !reviewUsesMargin }, set: {
+            // An adaptive move into the margin dismisses the sheet without
+            // closing review. A user dismissal in the narrow layout closes it.
+            if !$0 && !reviewUsesMargin { showChanges = false }
+        })) {
             MobileChangesView(reader: reader, close: { showChanges = false }, reveal: {
                 showChanges = false; reader.showSelectedChange()
             })

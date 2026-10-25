@@ -8,6 +8,30 @@ import XCTest
 #endif
 
 final class DiscussionRenderingTests: XCTestCase {
+    func testReplayPreparationUsesTheMountedHistoryImagePolicy() async throws {
+        let address = "https://example.invalid/saved-comment.png"
+        let thread = DiscussionThread(id: "t-image-policy", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "A passage.", prefix: "", suffix: "", section: nil),
+            messages: [.init(id: "m-image-policy", author: "Alex", created: "2026-10-24T10:00:00Z",
+                body: "A saved comment.\n\n![A useful diagram](\(address))", inReplyTo: nil)],
+            resolvedBy: nil, resolved: nil, attachmentHistory: [])
+        // Rendering and speech preparation construct strings only; no WebView
+        // or image loader is created, so the HTTPS host is never contacted.
+        let visible = try await MarkdownRenderer.shared.renderDiscussion(thread, loadRemoteImages: true,
+            prepareSpeech: true, includeContext: false)
+        let blocked = try await MarkdownRenderer.shared.renderDiscussion(thread, loadRemoteImages: false,
+            prepareSpeech: true, includeContext: false)
+        XCTAssertTrue(try SwiftSoup.parse(visible.html).select("img[src]").array().contains { try $0.attr("src") == address })
+        XCTAssertFalse(try SwiftSoup.parse(blocked.html).select("img[src]").array().contains { try $0.attr("src") == address })
+        let speech = try XCTUnwrap(visible.speech)
+        let replay = try await MarkdownRenderer.shared.conversationSpeech(thread, loadRemoteImages: true,
+            speechOptions: SpeechOptions())
+        XCTAssertEqual(replay.segments, speech.segments)
+        XCTAssertEqual(replay.options, speech.options)
+        XCTAssertEqual(replay.fingerprint, speech.fingerprint,
+                       "Root replay must retain the mounted history identity used for highlighting")
+    }
+
     func testNotesAreSeparateFromProseSpeechCountAndReview() async throws {
         let source = "# Plan\n\nRead this paragraph.\n\n- [ ] Complete the task.\n"
         let target = DiscussionTarget(type: "TextQuoteSelector", exact: "Read this paragraph.", prefix: "Plan", suffix: "Complete the task.", section: "Plan")

@@ -82,7 +82,7 @@ final class ReaderDiscussionSourceWindow: NSWindowController, NSWindowDelegate, 
 
     @objc func stopSpeech(_ sender: Any?) { reader?.existingSpeech?.stop() }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        item.action == #selector(stopSpeech(_:)) && reader?.existingSpeech?.session.isActive == true
+        item.action == #selector(stopSpeech(_:)) && (reader?.existingSpeech?.session.isActive == true || reader?.existingSpeech?.isPreparing == true)
     }
 
     func showFind() {

@@ -280,6 +280,7 @@ targets:
       - iOSTests
       - Tests/PreviewDocumentTests.swift
       - Tests/PrintContentTests.swift
+      - Tests/ConversationPlaybackTests.swift
       - Tests/MarkdownSourceEditsTests.swift
       - Tests/SourceFileEditTests.swift
       - Tests/SourceFileGateTests.swift

@@ -5,10 +5,12 @@ import Observation
 final class SpeechCoordinator {
     static let shared = SpeechCoordinator()
     private weak var owner: SpeechSession?
+    private(set) var intentGeneration = UUID()
     func claim(_ session: SpeechSession) {
         if let owner, owner !== session { owner.stop() }
-        owner = session
+        owner = session; intentGeneration = UUID()
     }
+    func noteIntent(_ session: SpeechSession) { if owner === session { intentGeneration = UUID() } }
     func release(_ session: SpeechSession) { if owner === session { owner = nil } }
 }
 
@@ -39,6 +41,8 @@ final class SpeechSession {
         self.driver = driver; self.voices = voices; self.coordinator = coordinator
         driver.eventHandler = { [weak self] event in self?.receive(event) }
     }
+
+    var playbackIntentGeneration: UUID { coordinator.intentGeneration }
 
     var currentSegment: SpeechSegment? {
         guard let document, document.segments.indices.contains(currentIndex) else { return nil }
@@ -78,6 +82,7 @@ final class SpeechSession {
 
     func pause() {
         guard status == .playing else { return }
+        coordinator.noteIntent(self)
         if !driver.pause() {
             // The synthesizer may still be starting. Cancel its queue so a
             // fast Pause cannot turn into speech later without another Play.
@@ -93,6 +98,7 @@ final class SpeechSession {
         else { needsRestart = true; enqueue() }
     }
     func stop() {
+        coordinator.noteIntent(self)
         invalidate(); status = .idle; coordinator.release(self); onProgress?(); onStop?()
     }
     func setRate(_ value: Double) {
@@ -120,6 +126,7 @@ final class SpeechSession {
     func seek(_ index: Int, offset: Int = 0) {
         guard isActive, let document, document.segments.indices.contains(index) else { return }
         let wasPaused = status == .paused
+        coordinator.noteIntent(self)
         invalidate(); currentIndex = index; self.offset = max(0, offset)
         if wasPaused { status = .paused; needsRestart = true }
         else { coordinator.claim(self); enqueue() }

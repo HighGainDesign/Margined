@@ -8,11 +8,13 @@ import WebKit
 struct MobileWebView: UIViewRepresentable {
     let reader: MobileReaderState
     private let inputs: Inputs
+    private let retainedPage: MobileReadingPage?
     @Environment(\.sizeCategory) private var sizeCategory
 
     @MainActor
-    init(reader: MobileReaderState) {
+    init(reader: MobileReaderState, retainedPage: MobileReadingPage? = nil) {
         self.reader = reader
+        self.retainedPage = retainedPage
         // Capture observable values while SwiftUI evaluates the parent's body.
         // Reading them only in updateUIView can miss an intent when the parent
         // produces another representable holding the same reader reference.
@@ -76,8 +78,8 @@ struct MobileWebView: UIViewRepresentable {
             speechRequest = reader.speechStartRequest
             speechMode = reader.speechStartMode
             speechOwner = reader.playback.ownerID
-            speechActive = reader.playback.session.isActive
-            speechElement = reader.playback.session.currentSegment?.elementID
+            speechActive = reader.playback.conversationID == nil && reader.playback.session.isActive
+            speechElement = reader.playback.conversationID == nil ? reader.playback.session.currentSegment?.elementID : nil
             speechFollow = reader.playback.session.followReading
         }
     }
@@ -89,21 +91,32 @@ struct MobileWebView: UIViewRepresentable {
         return configuration
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(reader: reader) }
+    func makeCoordinator() -> Coordinator {
+        if let retainedPage {
+            precondition(retainedPage.coordinator.reader === reader)
+            return retainedPage.coordinator
+        }
+        return Coordinator(reader: reader)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
+        retainedPage?.webView ?? Self.createUIView(coordinator: context.coordinator)
+    }
+
+    @MainActor
+    static func createUIView(coordinator: Coordinator) -> WKWebView {
         let configuration = Self.configuration()
-        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "margined-resource")
-        configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.contentWorld, name: "taskToggle")
-        configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
+        configuration.setURLSchemeHandler(coordinator.images, forURLScheme: "margined-resource")
+        configuration.userContentController.add(coordinator, contentWorld: Coordinator.contentWorld, name: "taskToggle")
+        configuration.userContentController.add(coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
+        webView.navigationDelegate = coordinator
         webView.allowsLinkPreview = false
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         webView.accessibilityLabel = String(localized: "Markdown document")
-        context.coordinator.webView = webView
+        coordinator.webView = webView
         return webView
     }
 
@@ -113,6 +126,14 @@ struct MobileWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        // A compact native destination can dismantle its hidden root view.
+        // The workspace keeps that page alive until the document workspace ends.
+        guard !coordinator.isWorkspaceRetained else { return }
+        disposeUIView(webView, coordinator: coordinator)
+    }
+
+    @MainActor
+    static func disposeUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.invalidate()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "taskToggle", contentWorld: Coordinator.contentWorld)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "discussion", contentWorld: Coordinator.discussionWorld)
@@ -128,6 +149,7 @@ struct MobileWebView: UIViewRepresentable {
         private var discussionSelectionGeneration = 0
         private var discussionDecorationKey: String?
         let reader: MobileReaderState
+        var isWorkspaceRetained = false
         let images = MobileImageSchemeHandler()
         weak var webView: WKWebView?
         private var html: String?
@@ -154,10 +176,14 @@ struct MobileWebView: UIViewRepresentable {
         init(reader: MobileReaderState) {
             self.reader = reader
             super.init()
-            images.loadFailed = { [weak reader] in reader?.localImageError = $0 }
+            images.loadFailed = { [weak self] error in
+                guard let self, !isInvalidated, documentGeneration == reader.documentGeneration else { return }
+                reader.localImageError = error
+            }
         }
 
         func invalidate() {
+            images.cancelPendingLoads()
             isInvalidated = true
             generation += 1
             loadingTask?.cancel()
@@ -259,11 +285,13 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         private func valid(_ expectedGeneration: Int) -> Bool {
-            !isInvalidated && !Task.isCancelled && expectedGeneration == generation
+            !isInvalidated && !Task.isCancelled && expectedGeneration == generation &&
+                documentGeneration == reader.documentGeneration
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard !isInvalidated, navigation === activeNavigation else { return }
+            guard !isInvalidated, documentGeneration == reader.documentGeneration,
+                  navigation === activeNavigation else { return }
             contentReady = true
             let expectedGeneration = generation
             let position = readingPosition
@@ -282,11 +310,23 @@ struct MobileWebView: UIViewRepresentable {
 
         private func ready() {
             defer { configureDiscussions() }
+            observeReadingPositionDuringResize()
             synchronizeTypography()
             configureTasks()
             synchronizeSpeech()
             if let target = pendingNavigation { pendingNavigation = nil; navigate(target) }
             if !reader.searchText.isEmpty { find() }
+        }
+
+        private func observeReadingPositionDuringResize() {
+            guard contentReady, let webView else { return }
+            let expectedGeneration = generation, documentToken = token
+            Task { [weak self] in
+                guard let self, valid(expectedGeneration), token == documentToken else { return }
+                _ = try? await webView.callAsyncJavaScript(Self.guarded(MobileWebScripts.document),
+                    arguments: ["operation": "observeResize", "restoreFocus": false, "documentToken": documentToken],
+                    in: nil, contentWorld: Self.contentWorld)
+            }
         }
 
         private func synchronizeTypography() {
@@ -304,7 +344,8 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         private var tasksEnabled: Bool {
-            contentReady && !isInvalidated && reader.fileURL != nil && loadedFile == reader.fileURL &&
+            contentReady && !isInvalidated && documentGeneration == reader.documentGeneration &&
+                reader.fileURL != nil && loadedFile == reader.fileURL &&
                 !reader.playbackHolding && !reader.hasPendingFileUpdate && !reader.fileSaving &&
                 !reader.isRendering && !reader.showChecklistConfirmation && html == reader.rendered?.html &&
                 reader.rendered?.taskSource == reader.source
@@ -414,6 +455,7 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard !isInvalidated, documentGeneration == reader.documentGeneration else { return }
             if message.name == "discussion" {
                 guard contentReady, !reader.isRendering, html == reader.rendered?.html,
                       let projection = reader.rendered?.discussionText, message.frameInfo.isMainFrame else { return }
@@ -463,7 +505,7 @@ struct MobileWebView: UIViewRepresentable {
             }
             let session = reader.playback.session
             let owned = reader.playback.ownerID == reader.id
-            let element = owned && session.isActive ? session.currentSegment?.elementID : nil
+            let element = owned && reader.playback.conversationID == nil && session.isActive ? session.currentSegment?.elementID : nil
             let follow = owned && session.followReading
             let key = "\(element ?? "none"):\(follow)"
             guard key != speechKey else { return }
@@ -511,7 +553,8 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-            guard !isInvalidated, let url = navigationAction.request.url,
+            guard !isInvalidated, documentGeneration == reader.documentGeneration,
+                  let url = navigationAction.request.url,
                   navigationAction.targetFrame?.isMainFrame != false else { return .cancel }
             if navigationAction.navigationType != .linkActivated {
                 let initial = loadedFile?.deletingLastPathComponent()
@@ -522,7 +565,11 @@ struct MobileWebView: UIViewRepresentable {
             case "https", "http", "mailto":
                 await UIApplication.shared.open(url)
             case "file" where ["md", "markdown", "mdown", "mkd", "mkdn"].contains(url.pathExtension.lowercased()):
-                Task { [weak reader] in await reader?.open(url: url) }
+                let context = reader.documentGeneration
+                Task { [weak reader] in
+                    guard let reader, reader.documentGeneration == context else { return }
+                    await reader.open(url: url)
+                }
             default: break
             }
             return .cancel
@@ -570,6 +617,7 @@ final class MobileImageSchemeHandler: NSObject, WKURLSchemeHandler {
         loader.webView(webView, start: task)
     }
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) { loader.webView(webView, stop: task) }
+    func cancelPendingLoads() { loader.cancelPendingLoads() }
 }
 
 @MainActor
@@ -648,5 +696,22 @@ private extension URL {
         guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else { return nil }
         components.fragment = nil
         return components.url
+    }
+}
+
+/// Retains native page identity independently of NavigationStack's transient roots.
+/// The workspace owns this object; the reader model does not retain its coordinator.
+@MainActor
+final class MobileReadingPage: ObservableObject {
+    let coordinator: MobileWebView.Coordinator
+    let webView: WKWebView
+    init(reader: MobileReaderState) {
+        coordinator = MobileWebView.Coordinator(reader: reader)
+        coordinator.isWorkspaceRetained = true
+        webView = MobileWebView.createUIView(coordinator: coordinator)
+    }
+    deinit {
+        let view = webView, bridge = coordinator
+        Task { @MainActor in MobileWebView.disposeUIView(view, coordinator: bridge) }
     }
 }

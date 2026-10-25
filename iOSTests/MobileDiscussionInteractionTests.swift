@@ -75,6 +75,299 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
+    func testLiveWindowResizingKeepsTheOpenReplyAndDocumentIdentity() async throws {
+        let paragraphs = (0..<100).map { "Paragraph \($0) keeps the document long enough to test its reading position while an unfinished reply moves between compact navigation and the margin." }.joined(separator: "\n\n")
+        let f = try await fixture(withThread: true, tail: "\n\n" + paragraphs)
+        let context = f.reader.documentGeneration
+        _ = try await f.web.callAsyncJavaScript("""
+        await document.fonts.ready;
+        window.mobileResizePage=document;
+        const passage=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 35 '));
+        passage.id='resize-reading-passage';
+        passage.scrollIntoView({block:'start',behavior:'instant'});
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("An unfinished reply across both displays.", for: .thread("t-mobile"))
+        let initial = await poll { self.visibleEditor(in: f.host.view)?.text == "An unfinished reply across both displays." }
+        XCTAssertTrue(initial)
+        // These are window shapes, not device detection or a simulated fold.
+        // Safe areas and vertical system bars can make the same outer size use
+        // different layouts; require retained state and exercise both modes.
+        var sawMargin = false, sawCompact = false
+        for size in [CGSize(width: 890, height: 626), CGSize(width: 626, height: 890),
+                     CGSize(width: 466, height: 678), CGSize(width: 1_120, height: 780),
+                     CGSize(width: 890, height: 626)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await poll {
+                self.visibleEditor(in: f.host.view)?.text == "An unfinished reply across both displays."
+            }
+            XCTAssertTrue(settled, "The same selected conversation and unposted reply must survive every live resize")
+            let nativeSettled = await settledNavigation(f)
+            XCTAssertTrue(nativeSettled, "The actual native top controller must finish resizing before assessing the layout")
+            sawMargin = sawMargin || f.reader.discussionUsesMargin
+            sawCompact = sawCompact || !f.reader.discussionUsesMargin
+            XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"))
+            XCTAssertEqual(f.reader.documentGeneration, context)
+            XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "An unfinished reply across both displays.")
+        }
+        XCTAssertTrue(sawMargin && sawCompact, "The test must actually move the reply between native navigation and the margin")
+        f.reader.hideDiscussions()
+        let visible = await poll { self.webView(in: f.host.view) === f.web }
+        XCTAssertTrue(visible)
+        let samePage = try await f.web.callAsyncJavaScript("return window.mobileResizePage===document;",
+            arguments: [:], in: nil, contentWorld: .defaultClient) as? Bool
+        XCTAssertEqual(samePage, true, "Resizing must retain the mounted document instead of reloading it")
+        let returned = await settledNavigation(f)
+        XCTAssertTrue(returned, "Return must finish the native pop and display the retained reading page")
+        // An unattached page cannot complete requestAnimationFrame. Preserve the
+        // failed assertions above without hanging before XCTest can report them.
+        guard visible, returned else { return }
+        let reading = try await resizeReadingMetrics(f.web)
+        XCTAssertEqual(reading["visible"] as? Bool, true,
+                       "Returning from a compact conversation must retain the passage being read")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testResizingBetweenWideWindowsDoesNotRecreateDiscussionNavigation() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this reply in the wide margin.", for: .thread("t-mobile"))
+        f.window.frame.size = CGSize(width: 1000, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let initial = await settledNavigation(f)
+        XCTAssertTrue(initial && f.reader.discussionUsesMargin)
+        guard initial, f.reader.discussionUsesMargin else { return }
+        let presentation = f.reader.discussionLayoutGeneration
+        for size in [CGSize(width: 1120, height: 780), CGSize(width: 1000, height: 780),
+                     CGSize(width: 890, height: 626)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f)
+            XCTAssertTrue(settled && f.reader.discussionUsesMargin,
+                          "Every window in this sequence must have native space for the margin")
+            XCTAssertEqual(f.reader.discussionLayoutGeneration, presentation,
+                           "A new viewport with no measurement yet must not tear down and recreate discussion navigation")
+            XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"))
+            XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this reply in the wide margin.")
+        }
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testNativeBackStillWorksAfterAMarginRoundTrip() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this reply after going back.", for: .thread("t-mobile"))
+        let opened = await poll { self.visibleEditor(in: f.host.view)?.text == "Keep this reply after going back." }
+        XCTAssertTrue(opened)
+        guard opened else { return }
+        f.window.frame.size = CGSize(width: 1120, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let margin = await settledNavigation(f)
+        XCTAssertTrue(margin && f.reader.discussionUsesMargin, "Exercise an actual native move into the margin")
+        guard margin, f.reader.discussionUsesMargin else { return }
+        f.window.frame.size = CGSize(width: 390, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let compact = await settledNavigation(f)
+        XCTAssertTrue(compact && !f.reader.discussionUsesMargin)
+        guard compact, !f.reader.discussionUsesMargin else { return }
+        func navigation(in controller: UIViewController) -> UINavigationController? {
+            if let value = controller as? UINavigationController { return value }
+            return controller.children.lazy.compactMap { navigation(in: $0) }.first
+        }
+        let controller = try XCTUnwrap(navigation(in: f.host))
+        XCTAssertGreaterThan(controller.viewControllers.count, 2)
+        controller.popViewController(animated: false)
+        let back = await poll { f.reader.discussionRoute == nil && f.reader.inspector == .discussions }
+        XCTAssertTrue(back, "Current native Back must still return to the conversation list")
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this reply after going back.")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testWindowResizingPreservesTheReadersVisiblePassage() async throws {
+        let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to wrap onto several lines in a narrower document window while keeping the same semantic reading passage." }.joined(separator: "\n\n")
+        let f = try await fixture(tail: "\n\n" + paragraphs)
+        _ = try await f.web.callAsyncJavaScript("""
+        await document.fonts.ready;
+        window.mobileResizePage = document;
+        const passage=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 35 '));
+        passage.id='resize-reading-passage';
+        passage.scrollIntoView({block:'start',behavior:'instant'});
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        let initial = try await resizeReadingMetrics(f.web)
+        XCTAssertGreaterThan(try XCTUnwrap(initial["scroll"] as? Double), 0,
+                             "The fixture must actually be partway through its rendered document")
+        XCTAssertEqual(initial["visible"] as? Bool, true)
+        for size in [CGSize(width: 890, height: 626), CGSize(width: 626, height: 890), CGSize(width: 466, height: 678)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let widthCommitted = await pollAsync {
+                let width = try await f.web.evaluateJavaScript("innerWidth") as? Double
+                return width.map { abs($0 - f.web.bounds.width) < 1 } == true
+            }
+            XCTAssertTrue(widthCommitted, "WebKit must commit the resized native viewport before assessing reading position")
+            let metrics = try await resizeReadingMetrics(f.web)
+            XCTAssertEqual(metrics["samePage"] as? Bool, true)
+            XCTAssertEqual(metrics["visible"] as? Bool, true,
+                           "The passage being read must stay visible after moving between narrow and wide windows")
+            XCTAssertLessThanOrEqual(try XCTUnwrap(metrics["overflow"] as? Double), 1)
+        }
+        XCTAssertTrue(webView(in: f.host.view) === f.web)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testOldResizeObserverCannotScrollANewerDocumentVersion() async throws {
+        let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to wrap onto several lines when the native window changes width." }.joined(separator: "\n\n")
+        let f = try await fixture(tail: "\n\n" + paragraphs)
+        _ = try await f.web.callAsyncJavaScript("""
+        await document.fonts.ready;
+        const passage=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 35 '));
+        passage.scrollIntoView({block:'start',behavior:'instant'});
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        let observer = try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
+            arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool
+        XCTAssertEqual(observer, true, "The actual app observer must be installed before testing stale work")
+        // Observe app-issued scrolling in its actual isolated world. First prove
+        // the observer acts while current, then require silence after supersession.
+        _ = try await f.web.callAsyncJavaScript("""
+        window.resizeScrollCalls=0;
+        const original=window.scrollTo;
+        window.scrollTo=function(...args) {
+            window.resizeScrollCalls++;
+            return Reflect.apply(original,this,args);
+        };
+        return true;
+        """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        f.window.frame.size = CGSize(width: 520, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        _ = try await f.web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;",
+            arguments: [:], in: nil, contentWorld: .defaultClient)
+        let active = try await f.web.callAsyncJavaScript("const count=window.resizeScrollCalls;window.resizeScrollCalls=0;return count;",
+            arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Int
+        XCTAssertGreaterThan(try XCTUnwrap(active), 0, "The native resize must exercise a live observer, not a vacuous spy")
+        _ = try await f.web.evaluateJavaScript("document.documentElement.setAttribute('data-margined-mobile-token','superseded-page-version');true")
+        f.window.frame.size = CGSize(width: 890, height: 626)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let committed = await pollAsync {
+            let width = try await f.web.evaluateJavaScript("innerWidth") as? Double
+            return width.map { abs($0 - f.web.bounds.width) < 1 } == true
+        }
+        XCTAssertTrue(committed)
+        let callsValue = try await f.web.callAsyncJavaScript("""
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        return window.resizeScrollCalls;
+        """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        XCTAssertEqual(try XCTUnwrap(callsValue as? Int), 0,
+                       "A superseded observer must leave scrolling to the new document version")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testChangeReviewUsesAvailableSpaceRatherThanRegularWidthAlone() async throws {
+        let f = try await fixture()
+        f.host.traitOverrides.horizontalSizeClass = .regular
+        f.window.frame.size = CGSize(width: 626, height: 890)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let narrow = await poll { !f.reader.discussionUsesMargin }
+        XCTAssertTrue(narrow)
+        f.reader.inspector = .changes
+        let sheet = await poll { f.host.presentedViewController != nil }
+        XCTAssertTrue(sheet, "A tall regular-width window must not lose 340 points of reading width to an inspector")
+        guard sheet else { return }
+        var sawInlineReview = false
+        for size in [CGSize(width: 890, height: 626), CGSize(width: 1_000, height: 780),
+                     CGSize(width: 1_120, height: 780), CGSize(width: 466, height: 678)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            _ = try await f.web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;",
+                arguments: [:], in: nil, contentWorld: .defaultClient)
+            let settled = await poll {
+                guard let sheet = f.host.presentedViewController else { return true }
+                return !sheet.isBeingDismissed && !sheet.isBeingPresented
+            }
+            XCTAssertTrue(settled)
+            XCTAssertEqual(f.reader.inspector, .changes, "Changing presentation must keep review open")
+            if f.host.presentedViewController == nil {
+                sawInlineReview = true
+                XCTAssertLessThanOrEqual(f.web.bounds.width, size.width - 340 + 1,
+                                         "An inline review must actually occupy space beside the document")
+                let minimum = DiscussionMarginLayout.minimumDocumentWidth(
+                    bodyFont: f.reader.discussionMargin?.bodyFont ?? 16 * f.reader.zoom,
+                    horizontalInsets: f.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+                XCTAssertGreaterThanOrEqual(f.web.bounds.width, minimum - 1,
+                                            "A docked inspector must leave the actual document a readable column after system bars")
+            }
+        }
+        XCTAssertTrue(sawInlineReview, "The test must actually move review from its sheet into a sufficiently wide margin")
+        XCTAssertNotNil(f.host.presentedViewController, "A narrow window must offer review in its sheet")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        f.reader.inspector = nil
+        _ = await poll { f.host.presentedViewController == nil }
+    }
+
+    func testDiscussionMarginLeavesReadableDocumentWidthAfterNavigationChrome() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.inspector = .discussions
+        var sawMargin = false
+        for size in [CGSize(width: 1_000, height: 780), CGSize(width: 1_120, height: 780),
+                     CGSize(width: 626, height: 890)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f)
+            XCTAssertTrue(settled)
+            if f.reader.discussionUsesMargin {
+                sawMargin = true
+                let minimum = DiscussionMarginLayout.minimumDocumentWidth(
+                    bodyFont: f.reader.discussionMargin?.bodyFont ?? 16 * f.reader.zoom,
+                    horizontalInsets: f.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+                XCTAssertGreaterThanOrEqual(f.web.bounds.width, minimum - 1,
+                    "A discussion margin must leave a readable document after the system's vertical bars")
+            }
+        }
+        XCTAssertTrue(sawMargin, "The test must exercise a real wide discussion margin")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    private func settledNavigation(_ fixture: Fixture) async -> Bool {
+        func navigation(in controller: UIViewController) -> UINavigationController? {
+            if let value = controller as? UINavigationController { return value }
+            return controller.children.lazy.compactMap { navigation(in: $0) }.first
+        }
+        return await poll {
+            guard let navigation = navigation(in: fixture.host),
+                  let top = navigation.topViewController?.viewIfLoaded,
+                  navigation.transitionCoordinator == nil,
+                  top.bounds.size == fixture.window.bounds.size else { return false }
+            // Native navigation may settle before SwiftUI publishes its new
+            // measured width. Wait for the layout decision to agree with the
+            // actual top controller's usable area, including vertical bars.
+            let minimum = DiscussionMarginLayout.minimumDocumentWidth(
+                bodyFont: fixture.reader.discussionMargin?.bodyFont ?? 16 * fixture.reader.zoom,
+                horizontalInsets: fixture.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+            let canDock = !top.traitCollection.preferredContentSizeCategory.isAccessibilityCategory &&
+                top.safeAreaLayoutGuide.layoutFrame.width >= minimum + 341
+            guard fixture.reader.discussionUsesMargin == canDock else { return false }
+            let showsReading = fixture.reader.discussionUsesMargin || fixture.reader.discussionNavigationPath.isEmpty
+            return fixture.web.isDescendant(of: top) == showsReading
+        }
+    }
+
+    private func resizeReadingMetrics(_ web: WKWebView) async throws -> [String: Any] {
+        let value = try await web.callAsyncJavaScript("""
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        const box=document.getElementById('resize-reading-passage').getBoundingClientRect();
+        return {samePage:window.mobileResizePage===document,scroll:scrollY,
+            visible:box.bottom>0&&box.top<innerHeight,
+            overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        return try XCTUnwrap(value as? [String: Any])
+    }
+
     func testFirstPostKeepsTheSavedConversationOpenAndCanReply() async throws {
         let f = try await fixture()
         _ = try await f.web.callAsyncJavaScript("""
@@ -948,8 +1241,8 @@ import XCTest
         let host: UIHostingController<MobileDocumentWorkspace>
         let web: WKWebView
     }
-    private func fixture(withThread: Bool = false) async throws -> Fixture {
-        var source = "# Plan\n\nBefore.\n\nCafe\u{301} **bold** passage.\n\nAfter.\n"
+    private func fixture(withThread: Bool = false, tail: String = "") async throws -> Fixture {
+        var source = "# Plan\n\nBefore.\n\nCafe\u{301} **bold** passage.\n\nAfter.\n" + tail
         if withThread {
             let thread = DiscussionThread(id: "t-mobile", state: .open,
                 target: .init(type: "TextQuoteSelector", exact: "Café bold passage.", prefix: "Before.", suffix: "After.", section: "Plan"),
@@ -998,6 +1291,13 @@ import XCTest
         if view is WKWebView { return nil }
         if let field = view as? UITextField, field.placeholder == "Your name" { return field }
         return view.subviews.lazy.compactMap { self.nameField(in: $0) }.first
+    }
+    private func visibleEditor(in view: UIView) -> UITextView? {
+        guard !view.isHidden, view.alpha > 0.01, let window = view.window,
+              view.convert(view.bounds, to: window).intersects(window.bounds) else { return nil }
+        if view is WKWebView { return nil }
+        if let text = view as? UITextView, text.isEditable { return text }
+        return view.subviews.lazy.compactMap { self.visibleEditor(in: $0) }.first
     }
     private func editor(in view: UIView) -> UITextView? {
         if view is WKWebView { return nil }

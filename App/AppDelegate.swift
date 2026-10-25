@@ -212,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         }
         if menuItem.action == #selector(stopSpeech(_:)) {
             if let sourceInspector { return sourceInspector.validateMenuItem(menuItem) }
-            return reader?.existingSpeech?.session.isActive == true
+            return reader?.existingSpeech?.session.isActive == true || reader?.existingSpeech?.isPreparing == true
         }
         if menuItem.action == #selector(nextSpeechSection(_:)) || menuItem.action == #selector(previousSpeechSection(_:)) { return reader?.existingSpeech?.session.isActive == true }
         if menuItem.action == #selector(toggleDiscussions(_:)) {

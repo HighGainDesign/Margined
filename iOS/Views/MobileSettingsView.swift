@@ -92,17 +92,23 @@ struct MobileSpeechPlayer: View {
         VStack(spacing: 12) {
             HStack {
                 Image(systemName: "speaker.wave.2").accessibilityHidden(true)
-                Text(ownsPlayback ? (playback.session.currentSegment?.text ?? String(localized: "Read Aloud")) : String(localized: "Read Aloud"))
-                    .font(.subheadline).lineLimit(2)
+                VStack(alignment: .leading, spacing: 2) {
+                    if ownsPlayback, playback.conversationID != nil {
+                        Group {
+                            if playback.session.isActive { Text("Reading Conversation") }
+                            else { Text("Read Conversation") }
+                        }.font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(ownsPlayback ? (playback.session.currentSegment?.text ?? String(localized: "Read Aloud")) : String(localized: "Read Aloud"))
+                        .font(.subheadline).lineLimit(2)
+                }
                 Spacer()
-                if ownsPlayback { Button("Stop Read Aloud", systemImage: "stop.fill") { playback.stop() }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44) }
+                if ownsPlayback || reader.speechPreparing { Button("Stop Read Aloud", systemImage: "stop.fill") { reader.stopSpeech() }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44) }
             }
             HStack(spacing: 16) {
                 Button("Previous Section", systemImage: "backward.end.fill") { playback.previousSection() }.frame(minWidth: 44, minHeight: 44).disabled(!ownsPlayback)
                 Button {
-                    if ownsPlayback, playback.session.status == .playing { playback.pause() }
-                    else if ownsPlayback, playback.session.status == .paused { playback.resume() }
-                    else { reader.resumeSpeechPosition() }
+                    reader.toggleSpeechPlayback()
                 } label: {
                     Label(ownsPlayback && playback.session.status == .playing ? "Pause" : "Play", systemImage: ownsPlayback && playback.session.status == .playing ? "pause.fill" : "play.fill")
                         .font(.title2)
@@ -110,13 +116,14 @@ struct MobileSpeechPlayer: View {
                 Button("Next Section", systemImage: "forward.end.fill") { playback.nextSection() }.frame(minWidth: 44, minHeight: 44).disabled(!ownsPlayback)
                 Spacer(minLength: 0)
                 Menu {
+                    if ownsPlayback, playback.conversationID != nil { Button("Resume Document") { reader.resumeSpeechPosition() }; Divider() }
                     Button("Read from Beginning") { reader.startSpeech(mode: "beginning") }
                     Button("Read from Here") { reader.startSpeech() }
                     Button("Read Selection") { reader.startSpeech(mode: "selection") }
                     Picker("Speed", selection: Binding(get: { playback.preferences.rate }, set: { playback.setRate($0) })) {
                         ForEach([0.5, 0.75, 1, 1.25, 1.5, 2], id: \.self) { Text($0.formatted() + "×").tag($0) }
                     }
-                    Picker("Voice", selection: Binding(get: { playback.preferences.voice(for: reader.rendered?.documentLanguage) ?? "" }, set: { value in
+                    Picker("Voice", selection: Binding(get: { playback.preferences.voice(for: ownsPlayback ? playback.spokenDocument?.language : reader.rendered?.documentLanguage) ?? "" }, set: { value in
                         let voice = value.isEmpty ? nil : value
                         if ownsPlayback { playback.setVoice(voice) }
                         else { playback.preferences.setVoice(voice, for: reader.rendered?.documentLanguage) }

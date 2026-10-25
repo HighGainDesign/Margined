@@ -25,7 +25,12 @@ final class MobileReaderState {
     var discussionSelectionGeneration = 0
     var discussionSelectionRequest: MobileDiscussionSelectionRequest?
     var discussionMargin: DiscussionMarginSnapshot?
-    var discussionUsesMargin = false
+    @ObservationIgnored private(set) var discussionLayoutGeneration = UUID()
+    var discussionUsesMargin = false {
+        didSet {
+            if discussionUsesMargin != oldValue { discussionLayoutGeneration = UUID() }
+        }
+    }
     var currentDiscussionVersion: MobileDiscussionVersion {
         .init(context: openGeneration, snapshot: snapshot?.sourceSnapshot)
     }
@@ -156,7 +161,7 @@ final class MobileReaderState {
                     if discussionRoute == operation.key { discussionRoute = .thread(operation.threadID) }
                 }
                 if operation.kind == .importDiscussions { discardDiscussionImport() }
-                discussionSaving = false; apply(saved)
+                discussionSaving = false; receive(saved)
             } catch {
                 discussions.failed(operation, error: error)
                 guard let self, generation == openGeneration else { return }
@@ -187,6 +192,7 @@ final class MobileReaderState {
     private(set) var title = "Margined"
     private(set) var fileURL: URL?
     private(set) var rendered: RenderedMarkdown?
+    var printRequest: MobilePrintRequest?
     private(set) var hasDocument = false
     private(set) var isOpening = false
     private(set) var isRendering = false
@@ -220,7 +226,12 @@ final class MobileReaderState {
     var searchMatch: Bool?
     var speechStartRequest: UUID?
     var speechStartMode = "visible"
+    private var speechPreparationTask: Task<Void, Never>?
+    @ObservationIgnored private var speechPreparationIntent = UUID()
+    private var speechRequestedOwnership: (owner: UUID, intent: UUID)?
+    var speechPreparing: Bool { speechPreparationTask != nil || speechStartRequest != nil }
     private var speechRequestedFingerprint: String?
+    private var suspendedProse: (context: UUID, fingerprint: String, options: SpeechOptions, index: Int, offset: Int)?
     private(set) var fileUpdatesPaused = false
     private(set) var currentChangeIndex = 0
     private var snapshot: MobileDocumentSnapshot?
@@ -324,6 +335,9 @@ final class MobileReaderState {
     }
 
     private func resetForOpen() {
+        cancelSpeechPreparation()
+        suspendedProse = nil
+        printRequest = nil
         playback.documentWillChange(ownerID: id)
         renderTask?.cancel(); classifyUpdateTask?.cancel(); isRendering = false
         discardDiscussionImport()
@@ -394,12 +408,19 @@ final class MobileReaderState {
             }
         } else { apply(value) }
     }
+    func waitForFileUpdateClassification() async { await classifyUpdateTask?.value }
+
     private func classifyHeldUpdate(_ value: MobileDocumentSnapshot, displayed: MobileDocumentSnapshot) {
         classifyUpdateTask?.cancel()
-        let generation = openGeneration
+        let generation = openGeneration, conversation = playback.conversationID, spoken = playback.spokenDocument
         classifyUpdateTask = Task { [weak self] in
-            let same = (try? await MarkdownRenderer.shared.hasSameReadingContent(displayed.source, value.source)) == true
+            let same: Bool
+            if let conversation, let spoken {
+                same = (try? await MarkdownRenderer.shared.hasSameConversationReadingContent(value.source,
+                    threadID: conversation, spoken: spoken)) == true
+            } else { same = (try? await MarkdownRenderer.shared.hasSameReadingContent(displayed.source, value.source)) == true }
             guard let self, !Task.isCancelled, generation == openGeneration,
+                  playback.ownerID == id, playback.conversationID == conversation, playback.spokenDocument == spoken,
                   snapshot == displayed, pendingSnapshot == value, !fileUpdatesPaused else { return }
             if same {
                 playback.clearPendingVersion(ownerID: id)
@@ -422,18 +443,11 @@ final class MobileReaderState {
     }
 
     func showLatest(readAloud: Bool = false) {
+        cancelSpeechPreparation()
         playback.releaseVersionHold(ownerID: id)
         fileUpdatesPaused = false
         if let value = pendingSnapshot { apply(value) }
-        if readAloud {
-            let generation = openGeneration
-            Task { [weak self] in
-                guard let self else { return }
-                await waitForRendering()
-                guard generation == openGeneration else { return }
-                startSpeech(mode: "beginning")
-            }
-        }
+        if readAloud { prepareSpeechStartAfterRendering(mode: "beginning") }
     }
 
     @discardableResult
@@ -544,49 +558,143 @@ final class MobileReaderState {
         reviewedUnits = baseline; render()
     }
 
+    func readConversation(thread: DiscussionThread, document: SpeechDocument, context: UUID) {
+        guard context == documentGeneration, hasDocument, !isRendering,
+              !fileSaving, !showChecklistConfirmation,
+              let output = rendered, output.taskSource.utf8.elementsEqual(source.utf8),
+              output.discussions?.threads.first(where: { $0.id == thread.id }) == thread,
+              !document.segments.isEmpty, document.options == playback.preferences.options else { return }
+        cancelSpeechPreparation()
+        if playback.ownerID == id, playback.conversationID == nil, let prose = playback.session.document,
+           prose.fingerprint == output.speech?.fingerprint,
+           prose.segments.indices.contains(playback.session.currentIndex),
+           playback.session.currentIndex < prose.segments.count - 1 || playback.session.offset < prose.segments[playback.session.currentIndex].text.utf16.count {
+            suspendedProse = (documentGeneration, prose.fingerprint, prose.options,
+                              playback.session.currentIndex, playback.session.offset)
+        }
+        // The existing owner checkpoints prose before replacing its immutable
+        // content. A conversation never writes progress under the document URL.
+        playback.play(document: document, title: title, url: nil, ownerID: id, conversationID: thread.id)
+        if hasPendingFileUpdate { playback.notePendingVersion(ownerID: id) }
+    }
+
     func speechOptionsChanged() { if !playbackHolding { render() } }
     func startSpeech(mode: String = "visible") {
+        cancelSpeechPreparation()
         guard !isRendering, !checklistSaving, !showChecklistConfirmation,
               let document = rendered?.speech, rendered?.taskSource.utf8.elementsEqual(source.utf8) == true else { return }
         if document.options != playback.preferences.options {
             playback.stop()
             render()
-            let generation = openGeneration, text = source
-            Task { [weak self] in
-                guard let self else { return }
-                await waitForRendering()
-                guard generation == openGeneration, source.utf8.elementsEqual(text.utf8) else { return }
-                startSpeech(mode: mode)
-            }
+            prepareSpeechStartAfterRendering(mode: mode)
             return
         }
         speechStartMode = mode; speechRequestedFingerprint = document.fingerprint
+        speechRequestedOwnership = (playback.ownershipGeneration, playback.session.playbackIntentGeneration)
         let request = UUID(); speechStartRequest = request
         if mode == "beginning" { completeSpeechStart(requestID: request, elementID: nil, offset: 0) }
     }
     func completeSpeechStart(requestID: UUID, elementID: String?, offset: Int) {
         guard speechStartRequest == requestID else { return }
         speechStartRequest = nil
+        let ownership = speechRequestedOwnership; speechRequestedOwnership = nil
+        guard ownership?.owner == playback.ownershipGeneration, ownership?.intent == playback.session.playbackIntentGeneration else { return }
         guard !isRendering, !checklistSaving, !showChecklistConfirmation, rendered?.taskSource.utf8.elementsEqual(source.utf8) == true,
               let document = rendered?.speech, document.fingerprint == speechRequestedFingerprint else {
             errorMessage = String(localized: "Wait for the document to finish loading, then try Read Aloud again."); return
         }
         if speechStartMode == "beginning" {
+            suspendedProse = nil
             playback.play(document: document, title: title, url: fileURL, ownerID: id)
         } else if let elementID, let position = document.position(elementID: elementID, sourceOffset: offset) {
+            suspendedProse = nil
             playback.play(document: document, title: title, url: fileURL, from: position.index, offset: position.offset, ownerID: id)
         } else {
             errorMessage = String(localized: "Select text in the document to choose where reading starts.")
         }
         if hasPendingFileUpdate { playback.notePendingVersion(ownerID: id) }
     }
+    func waitForSpeechPreparation() async { await speechPreparationTask?.value }
+    func stopSpeech() {
+        cancelSpeechPreparation()
+        if playback.ownerID == id { playback.stop() }
+    }
+
+    func toggleSpeechPlayback() {
+        cancelSpeechPreparation()
+        if playback.ownerID == id, playback.session.status == .playing { playback.pause() }
+        else if playback.ownerID == id, playback.session.status == .paused { playback.resume() }
+        else if playback.ownerID == id, let conversationID = playback.conversationID {
+            replayConversation(conversationID)
+        } else { resumeSpeechPosition() }
+    }
+
     func resumeSpeechPosition() {
+        cancelSpeechPreparation()
         guard !isRendering, !checklistSaving, !showChecklistConfirmation, let document = rendered?.speech else { return }
         if document.options != playback.preferences.options { startSpeech(mode: "beginning"); return }
         let saved = playback.savedPosition(document: document, url: fileURL)
-        playback.play(document: document, title: title, url: fileURL, from: saved?.index ?? 0, offset: saved?.offset ?? 0, ownerID: id)
+        var index = saved?.index ?? 0, offset = saved?.offset ?? 0
+        if playback.ownerID == id, playback.conversationID != nil, let suspended = suspendedProse,
+           suspended.context == documentGeneration, suspended.fingerprint == document.fingerprint,
+           suspended.options == document.options {
+            index = suspended.index; offset = suspended.offset
+        }
+        suspendedProse = nil
+        playback.play(document: document, title: title, url: fileURL, from: index, offset: offset, ownerID: id)
         if hasPendingFileUpdate { playback.notePendingVersion(ownerID: id) }
     }
+    private func cancelSpeechPreparation() {
+        speechPreparationTask?.cancel(); speechPreparationTask = nil
+        speechPreparationIntent = UUID()
+        speechStartRequest = nil; speechRequestedFingerprint = nil; speechRequestedOwnership = nil
+    }
+
+    private func prepareSpeechStartAfterRendering(mode: String) {
+        let generation = openGeneration, text = source, intent = speechPreparationIntent
+        let ownership = playback.ownershipGeneration
+        speechPreparationTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if intent == speechPreparationIntent { speechPreparationTask = nil } }
+            await waitForRendering()
+            guard !Task.isCancelled, intent == speechPreparationIntent, generation == openGeneration,
+                  ownership == playback.ownershipGeneration, source.utf8.elementsEqual(text.utf8) else { return }
+            speechPreparationTask = nil
+            startSpeech(mode: mode)
+        }
+    }
+
+    private func replayConversation(_ threadID: String) {
+        guard !isRendering, !fileSaving, !showChecklistConfirmation,
+              let output = rendered, output.taskSource.utf8.elementsEqual(source.utf8) else { return }
+        guard let thread = output.discussions?.threads.first(where: { $0.id == threadID }) else {
+            errorMessage = String(localized: "This conversation is no longer available."); return
+        }
+        let generation = openGeneration, text = source, intent = speechPreparationIntent
+        let ownership = playback.ownershipGeneration, options = playback.preferences.options
+        let locale = Locale.current, timeZone = TimeZone.current, remoteImages = loadRemoteImages
+        speechPreparationTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if intent == speechPreparationIntent { speechPreparationTask = nil } }
+            do {
+                let speech = try await MarkdownRenderer.shared.conversationSpeech(thread, loadRemoteImages: remoteImages,
+                    speechOptions: options, locale: locale, timeZone: timeZone)
+                guard !Task.isCancelled, intent == speechPreparationIntent, generation == openGeneration,
+                      playback.ownerID == id, playback.conversationID == threadID,
+                      playback.ownershipGeneration == ownership, source.utf8.elementsEqual(text.utf8),
+                      options == playback.preferences.options, remoteImages == loadRemoteImages, locale.identifier == Locale.current.identifier,
+                      timeZone.identifier == TimeZone.current.identifier,
+                      rendered?.discussions?.threads.first(where: { $0.id == threadID }) == thread else { return }
+                speechPreparationTask = nil
+                readConversation(thread: thread, document: speech, context: generation)
+            } catch is CancellationError {
+            } catch {
+                guard !Task.isCancelled, intent == speechPreparationIntent, generation == openGeneration else { return }
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func waitForRendering() async { await renderTask?.value }
     func makeDiscussionCopyReader() -> MobileReaderState { MobileReaderState(playback: playback, defaults: defaults) }
     func performDiscussionFileSave(_ action: @escaping @MainActor () async -> Void) {

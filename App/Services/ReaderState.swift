@@ -278,9 +278,8 @@ final class ReaderState {
                 try discussions.saved(operation, as: saved)
                 didSaveDiscussionAction(operation)
                 if operation.kind == .importDiscussions { discardDiscussionImport() }
-                sourceSnapshot = saved
                 discussionSaving = false
-                acceptFileUpdate(try saved.source)
+                receiveDiskSnapshot(saved)
             } catch {
                 discussions.failed(operation, error: error)
                 guard let self, sourceContext == context else { return }
@@ -564,12 +563,20 @@ final class ReaderState {
             acceptFileUpdate(text)
         }
     }
+    func waitForFileUpdateClassification() async { await classifyUpdateTask?.value }
+
     private func classifyHeldUpdate(_ text: String) {
         classifyUpdateTask?.cancel()
         let displayed = source, context = sourceContext, revision = externalFileRevision
+        let conversation = existingSpeech?.conversationID, spoken = existingSpeech?.session.document
         classifyUpdateTask = Task { [weak self] in
-            let same = (try? await MarkdownRenderer.shared.hasSameReadingContent(displayed, text)) == true
+            let same: Bool
+            if let conversation, let spoken {
+                same = (try? await MarkdownRenderer.shared.hasSameConversationReadingContent(text,
+                    threadID: conversation, spoken: spoken)) == true
+            } else { same = (try? await MarkdownRenderer.shared.hasSameReadingContent(displayed, text)) == true }
             guard let self, !Task.isCancelled, sourceContext == context, externalFileRevision == revision,
+                  existingSpeech?.conversationID == conversation, existingSpeech?.session.document == spoken,
                   !fileUpdatesPaused, source.utf8.elementsEqual(displayed.utf8), same,
                   pendingFileSource?.utf8.elementsEqual(text.utf8) == true || source.utf8.elementsEqual(text.utf8) else { return }
             applyPendingDiskSnapshot(); pendingFileSource = nil

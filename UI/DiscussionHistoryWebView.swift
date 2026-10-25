@@ -6,16 +6,23 @@ import UIKit
 import AppKit
 #endif
 
+struct DiscussionSpeechHighlight: Equatable, Sendable {
+    let elementID: String?
+    let follow: Bool
+    static let inactive = DiscussionSpeechHighlight(elementID: nil, follow: false)
+}
+
 #if os(iOS)
 struct DiscussionHistoryWebView: UIViewRepresentable {
     let html: String
     let fontSize: Double
     let imageGeneration: Int
     let scope: DiscussionHistoryScope
+    var speech: DiscussionSpeechHighlight = .inactive
     func makeCoordinator() -> DiscussionHistoryCoordinator { .init(scope: scope) }
     func makeUIView(context: Context) -> WKWebView { context.coordinator.makeWebView() }
     func updateUIView(_ view: WKWebView, context: Context) {
-        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration)
+        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration, speech: speech)
     }
     static func dismantleUIView(_ view: WKWebView, coordinator: DiscussionHistoryCoordinator) { coordinator.invalidate() }
 }
@@ -25,10 +32,11 @@ struct DiscussionHistoryWebView: NSViewRepresentable {
     let fontSize: Double
     let imageGeneration: Int
     let scope: DiscussionHistoryScope
+    var speech: DiscussionSpeechHighlight = .inactive
     func makeCoordinator() -> DiscussionHistoryCoordinator { .init(scope: scope) }
     func makeNSView(context: Context) -> WKWebView { context.coordinator.makeWebView() }
     func updateNSView(_ view: WKWebView, context: Context) {
-        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration)
+        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration, speech: speech)
     }
     static func dismantleNSView(_ view: WKWebView, coordinator: DiscussionHistoryCoordinator) { coordinator.invalidate() }
 }
@@ -50,6 +58,13 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     private var html: String?
     private var imageGeneration = -1
     private var fontSize = 16.0
+    private var speech = DiscussionSpeechHighlight.inactive
+    private var speechKey: String?
+    private static let speechScript: String = {
+        guard let url = Bundle.main.url(forResource: "reader-speech", withExtension: "js"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return "return false;" }
+        return "if (document.documentElement.getAttribute('data-margined-history-token') !== documentToken) return false;\n" + text
+    }()
     private var generation = 0
     private var token = UUID().uuidString
     private var ready = false
@@ -92,8 +107,9 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         webView?.stopLoading(); webView = nil
     }
 
-    func update(html: String, fontSize: Double, imageGeneration: Int) {
+    func update(html: String, fontSize: Double, imageGeneration: Int, speech: DiscussionSpeechHighlight = .inactive) {
         guard !invalidated, scope.isCurrent() else { invalidate(); return }
+        self.speech = speech
         let fontChanged = self.fontSize != fontSize
         self.fontSize = fontSize
         if self.imageGeneration != imageGeneration {
@@ -111,7 +127,25 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
                 _ = try? await webView.callAsyncJavaScript(Self.finishScript,
                     arguments: ["documentToken": token, "fontSize": fontSize, "position": NSNull()],
                     in: nil, contentWorld: Self.world)
+                guard valid(expected) else { return }
+                speechKey = nil; synchronizeSpeech()
             }
+        }
+        synchronizeSpeech()
+    }
+
+    private func synchronizeSpeech() {
+        guard ready, let webView else { return }
+        let key = "\(generation):\(speech.elementID ?? "none"):\(speech.follow)"
+        guard key != speechKey else { return }
+        speechKey = key
+        let expected = generation, highlight = speech
+        Task { [weak self] in
+            guard let self, valid(expected), speechKey == key else { return }
+            _ = try? await webView.callAsyncJavaScript(Self.speechScript,
+                arguments: ["documentToken": token, "operation": "highlight",
+                            "elementID": highlight.elementID ?? "", "follow": highlight.follow],
+                in: nil, contentWorld: Self.world)
         }
     }
 
@@ -136,7 +170,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
                         "expectedToken": previousToken, "nextToken": nextToken, "fontSize": fontSize],
                     in: nil, contentWorld: Self.world) as? Bool
                 guard valid(expected) else { return }
-                if updated == true { ready = true; navigation = nil; return }
+                if updated == true { ready = true; navigation = nil; speechKey = nil; synchronizeSpeech(); return }
             }
             if webView.url != nil {
                 position = try? await webView.callAsyncJavaScript(Self.captureScript,
@@ -161,6 +195,8 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
             _ = try? await view.callAsyncJavaScript(Self.finishScript,
                 arguments: ["documentToken": token, "fontSize": fontSize, "position": position as Any? ?? NSNull()],
                 in: nil, contentWorld: Self.world)
+            guard valid(expected) else { return }
+            speechKey = nil; synchronizeSpeech()
         }
     }
 

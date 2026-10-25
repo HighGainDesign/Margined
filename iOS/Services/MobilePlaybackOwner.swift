@@ -25,6 +25,7 @@ final class SystemMobileAudioSession: MobileAudioSessionManaging {
 final class MobilePlaybackOwner {
     let session: SpeechSession
     let preferences: SpeechPreferences
+    private(set) var conversationID: String?
     private(set) var spokenDocument: SpeechDocument?
     private(set) var title = ""
     private(set) var url: URL?
@@ -60,12 +61,12 @@ final class MobilePlaybackOwner {
     var playbackHolding: Bool { ownerID != nil && (session.isActive || hasPendingVersion) }
 
     func play(document: SpeechDocument, title: String, url: URL?, from: Int = 0, offset: Int = 0,
-              ownerID: UUID? = nil) {
+              ownerID: UUID? = nil, conversationID: String? = nil) {
         let retainsPendingVersion = hasPendingVersion && self.ownerID == ownerID &&
-            spokenDocument == document && self.url == url
+            spokenDocument == document && self.url == url && self.conversationID == conversationID
         stop()
         self.ownerID = ownerID ?? UUID()
-        self.spokenDocument = document
+        self.spokenDocument = document; self.conversationID = conversationID
         self.title = title
         self.url = url
         hasPendingVersion = retainsPendingVersion
@@ -142,7 +143,7 @@ final class MobilePlaybackOwner {
         stop()
         hasPendingVersion = false
         ownerID = nil
-        spokenDocument = nil
+        spokenDocument = nil; conversationID = nil
         url = nil
         title = ""
         audioNotice = nil

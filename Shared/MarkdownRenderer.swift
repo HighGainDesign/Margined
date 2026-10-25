@@ -141,18 +141,14 @@ actor MarkdownRenderer {
     /// They are independent Markdown fragments, never nested document discussions.
     func renderDiscussion(_ thread: DiscussionThread, loadRemoteImages: Bool = false,
                           appearance: DocumentAppearance = .system, documentLanguage: String? = nil,
-                          prepareSpeech: Bool = false, locale: Locale = .current,
+                          prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), locale: Locale = .current,
                           timeZone: TimeZone = .current, includeContext: Bool = true) async throws -> RenderedMarkdown {
         try Task.checkCancellation()
         try loadStylesheet()
-        var remaining = MarkdownSource.maximumBytes
-        let bodies = try parseDiscussionBodies(thread, loadRemoteImages: loadRemoteImages, remaining: &remaining)
-        let document = try DiscussionRendering.document(thread, bodies: bodies, locale: locale, timeZone: timeZone, includeContext: includeContext)
-        let semanticSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
-        let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
-        let speech = prepareSpeech
-            ? try SpeechDocumentBuilder.prepare(document, source: semanticSource, language: language, options: SpeechOptions())
-            : nil
+        let prepared = try prepareDiscussionContent(thread, loadRemoteImages: loadRemoteImages,
+            documentLanguage: documentLanguage, prepareSpeech: prepareSpeech, speechOptions: speechOptions,
+            locale: locale, timeZone: timeZone, includeContext: includeContext)
+        let (document, language, speech) = prepared
         let headings = try document.select("h1, h2, h3, h4, h5, h6").array().map {
             MarkdownHeading(id: try $0.attr("id"), title: try $0.text(), level: Int($0.tagName().dropFirst()) ?? 1)
         }
@@ -164,6 +160,47 @@ actor MarkdownRenderer {
             loadRemoteImages: loadRemoteImages, appearance: appearance, language: language,
             extraBodyClass: "discussion-history", documentLabel: String(localized: "Discussion history")), headings: headings, wordCount: wordCount,
             documentLanguage: language, speech: speech)
+    }
+
+    func conversationSpeech(_ thread: DiscussionThread, loadRemoteImages: Bool = false, documentLanguage: String? = nil,
+                            speechOptions: SpeechOptions, locale: Locale = .current,
+                            timeZone: TimeZone = .current) throws -> SpeechDocument {
+        try Task.checkCancellation()
+        let prepared = try prepareDiscussionContent(thread, loadRemoteImages: loadRemoteImages,
+            documentLanguage: documentLanguage, prepareSpeech: true, speechOptions: speechOptions,
+            locale: locale, timeZone: timeZone, includeContext: false)
+        guard let speech = prepared.speech else { throw ReaderError.rendererUnavailable }
+        try Task.checkCancellation()
+        return speech
+    }
+
+    /// A held conversation is compared with its immutable spoken messages,
+    /// rather than with prose. Skip artwork: it cannot change the spoken text.
+    func hasSameConversationReadingContent(_ source: String, threadID: String,
+                                          spoken: SpeechDocument) throws -> Bool {
+        try Task.checkCancellation()
+        guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
+        guard let thread = try DiscussionCodec.parse(source).threads.first(where: { $0.id == threadID }) else { return false }
+        let prepared = try prepareDiscussionContent(thread, loadRemoteImages: false,
+            documentLanguage: spoken.language, prepareSpeech: true, speechOptions: spoken.options,
+            locale: .current, timeZone: .current, includeContext: false)
+        try Task.checkCancellation()
+        return prepared.speech?.segments.map(\.text) == spoken.segments.map(\.text)
+    }
+
+    private func prepareDiscussionContent(_ thread: DiscussionThread, loadRemoteImages: Bool,
+        documentLanguage: String?, prepareSpeech: Bool, speechOptions: SpeechOptions,
+        locale: Locale, timeZone: TimeZone, includeContext: Bool)
+        throws -> (document: Document, language: String?, speech: SpeechDocument?) {
+        var remaining = MarkdownSource.maximumBytes
+        let bodies = try parseDiscussionBodies(thread, loadRemoteImages: loadRemoteImages, remaining: &remaining)
+        let document = try DiscussionRendering.document(thread, bodies: bodies, locale: locale,
+                                                        timeZone: timeZone, includeContext: includeContext)
+        let semanticSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
+        let speech = prepareSpeech ? try SpeechDocumentBuilder.prepare(document, source: semanticSource,
+            language: language, options: speechOptions) : nil
+        return (document, language, speech)
     }
 
     private func parseDiscussionBodies(_ thread: DiscussionThread, loadRemoteImages: Bool,

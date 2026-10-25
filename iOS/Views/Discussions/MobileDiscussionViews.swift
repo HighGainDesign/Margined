@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MobileDiscussionList: View {
     @Bindable var reader: MobileReaderState
+    var viewport = CGSize.zero
+    var contentWidthChanged: (Double) -> Void = { _ in }
     var body: some View {
         List {
             if reader.discussionImportLoading { ProgressView("Reading discussions…") }
@@ -32,6 +34,7 @@ struct MobileDiscussionList: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: !reader.discussionUsesMargin && reader.discussionNavigationPath.last == .list, report: contentWidthChanged))
         .navigationTitle("Discussions").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .topBarTrailing) {
             Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
@@ -46,6 +49,8 @@ struct MobileDiscussionList: View {
 struct MobileDiscussionThread: View {
     @Bindable var reader: MobileReaderState
     let key: DiscussionSession.DraftKey
+    var viewport = CGSize.zero
+    var contentWidthChanged: (Double) -> Void = { _ in }
     private var thread: DiscussionThread? {
         if case let .thread(id) = key { return reader.rendered?.discussions?.threads.first { $0.id == id } }
         return nil
@@ -70,6 +75,7 @@ struct MobileDiscussionThread: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { MobileDiscussionComposer(reader: reader, key: key).padding(16).background(.bar) }
+        .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: !reader.discussionUsesMargin && reader.discussionNavigationPath.last == .thread(key), report: contentWidthChanged))
         .navigationTitle("Discussion").navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -99,7 +105,7 @@ private struct MobileDiscussionMessages: View {
     let reader: MobileReaderState
     let thread: DiscussionThread
     var body: some View {
-        let context = reader.documentGeneration
+        let context = reader.documentGeneration, playback = reader.playback
         DiscussionHistoryView(documentID: context, thread: thread, fileURL: reader.fileURL,
             appearance: reader.appearance, loadRemoteImages: reader.loadRemoteImages,
             zoom: reader.zoom, imageGeneration: reader.imageReloadGeneration, documentLanguage: nil,
@@ -113,7 +119,21 @@ private struct MobileDiscussionMessages: View {
                     guard reader.documentGeneration == context else { return }
                     await reader.open(url: url)
                 }
-            })
+            }, playback: DiscussionHistoryPlayback(session: playback.session, options: playback.preferences.options,
+                conversationID: playback.ownerID == reader.id ? playback.conversationID : nil,
+                enabled: !reader.isRendering && !reader.fileSaving && !reader.showChecklistConfirmation,
+                pendingVersion: reader.hasPendingFileUpdate, preparing: reader.speechPreparing,
+                read: { reader.readConversation(thread: thread, document: $0, context: context) },
+                toggle: {
+                    guard playback.ownerID == reader.id, playback.conversationID == thread.id, playback.session.isActive else { return }
+                    reader.toggleSpeechPlayback()
+                }, stop: {
+                    guard playback.ownerID == reader.id, playback.conversationID == thread.id else { return }
+                    reader.stopSpeech()
+                }, resumeDocument: {
+                    guard playback.ownerID == reader.id, playback.conversationID == thread.id else { return }
+                    reader.resumeSpeechPosition()
+                }, showLatest: { reader.showLatest() }))
     }
 }
 
@@ -175,6 +195,7 @@ private struct MobileDiscussionComposerFields: View {
 struct MobileDiscussionMargin: View {
     @Bindable var reader: MobileReaderState
     @State private var frames: [String: CGRect] = [:]
+    private struct ComposerAnchor: Hashable { let key: DiscussionSession.DraftKey }
     var body: some View {
         VStack(spacing: 12) {
             HStack {
@@ -197,40 +218,53 @@ struct MobileDiscussionMargin: View {
                 let anchors = Dictionary(uniqueKeysWithValues: (reader.discussionMargin?.anchors ?? []).map { ($0.id, $0.top) })
                 let positions = DiscussionMarginLayout.cards(ids: threads.map(\.id), anchorTops: anchors,
                     heights: frames.mapValues { Double($0.height) }, topInset: area.frame(in: .named("mobile-discussion-margin")).minY)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(positions.enumerated()), id: \.element.id) { index, position in
-                            let previous = index > 0 ? positions[index - 1] : nil
-                            let bottom = previous.map { $0.top + Double(frames[$0.id]?.height ?? 100) } ?? 0
-                            Color.clear.frame(height: max(0, position.top - bottom)).accessibilityHidden(true)
-                            if let thread = indexed[position.id] {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    Button { reader.openDiscussion(thread.id) } label: { MobileDiscussionSummary(reader: reader, thread: thread) }
-                                    if reader.discussions.selection == .thread(thread.id) {
-                                        MobileDiscussionControls(reader: reader, thread: thread)
-                                        MobileDiscussionDecisionView(reader: reader, key: .thread(thread.id))
-                                        MobileDiscussionMessages(reader: reader, thread: thread)
-                                        MobileDiscussionComposer(reader: reader, key: .thread(thread.id))
-                                    }
-                                }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
-                                    .background(GeometryReader { proxy in Color.clear.preference(key: MobileDiscussionFrames.self,
-                                        value: [thread.id: proxy.frame(in: .named("mobile-discussion-margin"))]) })
+                ScrollViewReader { scroller in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(positions.enumerated()), id: \.element.id) { index, position in
+                                let previous = index > 0 ? positions[index - 1] : nil
+                                let bottom = previous.map { $0.top + Double(frames[$0.id]?.height ?? 100) } ?? 0
+                                Color.clear.frame(height: max(0, position.top - bottom)).accessibilityHidden(true)
+                                if let thread = indexed[position.id] {
+                                    VStack(alignment: .leading, spacing: 14) {
+                                        Button { reader.openDiscussion(thread.id) } label: { MobileDiscussionSummary(reader: reader, thread: thread) }
+                                        if reader.discussions.selection == .thread(thread.id) {
+                                            MobileDiscussionControls(reader: reader, thread: thread)
+                                            MobileDiscussionDecisionView(reader: reader, key: .thread(thread.id))
+                                            MobileDiscussionMessages(reader: reader, thread: thread)
+                                            MobileDiscussionComposer(reader: reader, key: .thread(thread.id))
+                                                .id(ComposerAnchor(key: .thread(thread.id)))
+                                        }
+                                    }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
+                                        .background(GeometryReader { proxy in Color.clear.preference(key: MobileDiscussionFrames.self,
+                                            value: [thread.id: proxy.frame(in: .named("mobile-discussion-margin"))]) })
+                                }
                             }
-                        }
-                        ForEach(newDrafts, id: \.self) { key in
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Unposted discussion").font(.headline)
-                                Text(reader.discussions.drafts[key]?.target?.exact ?? "")
-                                MobileDiscussionDecisionView(reader: reader, key: key)
-                                MobileDiscussionComposer(reader: reader, key: key)
-                            }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                            ForEach(newDrafts, id: \.self) { key in
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Unposted discussion").font(.headline)
+                                    Text(reader.discussions.drafts[key]?.target?.exact ?? "")
+                                    MobileDiscussionDecisionView(reader: reader, key: key)
+                                    MobileDiscussionComposer(reader: reader, key: key)
+                                        .id(ComposerAnchor(key: key))
+                                }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onChange(of: area.size, initial: true) { _, _ in revealComposer(using: scroller) }
+                    .onChange(of: reader.discussions.selection) { _, _ in revealComposer(using: scroller) }
+                    .onChange(of: frames.mapValues(\.height)) { _, _ in revealComposer(using: scroller) }
                 }
             }
         }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity)
             .coordinateSpace(name: "mobile-discussion-margin")
             .onPreferenceChange(MobileDiscussionFrames.self) { frames = $0 }
+    }
+    private func revealComposer(using scroller: ScrollViewProxy) {
+        guard let key = reader.discussions.selection else { return }
+        // The margin scrolls independently; keep the active reply reachable
+        // without moving the document or taking focus from another control.
+        scroller.scrollTo(ComposerAnchor(key: key), anchor: .bottom)
     }
     private var newDrafts: [DiscussionSession.DraftKey] {
         reader.discussions.drafts.keys.filter { if case .new = $0 { return true }; return false }
