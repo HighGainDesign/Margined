@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import plistlib
 import subprocess
+import statistics
 import time
 import unittest
 
@@ -15,16 +16,16 @@ class NativeObserverContract(unittest.TestCase):
     output = None
     benchmark = None
 
-    def launch(self, presentation, threads=20, require_ready=True):
+    def launch(self, presentation, threads=20, require_ready=True, fixture="annotated", kind="cold", samples=1):
         directory = self.output / self._testMethodName
         directory.mkdir()
-        text = self.benchmark.fixtures()['annotated']
+        text = self.benchmark.fixtures()[fixture]
         (directory / 'fixture.md').write_text(text)
-        request = {'version': 1, 'kind': 'cold', 'sourceFile': 'fixture.md',
-                   'expectedMarker': text.splitlines()[0][2:], 'sampleCount': 1,
+        request = {'version': 1, 'kind': kind, 'sourceFile': 'fixture.md',
+                   'expectedMarker': text.splitlines()[0][2:], 'sampleCount': samples,
                    'expectedMath': 0, 'expectedDiagrams': 0,
                    'presentation': presentation, 'expectedThreads': threads,
-                   'expectedMessages': 80, 'expectedAttached': threads}
+                   'expectedMessages': 80 if fixture == 'annotated' else 0, 'expectedAttached': threads}
         manifest = directory / 'request.json'
         manifest.write_text(json.dumps(request))
         info = plistlib.loads((self.app / 'Contents/Info.plist').read_bytes())
@@ -81,6 +82,46 @@ class NativeObserverContract(unittest.TestCase):
         self.assertLessEqual(row['renderer_total_ns'], row['render_ready_ns'] - row['request_ns'])
         self.assertGreaterEqual(row['layout_ready_ns'], row['render_ready_ns'])
         self.assertLessEqual(row['layout_ready_ns'], row['frame_ns'])
+
+    def test_opening_lifecycle_locates_window_and_webkit_costs(self):
+        _, payload, _ = self.launch('collapsed')
+        row = payload['samples'][0]
+        stages = row.get('opening_lifecycle')
+        self.assertIsInstance(stages, dict,
+                              'Real opening needs read, window, task and WebKit timestamps')
+        names = ['read_started_ns', 'read_finished_ns', 'window_started_ns',
+                 'window_finished_ns', 'watch_started_ns', 'render_enqueued_ns',
+                 'render_task_started_ns', 'renderer_requested_ns', 'webview_started_ns',
+                 'webview_created_ns', 'navigation_requested_ns', 'navigation_finished_ns']
+        for name in names:
+            self.assertIs(type(stages.get(name)), int, name)
+            self.assertGreaterEqual(stages[name], row['request_ns'], name)
+            self.assertLessEqual(stages[name], row['frame_ns'], name)
+        for before, after in [('read_started_ns', 'read_finished_ns'),
+                              ('read_finished_ns', 'window_started_ns'),
+                              ('window_started_ns', 'window_finished_ns'),
+                              ('watch_started_ns', 'render_enqueued_ns'),
+                              ('render_enqueued_ns', 'render_task_started_ns'),
+                              ('render_task_started_ns', 'renderer_requested_ns'),
+                              ('webview_started_ns', 'webview_created_ns'),
+                              ('webview_created_ns', 'navigation_requested_ns'),
+                              ('navigation_requested_ns', 'navigation_finished_ns')]:
+            self.assertLessEqual(stages[before], stages[after], (before, after))
+        self.assertLessEqual(stages['renderer_requested_ns'], row['render_ready_ns'])
+        self.assertGreaterEqual(stages['webview_started_ns'], row['render_ready_ns'])
+
+    def test_warm_prose_opening_avoids_fresh_webkit_startup(self):
+        _, payload, _ = self.launch('collapsed', threads=0, fixture='prose', kind='warm', samples=20)
+        rows = payload['samples']
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len({row['pid'] for row in rows}), 1, 'Warm opening must reuse the process')
+        frame_ms = [(row['frame_ns'] - row['request_ns']) / 1_000_000 for row in rows]
+        navigation_ms = [(row['opening_lifecycle']['navigation_finished_ns']
+                          - row['opening_lifecycle']['navigation_requested_ns']) / 1_000_000 for row in rows]
+        self.assertLess(statistics.median(frame_ms), 175,
+                        'Complete warm opening must improve, not just an internal stage: ' + str(statistics.median(frame_ms)))
+        self.assertLess(statistics.median(navigation_ms), 20,
+                        'Warm documents should avoid fresh WebKit startup: ' + str(statistics.median(navigation_ms)))
 
     def test_wrong_discussion_expectation_cannot_yield_a_fast_success(self):
         code, payload, _ = self.launch('expanded', threads=19, require_ready=False)

@@ -52,6 +52,7 @@ struct ViewingBenchmarkMeasurement: Codable, Sendable {
     var rendererTotalNS: UInt64? = nil
     var layoutReadyNS: UInt64? = nil
     var discussionLayout: ViewingBenchmarkDiscussionLayout? = nil
+    var openingLifecycle: [String: UInt64]? = nil
 
     init(index: Int, pid: Int32, requestNS: UInt64, renderReadyNS: UInt64, frameNS: UInt64) throws {
         guard index >= 0, pid > 0, requestNS > 0,
@@ -67,6 +68,7 @@ struct ViewingBenchmarkMeasurement: Codable, Sendable {
         case index, pid, geometry
         case renderPhases = "render_phases", rendererTotalNS = "renderer_total_ns"
         case layoutReadyNS = "layout_ready_ns", discussionLayout = "discussion_layout"
+        case openingLifecycle = "opening_lifecycle"
         case requestNS = "request_ns", renderReadyNS = "render_ready_ns", frameNS = "frame_ns"
     }
 }

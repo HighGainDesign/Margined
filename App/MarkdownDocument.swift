@@ -45,13 +45,35 @@ final class MarkdownDocument: NSDocument {
     nonisolated override class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { true }
 
     override func read(from url: URL, ofType typeName: String) throws {
+        #if MARGINED_BENCHMARK
+        let started = DispatchTime.now().uptimeNanoseconds
+        #endif
         let snapshot = try SourceFileEdit.capture(url)
         let text = try snapshot.source
-        loadedSource.withLock { $0 = LoadedSource(text: text, url: url, title: url.lastPathComponent, snapshot: snapshot) }
+        loadedSource.withLock {
+            $0 = LoadedSource(text: text, url: url, title: url.lastPathComponent, snapshot: snapshot)
+            #if MARGINED_BENCHMARK
+            $0.benchmarkReadStartedNS = started
+            $0.benchmarkReadFinishedNS = DispatchTime.now().uptimeNanoseconds
+            #endif
+        }
     }
 
     override func makeWindowControllers() {
+        #if MARGINED_BENCHMARK
+        let started = DispatchTime.now().uptimeNanoseconds
+        #endif
         let loaded = loadedSource.withLock { $0 }
+        #if MARGINED_BENCHMARK
+        let benchmark = ViewingBenchmarkSession.current
+        if let timestamp = loaded.benchmarkReadStartedNS {
+            benchmark?.recordOpening("read_started_ns", source: loaded.text, at: timestamp)
+        }
+        if let timestamp = loaded.benchmarkReadFinishedNS {
+            benchmark?.recordOpening("read_finished_ns", source: loaded.text, at: timestamp)
+        }
+        benchmark?.recordOpening("window_started_ns", source: loaded.text, at: started)
+        #endif
         reader.source = loaded.text
         reader.fileURL = loaded.url
         reader.title = loaded.title
@@ -65,6 +87,9 @@ final class MarkdownDocument: NSDocument {
         window.center()
         addWindowController(NSWindowController(window: window))
         (NSApp.delegate as? AppDelegate)?.documentDidOpen()
+        #if MARGINED_BENCHMARK
+        benchmark?.recordOpening("window_finished_ns", source: loaded.text)
+        #endif
     }
 
     private var preparingPrint: Task<Void, Never>?
@@ -258,4 +283,8 @@ private struct LoadedSource: Sendable {
     var url: URL?
     var title = "Markdown"
     var snapshot: SourceFileEdit.Snapshot? = nil
+    #if MARGINED_BENCHMARK
+    var benchmarkReadStartedNS: UInt64? = nil
+    var benchmarkReadFinishedNS: UInt64? = nil
+    #endif
 }

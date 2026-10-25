@@ -14,6 +14,7 @@ final class ViewingBenchmarkSession {
     private var expectedMarker = ""
     private var renderReadyNS: UInt64?
     private var renderOutput: RenderedMarkdown?
+    private var openingLifecycle: [String: UInt64] = [:]
     private var cardFrames: [ObjectIdentifier: [String: CGRect]] = [:]
     private var request: ViewingBenchmarkRequest?
     private var finished = false
@@ -27,6 +28,13 @@ final class ViewingBenchmarkSession {
         current = session
         Task { await session.run() }
         return true
+    }
+
+    func recordOpening(_ stage: String, source: String,
+                       at timestamp: UInt64 = DispatchTime.now().uptimeNanoseconds) {
+        guard !expectedMarker.isEmpty, source.hasPrefix("# " + expectedMarker + "\n"),
+              openingLifecycle[stage] == nil else { return }
+        openingLifecycle[stage] = timestamp
     }
 
     func didRender(source: String, output: RenderedMarkdown) {
@@ -87,6 +95,7 @@ final class ViewingBenchmarkSession {
                         let delays = [0, 173, 409, 683, 937]
                         try await Task.sleep(for: .milliseconds(delays[index % delays.count]))
                         expectedMarker = marker; renderReadyNS = nil; renderOutput = nil
+                        openingLifecycle.removeAll(keepingCapacity: true)
                         let start = DispatchTime.now().uptimeNanoseconds
                         try Data(text.utf8).write(to: source.url, options: .atomic)
                         samples.append(try await frame(for: initial, marker: marker, index: index, start: start))
@@ -100,6 +109,7 @@ final class ViewingBenchmarkSession {
 
     private func open(_ url: URL, marker: String, index: Int, start: UInt64) async throws -> (MarkdownDocument, ViewingBenchmarkMeasurement) {
         expectedMarker = marker; renderReadyNS = nil; renderOutput = nil
+        openingLifecycle.removeAll(keepingCapacity: true)
         let document: MarkdownDocument = try await withCheckedThrowingContinuation { continuation in
             NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { document, _, error in
                 if let document = document as? MarkdownDocument { continuation.resume(returning: document) }
@@ -182,6 +192,7 @@ final class ViewingBenchmarkSession {
                 measurement.rendererTotalNS = output.benchmarkTotalNS
                 measurement.layoutReadyNS = layoutReady
                 measurement.discussionLayout = layout
+                measurement.openingLifecycle = openingLifecycle
                 return measurement
             }
             try await Task.sleep(for: .milliseconds(10))

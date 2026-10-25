@@ -22,17 +22,21 @@ struct MarkdownWebView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(reader: reader) }
 
     func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "margined-resource")
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-        configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.taskWorld, name: "taskToggle")
-        configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        #if MARGINED_BENCHMARK
+        ViewingBenchmarkSession.current?.recordOpening("webview_started_ns", source: reader.source)
+        #endif
+        let page = ReaderPagePreparation.shared.take()
+        let webView = page.webView
+        context.coordinator.bindImages(page.images)
+        webView.configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.taskWorld, name: "taskToggle")
+        webView.configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
         webView.navigationDelegate = context.coordinator
         webView.setAccessibilityLabel(String(localized: "Markdown document"))
         webView.allowsLinkPreview = false
         context.coordinator.webView = webView
+        #if MARGINED_BENCHMARK
+        ViewingBenchmarkSession.current?.recordOpening("webview_created_ns", source: reader.source)
+        #endif
         return webView
     }
 
@@ -73,7 +77,7 @@ struct MarkdownWebView: NSViewRepresentable {
         private var discussionDecorationKey: String?
         private var discussionPassageGeneration = 0
         let reader: ReaderState
-        let images = ImageSchemeHandler()
+        private(set) var images = ImageSchemeHandler()
         weak var webView: WKWebView?
         var html: String?
         var imageReloadGeneration = -1
@@ -103,6 +107,12 @@ struct MarkdownWebView: NSViewRepresentable {
 
         init(reader: ReaderState) {
             self.reader = reader
+            super.init()
+            bindImages(images)
+        }
+
+        func bindImages(_ handler: ImageSchemeHandler) {
+            images = handler
             images.loadFailed = { [weak reader] in reader?.localImageError = $0 }
         }
 
@@ -148,12 +158,18 @@ struct MarkdownWebView: NSViewRepresentable {
                 }
                 guard generation == loadGeneration else { return }
                 activeLoadGeneration = generation
+                #if MARGINED_BENCHMARK
+                ViewingBenchmarkSession.current?.recordOpening("navigation_requested_ns", source: reader.source)
+                #endif
                 activeNavigation = webView.loadHTMLString(html, baseURL: reader.fileURL?.deletingLastPathComponent())
             }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard navigation === activeNavigation, activeLoadGeneration == loadGeneration else { return }
+            #if MARGINED_BENCHMARK
+            ViewingBenchmarkSession.current?.recordOpening("navigation_finished_ns", source: reader.source)
+            #endif
             contentReady = true
             let position = readingPosition
             let generation = loadGeneration, focusIntent = readingPositionFocusIntent
@@ -172,6 +188,7 @@ struct MarkdownWebView: NSViewRepresentable {
             configureTasks()
             synchronizeSpeech()
             if !reader.searchText.isEmpty { find() }
+            Task { @MainActor in ReaderPagePreparation.shared.prepareIfNeeded() }
         }
 
         func synchronizeSpeech() {
@@ -407,6 +424,7 @@ struct MarkdownWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+            guard navigation === activeNavigation, activeLoadGeneration == loadGeneration else { return }
             if (error as NSError).code != NSURLErrorCancelled { reader.errorMessage = error.localizedDescription }
         }
 

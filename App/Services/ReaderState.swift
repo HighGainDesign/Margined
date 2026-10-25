@@ -732,6 +732,9 @@ final class ReaderState {
     private struct ChecklistOperation { let task: MarkdownTask; let marker: UInt8 }
 
     func render() {
+        #if MARGINED_BENCHMARK
+        ViewingBenchmarkSession.current?.recordOpening("render_enqueued_ns", source: source)
+        #endif
         renderTask?.cancel()
         isRendering = true
         let text = source, title = title, wide = wide, loadRemoteImages = loadRemoteImages
@@ -745,12 +748,18 @@ final class ReaderState {
             sourceGate.enqueue { try SourceFileEdit.read(url) }
         } : nil
         renderTask = Task { [weak self] in
+            #if MARGINED_BENCHMARK
+            ViewingBenchmarkSession.current?.recordOpening("render_task_started_ns", source: text)
+            #endif
             do {
                 if let initialRead, let captured = try? await initialRead.value(),
                    let self, sourceContext == context, source.utf8.elementsEqual(text.utf8),
                    (try? captured.source.utf8.elementsEqual(text.utf8)) == true, !hasPendingFileUpdate {
                     sourceSnapshot = captured
                 }
+                #if MARGINED_BENCHMARK
+                ViewingBenchmarkSession.current?.recordOpening("renderer_requested_ns", source: text)
+                #endif
                 let output = try await MarkdownRenderer.shared.render(text, title: title, wide: wide, baseline: baseline, reviewedUnits: units, loadRemoteImages: loadRemoteImages, appearance: appearance, mapTasks: self?.fileURL != nil, documentLanguage: language, prepareSpeech: true, speechOptions: self?.speechModel?.preferences.options ?? SpeechPreferences.shared.options, previousDiscussionProjection: previousProjection, previousDiscussions: previousDiscussions)
                 guard !Task.isCancelled, self?.sourceContext == context else { return }
                 let sameReview = self?.rendered?.changes.entries == output.changes.entries
@@ -790,6 +799,9 @@ final class ReaderState {
     /// Poll the pathname, rather than an inode, to support atomic saves by agents/editors.
     /// The SwiftUI task cancels when its document window closes.
     func watchFile() async {
+        #if MARGINED_BENCHMARK
+        ViewingBenchmarkSession.current?.recordOpening("watch_started_ns", source: source)
+        #endif
         if isStreamingPreview { await watchStream(); return }
         if reviewedSource == nil { reviewedSource = source }
         render()

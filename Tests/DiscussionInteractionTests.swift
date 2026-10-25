@@ -526,11 +526,29 @@ import XCTest
         let window = DiscussionInteractionWindow(contentViewController: controller)
         window.styleMask = [.titled, .closable, .resizable]
         window.setContentSize(NSSize(width: 1_200, height: 780)); window.makeKeyAndOrderFront(nil)
+        // A prepared blank page already has a URL. Verify the actual document
+        // before a test records DOM identity or starts a native interaction.
         for _ in 0..<200 {
-            if let web = findWebView(controller.view), web.url != nil, !web.isLoading, !reader.isRendering, reader.currentDiscussionVersion.snapshot != nil { break }
+            if let web = findWebView(controller.view), web.url != nil, !web.isLoading,
+               !reader.isRendering, reader.currentDiscussionVersion.snapshot != nil,
+               let text = try? await web.callAsyncJavaScript("""
+               const main = document.querySelector('main#document');
+               const text = main?.textContent.normalize('NFC') ?? '';
+               return document.readyState === 'complete'
+                   && main?.querySelector('h1')?.textContent === 'Plan'
+                   && text.includes('Café bold passage.') ? text : null;
+               """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionFixture")) as? String {
+                XCTContext.runActivity(named: "Verified document before interaction") { activity in
+                    let attachment = XCTAttachment(string: text)
+                    attachment.lifetime = .keepAlways; activity.add(attachment)
+                }
+                return .init(reader: reader, controller: controller, window: window, file: file, data: data)
+            }
             try await Task.sleep(for: .milliseconds(20))
         }
-        return .init(reader: reader, controller: controller, window: window, file: file, data: data)
+        window.close(); reader.stop(); try? FileManager.default.removeItem(at: file)
+        XCTFail("The actual discussion document did not become ready")
+        throw CocoaError(.coderInvalidValue)
     }
     private func findWebView(_ view: NSView) -> WKWebView? {
         if let web = view as? WKWebView { return web }
