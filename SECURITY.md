@@ -19,8 +19,8 @@ App Sandbox. Local image paths, file URLs and symlinks may refer to any regular
 file macOS permits the app to read; Margined imposes no document-folder boundary
 or additional image-folder grants. Native reads are bounded, and image bytes
 are decoded by WebKit. Hardened Runtime and Developer ID signing remain enabled.
-The Quick Look extension retains its required sandbox and previews text and
-embedded data images only. Remote images require a per-document HTTPS opt-in and are
+The macOS Quick Look extension stays sandboxed and uses a read-only filesystem
+exception to package local image attachments for offline previews. Remote images require a per-document HTTPS opt-in and are
 always blocked in Finder Quick Look. An image request can disclose your IP
 address to its host. Appearance preferences are shared only between the signed
 app and its Quick Look extension through their macOS App Group.

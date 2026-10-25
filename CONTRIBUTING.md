@@ -79,7 +79,8 @@ extension behavior changes. Verify light/dark appearance, tables, links, and
 automatic refresh when they are affected. Preserve read-only defaults, the
 consent-gated task-marker exception, bounded image reads, and inert HTML/scripts.
 The directly distributed main app uses normal macOS filesystem permissions; the
-Quick Look extension retains its required sandbox.
+Quick Look extension stays sandboxed, with a read-only path exception for local
+image attachments. Explain this exception when submitting for App Store review.
 
 Do not commit signing certificates, private keys, provisioning profiles, build
 products, personal settings, or local agent notes. After testing, close and
