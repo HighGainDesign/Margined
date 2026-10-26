@@ -65,6 +65,22 @@ python3 script/check-viewing-observer.py --app /path/to/Margined.app \
 Retain native results before claiming expanded-view performance. Invalid phase
 ordering, missing histories and unexpected discussion counts reject the run.
 
+## Acceptance targets
+
+For ordinary local prose, tables, images and annotated documents, use complete
+20-sample cohorts and these p95 gates:
+
+| Operation | Target |
+| --- | --- |
+| Fresh process/open (OS caches retained) | <1 s |
+| Subsequent document/open | <200 ms |
+| File save to verified refreshed frame | <500 ms |
+
+About 50 ms warm opening is a stretch target. Large files, math/Mermaid, expanded
+conversations, mobile and system Quick Look need separately labeled cohorts;
+a fast parser or HTML reply is not a visible-document result. Final 2.0 viewing
+acceptance remains incomplete until actual runs satisfy the agreed scope.
+
 System Quick Look and iOS timings require separate native runs. Internal HTML
 packaging timings cannot stand in for system preview display.
 
