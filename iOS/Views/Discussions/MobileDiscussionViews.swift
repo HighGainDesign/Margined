@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct MobileDiscussionList: View {
     @Bindable var reader: MobileReaderState
@@ -6,6 +7,7 @@ struct MobileDiscussionList: View {
     var contentWidthChanged: (Double) -> Void = { _ in }
     var body: some View {
         List {
+            MobileDiscussionDiagnostics(reader: reader)
             if reader.discussionImportLoading { ProgressView("Reading discussions…") }
             if let error = reader.discussionError { Label(error, systemImage: "exclamationmark.triangle").textSelection(.enabled) }
             Section {
@@ -110,7 +112,8 @@ private struct MobileDiscussionMessages: View {
             appearance: reader.appearance, loadRemoteImages: reader.loadRemoteImages,
             zoom: reader.zoom, imageGeneration: reader.imageReloadGeneration, documentLanguage: nil,
             isCurrent: { reader.documentGeneration == context && reader.inspector == .discussions &&
-                reader.discussions.selection == .thread(thread.id) && reader.discussionRoute == .thread(thread.id) &&
+                reader.discussions.selection == .thread(thread.id) &&
+                (reader.discussionUsesMargin || reader.discussionRoute == .thread(thread.id)) &&
                 reader.rendered?.discussions?.threads.contains(where: { $0.id == thread.id }) == true },
             imageFailed: { reader.localImageError = $0 },
             openFile: { url in
@@ -194,16 +197,22 @@ private struct MobileDiscussionComposerFields: View {
 /// Uses viewport coordinates already scaled by MobileWebTypography. Do not apply zoom twice.
 struct MobileDiscussionMargin: View {
     @Bindable var reader: MobileReaderState
+    var includesInspectorPicker = false
     @State private var frames: [String: CGRect] = [:]
     private struct ComposerAnchor: Hashable { let key: DiscussionSession.DraftKey }
     var body: some View {
         VStack(spacing: 12) {
-            HStack {
-                Label("Discussions", systemImage: "bubble.left.and.bubble.right").font(.headline)
-                Spacer()
-                Button("Hide discussions", systemImage: "xmark") { reader.hideDiscussions() }.labelStyle(.iconOnly)
+            if includesInspectorPicker {
+                MobileInspectorHeader(reader: reader)
+            } else {
+                HStack {
+                    Label("Discussions", systemImage: "bubble.left.and.bubble.right").font(.headline)
+                    Spacer()
+                    Button("Hide discussions", systemImage: "xmark") { reader.hideDiscussions() }.labelStyle(.iconOnly)
+                }
             }
             Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
+            MobileDiscussionDiagnostics(reader: reader)
             if reader.discussionImportLoading { ProgressView("Reading discussions…") }
             if let error = reader.discussionError { Label(error, systemImage: "exclamationmark.triangle").font(.footnote) }
             Picker("Show discussions", selection: Binding(get: { reader.discussions.filter }, set: { reader.discussions.filter = $0 })) {
@@ -262,6 +271,7 @@ struct MobileDiscussionMargin: View {
     }
     private func revealComposer(using scroller: ScrollViewProxy) {
         guard let key = reader.discussions.selection else { return }
+        if case .thread = key, reader.discussions.drafts[key]?.body.isEmpty != false { return }
         // The margin scrolls independently; keep the active reply reachable
         // without moving the document or taking focus from another control.
         scroller.scrollTo(ComposerAnchor(key: key), anchor: .bottom)
@@ -355,23 +365,33 @@ struct MobileDiscussionControls: View {
         self.reader = reader; self.thread = thread; version = reader.currentDiscussionVersion
     }
     var body: some View {
-        HStack {
-            Button(thread.state == .open ? "Resolve" : "Reopen",
-                   systemImage: thread.state == .open ? "checkmark.bubble" : "arrow.uturn.backward") {
-                guard reader.matchesDiscussionVersion(version) else {
-                    reader.discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
-                }
-                if thread.state == .open { reader.requestResolveDiscussion(thread.id) }
-                else { reader.reopenDiscussion(thread.id) }
-            }.buttonStyle(.bordered).disabled(!reader.canEditDiscussions)
-            Button("Reattach…", systemImage: "link") {
-                guard reader.matchesDiscussionVersion(version) else {
-                    reader.discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
-                }
-                reader.requestReattachDiscussion(thread.id)
-            }.buttonStyle(.bordered).disabled(!reader.canEditDiscussions)
-                .accessibilityHint("Select replacement text in the document, or choose a passage from a list.")
-            Spacer()
+        VStack(alignment: .leading, spacing: 10) {
+            if reader.rendered?.discussionText?.anchorResults[thread.id]?.status == .attached {
+                Button("Go to Passage", systemImage: "arrow.up.forward") {
+                    reader.goToDiscussion(thread.id, version: version)
+                }.buttonStyle(.bordered).disabled(reader.isRendering || reader.fileSaving)
+            } else {
+                Label("Passage needs attention", systemImage: "link.badge.plus")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(thread.state == .open ? "Resolve" : "Reopen",
+                       systemImage: thread.state == .open ? "checkmark.bubble" : "arrow.uturn.backward") {
+                    guard reader.matchesDiscussionVersion(version) else {
+                        reader.discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+                    }
+                    if thread.state == .open { reader.requestResolveDiscussion(thread.id) }
+                    else { reader.reopenDiscussion(thread.id) }
+                }.buttonStyle(.bordered).disabled(!reader.canEditDiscussions)
+                Button("Reattach…", systemImage: "link") {
+                    guard reader.matchesDiscussionVersion(version) else {
+                        reader.discussionError = DiscussionSession.Failure.staleSource.localizedDescription; return
+                    }
+                    reader.requestReattachDiscussion(thread.id)
+                }.buttonStyle(.bordered).disabled(!reader.canEditDiscussions)
+                    .accessibilityHint("Select replacement text in the document, or choose a passage from a list.")
+                Spacer()
+            }
         }
     }
 }
@@ -435,5 +455,79 @@ private struct MobileDiscussionDecisionCard: View {
             ScrollView { Text(verbatim: text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                 .frame(maxHeight: 110)
         }
+    }
+}
+
+
+/// Unrecognized blocks remain in the file and can be inspected without editing it.
+struct MobileDiscussionDiagnostics: View {
+    let reader: MobileReaderState
+    private struct SourceSnapshot: Identifiable {
+        let id = UUID()
+        let title: String
+        let source: String
+    }
+    @State private var snapshot: SourceSnapshot?
+    @State private var expanded = true
+
+    var body: some View {
+        if let document = reader.rendered?.discussions, !document.diagnostics.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                DisclosureGroup(isExpanded: $expanded) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(document.diagnostics.enumerated()), id: \.offset) { _, item in
+                                Text("Line \(item.line): \(item.message)").font(.caption)
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 100)
+                } label: {
+                    Label("Some discussions are unavailable", systemImage: "exclamationmark.bubble")
+                        .font(.callout)
+                }
+                Button("Show Source", systemImage: "doc.text") {
+                    snapshot = .init(title: reader.title, source: document.source)
+                }
+            }.textSelection(.enabled)
+                .accessibilityIdentifier("discussion-diagnostics")
+                .sheet(item: $snapshot) { source in
+                    NavigationStack {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Read-only source snapshot. Includes saved discussions and metadata. Unposted comments are not included.")
+                                .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                            MobileDiscussionSourceText(source: source.source)
+                        }
+                        .navigationTitle(Text("Source — \(source.title)"))
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Copy") { UIPasteboard.general.string = source.source }
+                            }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { snapshot = nil }
+                            }
+                        }
+                    }.presentationDragIndicator(.visible)
+                }
+        }
+    }
+}
+
+private struct MobileDiscussionSourceText: UIViewRepresentable {
+    let source: String
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .monospacedSystemFont(ofSize: 14, weight: .regular))
+        view.adjustsFontForContentSizeCategory = true
+        view.textColor = .label
+        view.backgroundColor = .systemBackground
+        view.textContainerInset = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        view.accessibilityLabel = String(localized: "Markdown source, read only")
+        return view
+    }
+    func updateUIView(_ view: UITextView, context: Context) {
+        if view.text != source { view.text = source }
     }
 }

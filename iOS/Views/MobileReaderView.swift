@@ -11,9 +11,12 @@ struct MobileReaderView: View {
     @Environment(\.dynamicTypeSize) private var textSize
     @State private var contentWidth = 0.0
     private var reviewUsesMargin: Bool {
-        !textSize.isAccessibilitySize && DiscussionMarginLayout.canShowMargin(width: contentWidth - 1,
+        reader.discussionUsesMargin
+    }
+    private var outlineUsesSidebar: Bool {
+        !textSize.isAccessibilitySize && MobileReaderPanelLayout.canDockOutline(width: contentWidth,
             bodyFont: reader.discussionMargin?.bodyFont ?? 16 * reader.zoom,
-            horizontalInsets: reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+            horizontalInsets: reader.discussionMargin?.horizontalInsets ?? 88)
     }
     private var showChanges: Bool {
         get { reader.inspector == .changes }
@@ -27,6 +30,18 @@ struct MobileReaderView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            if showOutline, reader.inspector == nil, outlineUsesSidebar {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Outline").font(.headline)
+                        Spacer()
+                        Button("Close Outline", systemImage: "xmark") { showOutline = false }
+                            .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                    }.padding(.horizontal, 12)
+                    outlineList
+                }.frame(width: CGFloat(MobileReaderPanelLayout.outlineWidth)).accessibilityIdentifier("document-outline-sidebar")
+                Divider()
+            }
             VStack(spacing: 0) {
                 if showFind { findBar }
                 if reader.hasPendingFileUpdate { latestBar }
@@ -45,12 +60,14 @@ struct MobileReaderView: View {
             }
             if reader.inspector == .discussions, reader.discussionUsesMargin {
                 Divider()
-                MobileDiscussionMargin(reader: reader).frame(width: 340)
+                MobileDiscussionMargin(reader: reader, includesInspectorPicker: true)
+                    .frame(width: CGFloat(MobileReaderPanelLayout.inspectorWidth))
             }
             if showChanges, reviewUsesMargin {
                 Divider()
-                MobileChangesView(reader: reader, close: { showChanges = false }, reveal: { reader.showSelectedChange() })
-                    .frame(width: 340)
+                MobileChangesView(reader: reader, close: { showChanges = false }, reveal: { reader.showSelectedChange() },
+                    includesInspectorPicker: true)
+                    .frame(width: CGFloat(MobileReaderPanelLayout.inspectorWidth))
             }
         }
         // Measure inside navigation chrome: Duo may place its toolbar beside
@@ -62,7 +79,10 @@ struct MobileReaderView: View {
             ToolbarItemGroup(placement: .topBarLeading) {
                 Button("Close Document", systemImage: "xmark", action: closeFile)
                     .labelStyle(.iconOnly)
-                Button("Outline", systemImage: "list.bullet.indent") { showOutline = true }
+                Button("Outline", systemImage: "list.bullet.indent") {
+                    if showOutline { showOutline = false }
+                    else { reader.inspector = nil; showOutline = true }
+                }
                     .disabled(reader.rendered?.headings.isEmpty != false)
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -113,12 +133,11 @@ struct MobileReaderView: View {
                 } label: { Label("More", systemImage: "ellipsis.circle") }
             }
         }
-        .sheet(isPresented: $showOutline) {
+        .sheet(isPresented: Binding(get: { showOutline && reader.inspector == nil && !outlineUsesSidebar }, set: {
+            if !$0 && !outlineUsesSidebar { showOutline = false }
+        })) {
             NavigationStack {
-                List(reader.rendered?.headings ?? []) { heading in
-                    Button(heading.title) { showOutline = false; reader.navigate(to: heading.id) }
-                        .padding(.leading, CGFloat(max(0, heading.level - 1)) * 12)
-                }
+                outlineList
                 .navigationTitle("Outline").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showOutline = false } } }
             }
@@ -142,6 +161,18 @@ struct MobileReaderView: View {
         .onChange(of: reader.wide) { _, _ in reader.render() }
         .onChange(of: reader.loadRemoteImages) { _, _ in reader.render() }
         .onChange(of: reader.appearance) { _, _ in reader.render() }
+        .onChange(of: reader.inspector) { _, value in
+            if value != nil { showOutline = false }
+        }
+    }
+
+    private var outlineList: some View {
+        List(reader.rendered?.headings ?? []) { heading in
+            Button(heading.title) {
+                if !outlineUsesSidebar { showOutline = false }
+                reader.navigate(to: heading.id)
+            }.padding(.leading, CGFloat(max(0, heading.level - 1)) * 12)
+        }
     }
 
     private var findBar: some View {
@@ -196,16 +227,39 @@ struct MobileReaderView: View {
     }
 }
 
+struct MobileInspectorHeader: View {
+    @Bindable var reader: MobileReaderState
+    var body: some View {
+        let document = reader.documentGeneration
+        HStack(spacing: 8) {
+            Picker("Inspector", selection: Binding(get: { reader.inspector ?? .discussions }, set: { value in
+                guard reader.documentGeneration == document, reader.inspector != nil else { return }
+                reader.inspector = value
+            })) {
+                Text("Changes").tag(MobileReaderState.Inspector.changes)
+                Text("Discussions").tag(MobileReaderState.Inspector.discussions)
+            }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Inspector")
+            Button("Close Inspector", systemImage: "xmark") { reader.inspector = nil }
+                .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+        }.accessibilityIdentifier("document-inspector-header")
+    }
+}
+
 struct MobileChangesView: View {
     @Bindable var reader: MobileReaderState
     let close: () -> Void
     let reveal: () -> Void
+    var includesInspectorPicker = false
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Review Changes").font(.headline).accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button("Close Review", systemImage: "xmark", action: close).labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+            if includesInspectorPicker {
+                MobileInspectorHeader(reader: reader)
+            } else {
+                HStack {
+                    Text("Review Changes").font(.headline).accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    Button("Close Review", systemImage: "xmark", action: close).labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                }
             }
             if let change = reader.selectedChange {
                 HStack {

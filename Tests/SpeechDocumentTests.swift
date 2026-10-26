@@ -35,6 +35,24 @@ final class SpeechDocumentTests: XCTestCase {
         XCTAssertTrue(full.contains("secretImplementation()"))
     }
 
+    func testUtteranceBoundaryKeepsExactTextAndOffsets() async throws {
+        for length in [1_199, 1_200, 1_201] {
+            let text = String(repeating: "a", count: length)
+            let output = try await MarkdownRenderer.shared.render(text, documentLanguage: "en", prepareSpeech: true)
+            let segments = try XCTUnwrap(output.speech).segments
+            XCTAssertEqual(segments.map(\.text).joined(), text)
+            XCTAssertEqual(segments.count, length <= 1_200 ? 1 : 2)
+            XCTAssertEqual(segments.first?.elementOffset, 0)
+            if segments.count == 2 { XCTAssertEqual(segments[1].elementOffset, 1_200) }
+        }
+        let unicode = String(repeating: "Café 👩🏽‍💻 漢字 ", count: 20).trimmingCharacters(in: .whitespaces)
+        let output = try await MarkdownRenderer.shared.render(unicode, documentLanguage: "en", prepareSpeech: true)
+        let segments = try XCTUnwrap(output.speech).segments
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments.first?.text, unicode)
+        XCTAssertEqual(segments.first?.elementOffset, 0)
+    }
+
     func testLongUnicodeBlocksStayBoundedWithoutLosingCharacters() async throws {
         let text = String(repeating: "書👩🏽‍💻読", count: 1000)
         let output = try await MarkdownRenderer.shared.render(text, prepareSpeech: true)

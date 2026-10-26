@@ -83,6 +83,14 @@ actor MarkdownRenderer {
         #if MARGINED_BENCHMARK
         benchmarkMark("anchor_ns")
         #endif
+        // Reuse the clean DOM only for a byte-identical baseline. Capture it
+        // before speech/task markers; later edits still need the original units.
+        let initialBaseline: [ReadingUnit]?
+        if reviewedUnits == nil, let baseline, baseline.utf8.elementsEqual(source.utf8) {
+            initialBaseline = try DocumentChanges.snapshot(in: document)
+        } else {
+            initialBaseline = nil
+        }
         // The semantic body is stable after a note-only update, unlike the full
         // source hash. Fingerprints still include code/math/image semantics.
         let speechSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
@@ -99,12 +107,14 @@ actor MarkdownRenderer {
         let comparisonBaseline: [ReadingUnit]?
         if let reviewedUnits {
             comparisonBaseline = reviewedUnits
+        } else if let initialBaseline {
+            comparisonBaseline = initialBaseline
         } else if let baseline {
             comparisonBaseline = try DocumentChanges.snapshot(in: parse(DiscussionCodec.parse(baseline).readingSource, loadRemoteImages: loadRemoteImages))
         } else {
             comparisonBaseline = nil
         }
-        if let comparisonBaseline {
+        if let comparisonBaseline, initialBaseline == nil {
             changes = try DocumentChanges.annotate(current: document, baseline: comparisonBaseline)
         }
         let checkboxCount = try document.select("input[type=checkbox]").size()

@@ -30,6 +30,13 @@ struct MobileDiscussionDecision: Identifiable {
 }
 enum MobileDiscussionRoute: Hashable { case list, thread(DiscussionSession.DraftKey) }
 
+struct MobileDiscussionPassageRequest {
+    let id = UUID()
+    let version: MobileDiscussionVersion
+    let sourceID: String
+    let threadID: String
+}
+
 extension MobileReaderState {
     var discussionNavigationPath: [MobileDiscussionRoute] {
         get {
@@ -181,6 +188,15 @@ extension MobileReaderState {
         guard rendered?.discussions?.threads.contains(where: { $0.id == threadID }) == true else { return }
         if !filteredDiscussionThreads.contains(where: { $0.id == threadID }) { discussions.filter = .all }
         discussions.selection = .thread(threadID); discussionRoute = .thread(threadID); inspector = .discussions
+    }
+    func goToDiscussion(_ threadID: String, version: MobileDiscussionVersion) {
+        guard !isRendering, !fileSaving, matchesDiscussionVersion(version),
+              let projection = rendered?.discussionText,
+              projection.anchorResults[threadID]?.status == .attached else { return }
+        discussions.selection = .thread(threadID)
+        discussionPassageRequest = .init(version: version, sourceID: projection.sourceID, threadID: threadID)
+        // Compact navigation must reveal the retained document before scrolling.
+        if !discussionUsesMargin { inspector = nil; discussionRoute = nil }
     }
     func backToDiscussionList() { discussionRoute = nil; inspector = .discussions }
     func hideDiscussions() { inspector = nil; discussionRoute = nil }

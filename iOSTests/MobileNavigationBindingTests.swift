@@ -49,6 +49,41 @@ final class MobileNavigationBindingTests: XCTestCase {
         XCTAssertNil(reader.discussionRoute)
     }
 
+    func testAnOldConversationBindingCannotDismissTheChangesInspector() async throws {
+        let (reader, _) = try await fixture()
+        let workspace = MobileDocumentWorkspace(reader: reader, openFolder: {}, closeFile: {})
+        reader.openDiscussion("t-binding")
+        reader.discussions.setDraft("Keep this reply while reviewing changes.", for: .thread("t-binding"))
+        let old = workspace.navigationBinding()
+        reader.inspector = .changes
+        old.wrappedValue = []
+        XCTAssertEqual(reader.inspector, .changes,
+                       "A queued conversation pop cannot close the newly selected inspector")
+        XCTAssertEqual(reader.discussionRoute, .thread("t-binding"))
+        workspace.navigationBinding().wrappedValue = []
+        XCTAssertEqual(reader.inspector, .changes,
+                       "A current binding for a non-conversation panel cannot dismiss that panel either")
+        XCTAssertEqual(reader.discussionRoute, .thread("t-binding"))
+        XCTAssertEqual(reader.discussions.selection, .thread("t-binding"))
+        XCTAssertEqual(reader.discussions.drafts[.thread("t-binding")]?.body,
+                       "Keep this reply while reviewing changes.")
+    }
+
+    func testPanelWidthPolicyCoversIPadPortraitLandscapeAndDuo() {
+        for (width, expected) in [(834.0, false), (1032, true), (1194, true), (1376, true), (890, true), (390, false)] {
+            for insets in [44.0, 88.0] {
+                XCTAssertEqual(MobileReaderPanelLayout.canDockInspector(width: width,
+                    bodyFont: 16, horizontalInsets: insets), expected,
+                    "Docking at \(width) points must not depend on whether the document is already compact")
+            }
+        }
+        XCTAssertFalse(MobileReaderPanelLayout.canDockInspector(width: 1032,
+            bodyFont: 28, horizontalInsets: 44),
+            "Larger document text can require compact panels even on a large iPad")
+        XCTAssertTrue(MobileReaderPanelLayout.canDockOutline(width: 834, bodyFont: 16, horizontalInsets: 44))
+        XCTAssertFalse(MobileReaderPanelLayout.canDockOutline(width: 390, bodyFont: 16, horizontalInsets: 44))
+    }
+
     private func fixture() async throws -> (MobileReaderState, URL) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

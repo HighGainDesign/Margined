@@ -37,6 +37,53 @@ final class DocumentChangesTests: XCTestCase {
         XCTAssertEqual(equivalent.changes.count, 0)
     }
 
+    func testIdenticalBaselineRetainsCleanSnapshotForNextReview() async throws {
+        let source = "# Plan\n\n- [ ] Review scope\n\n| Item | State |\n| --- | --- |\n| Alpha | Pending |\n"
+        let first = try await MarkdownRenderer.shared.render(source, baseline: source, mapTasks: true,
+            documentLanguage: "en", prepareSpeech: true)
+        let baseline = try XCTUnwrap(first.comparisonBaseline)
+        XCTAssertEqual(first.changes.count, 0)
+        XCTAssertEqual(first.tasks.count, 1)
+        XCTAssertEqual(first.speech?.segments.map(\.text), ["Plan", "Unchecked: Review scope", "Item: Alpha; State: Pending"])
+        let cleanHTML = baseline.map(\.html).joined()
+        XCTAssertFalse(cleanHTML.contains("data-margined-speech"))
+        XCTAssertFalse(cleanHTML.contains("data-margined-task"))
+        XCTAssertFalse(cleanHTML.contains("margined-change"))
+
+        let updated = source.replacingOccurrences(of: "[ ]", with: "[x]").replacingOccurrences(of: "Pending", with: "Ready")
+        let next = try await MarkdownRenderer.shared.render(updated, reviewedUnits: baseline, mapTasks: true,
+            documentLanguage: "en", prepareSpeech: true)
+        XCTAssertEqual(next.changes.count, 2)
+        XCTAssertTrue(next.changes.entries.allSatisfy { $0.kind == .edited })
+        XCTAssertTrue(next.changes.entries.contains { $0.before == "Pending" && $0.after == "Ready" })
+        XCTAssertEqual(next.speech?.segments.map(\.text), ["Plan", "Checked: Review scope", "Item: Alpha; State: Ready"])
+    }
+
+    func testCanonicallyEquivalentSourceKeepsOriginalBaselineBytes() async throws {
+        let before = "Caf\u{00e9} review."
+        let current = "Cafe\u{0301} review."
+        XCTAssertEqual(before, current)
+        XCTAssertNotEqual(Array(before.utf8), Array(current.utf8))
+        let output = try await MarkdownRenderer.shared.render(current, baseline: before, prepareSpeech: true)
+        let baseline = try XCTUnwrap(output.comparisonBaseline)
+        let unit = try XCTUnwrap(baseline.first)
+        XCTAssertEqual(output.changes.count, 0)
+        XCTAssertEqual(Array(unit.html.utf8), Array(before.utf8))
+    }
+
+    func testReviewedUnitsOverrideIdenticalCurrentSourceBaseline() async throws {
+        let before = "The state is Pending."
+        let current = "The state is Ready."
+        let first = try await MarkdownRenderer.shared.render(before, baseline: before)
+        let units = try XCTUnwrap(first.comparisonBaseline)
+        let next = try await MarkdownRenderer.shared.render(current, baseline: current, reviewedUnits: units,
+            prepareSpeech: true)
+        XCTAssertEqual(next.comparisonBaseline, units)
+        XCTAssertEqual(next.changes.count, 1)
+        XCTAssertEqual(next.changes.entries.first?.before, before)
+        XCTAssertEqual(next.changes.entries.first?.after, current)
+    }
+
     func testUnicodeCodeAndUnsafeTextRemainIntact() async throws {
         let before = "Café **日本語 old**\n\n```swift\nlet x = 1\n```"
         let after = "Café **日本語 👁️ new**\n\n```swift\nlet x = 2\n```\n\n`<script>alert(1)</script>`"

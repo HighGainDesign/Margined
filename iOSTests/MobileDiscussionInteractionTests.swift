@@ -2,10 +2,256 @@ import SwiftUI
 import LinkPresentation
 import UIKit
 import WebKit
+import Vision
 import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    func testGoToPassageReturnsToTheRetainedDocumentAndRejectsStaleActions() async throws {
+        let tail = (0..<120).map { "Long paragraph \($0) keeps the quoted passage above the current reading position.\n\n" }.joined()
+        let f = try await fixture(withThread: true, tail: tail)
+        _ = try await f.web.evaluateJavaScript("window.passageDocument=document;scrollTo(0,document.body.scrollHeight);true")
+        let scrolled = await pollAsync { try await f.web.evaluateJavaScript("scrollY>500") as? Bool == true }
+        XCTAssertTrue(scrolled)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep my reply when showing its passage.", for: .thread("t-mobile"))
+        let compact = await poll { self.visibleEditor(in: f.host.view)?.text == "Keep my reply when showing its passage." }
+        XCTAssertTrue(compact); guard compact else { return }
+        let version = f.reader.currentDiscussionVersion
+        f.reader.goToDiscussion("t-mobile", version: version)
+        let returned = await settledNavigation(f); XCTAssertTrue(returned)
+        XCTAssertTrue(f.reader.discussionNavigationPath.isEmpty)
+        let passage = await pollAsync {
+            guard f.reader.discussionPassageRequest == nil else { return false }
+            return try await f.web.evaluateJavaScript("window.passageDocument===document && document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<innerHeight") as? Bool == true
+        }
+        XCTAssertTrue(passage, "Go to Passage must focus and reveal the actual quote after compact navigation")
+        XCTAssertNil(f.reader.discussionPassageRequest)
+        XCTAssertTrue(self.webView(in: f.host.view) === f.web)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my reply when showing its passage.")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+
+        f.window.frame.size = CGSize(width: 1120, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let wide = await settledNavigation(f); XCTAssertTrue(wide)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.filter = .resolved // The unposted reply still makes this open thread reachable.
+        XCTAssertTrue(f.reader.filteredDiscussionThreads.isEmpty)
+        _ = try await f.web.evaluateJavaScript("scrollTo(0,document.body.scrollHeight);true")
+        f.reader.goToDiscussion("t-mobile", version: version)
+        let excluded = await pollAsync {
+            guard f.reader.discussionPassageRequest == nil else { return false }
+            return try await f.web.evaluateJavaScript("document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<innerHeight") as? Bool == true
+        }
+        XCTAssertTrue(excluded, "A retained reply outside the filter still needs a passage route")
+        XCTAssertEqual(f.reader.discussions.filter, .resolved)
+        XCTAssertNil(f.reader.discussionPassageRequest)
+
+        let replacement = Data(try MarkdownSource.decode(f.original).replacingOccurrences(of: "Before.", with: "Before changed externally.").utf8)
+        try replacement.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        let inspector = f.reader.inspector
+        f.reader.goToDiscussion("t-mobile", version: version)
+        XCTAssertNil(f.reader.discussionPassageRequest, "An old source-version action cannot navigate the refreshed file")
+        XCTAssertEqual(f.reader.inspector, inspector)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my reply when showing its passage.")
+        XCTAssertEqual(try Data(contentsOf: f.file), replacement)
+    }
+
+    func testDockedHistoryReopensWithoutRepairingTheClearedCompactRoute() async throws {
+        let f = try await fixture(withThread: true)
+        f.window.frame.size = CGSize(width: 1120, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let wide = await settledNavigation(f); XCTAssertTrue(wide)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep my unposted reply.", for: .thread("t-mobile"))
+        let initial = await pollAsync {
+            guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
+            return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+        }
+        XCTAssertTrue(initial); guard initial else { return }
+        f.reader.hideDiscussions()
+        let hidden = await poll { self.history(in: f.host.view, excluding: f.web) == nil }
+        XCTAssertTrue(hidden); XCTAssertNil(f.reader.discussionRoute)
+        f.reader.inspector = .discussions
+        let reopened = await pollAsync {
+            guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
+            return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+        }
+        XCTAssertTrue(reopened, "The visible selected history must load after hiding and reopening without another openDiscussion call")
+        f.window.frame.size = CGSize(width: 390, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let compact = await settledNavigation(f); XCTAssertTrue(compact)
+        f.reader.backToDiscussionList()
+        let list = await settledNavigation(f); XCTAssertTrue(list)
+        f.window.frame.size = CGSize(width: 1120, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let restored = await settledNavigation(f); XCTAssertTrue(restored)
+        let widened = await pollAsync {
+            guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
+            return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+        }
+        XCTAssertTrue(widened, "Compact Back and widening must restore selected history without repairing the route")
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my unposted reply.")
+        XCTAssertTrue(self.webView(in: f.host.view) === f.web)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testCurrentFileDiagnosticsAreVisibleInCompactAndDockedDiscussions() async throws {
+        let f = try await fixture(withThread: true)
+        let parsed = try DiscussionCodec.parse(MarkdownSource.read(f.file))
+        let block = try XCTUnwrap(parsed.blocks.first)
+        let raw = String(decoding: Array(parsed.source.utf8)[block.range], as: UTF8.self)
+        let duplicate = raw.replacingOccurrences(of: "t-mobile", with: "t-duplicate").replacingOccurrences(of: "m-mobile", with: "m-duplicate")
+        let future = raw.replacingOccurrences(of: "v1\n", with: "v9\n")
+        let malformed = raw.replacingOccurrences(of: "state: open", with: "state: [unterminated")
+        let bytes = f.original + Data(("\n\n" + future + "\n\n" + malformed + "\n\n" + duplicate + "\n\n" + duplicate).utf8)
+        try bytes.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        XCTAssertFalse(try XCTUnwrap(f.reader.rendered?.discussions).diagnostics.isEmpty)
+        XCTAssertEqual(f.reader.rendered?.discussions?.threads.map(\.id), ["t-mobile"])
+        f.reader.inspector = .discussions
+        for width in [CGFloat(390), CGFloat(1120)] {
+            f.window.frame.size = CGSize(width: width, height: 780)
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled)
+            let warning = try recognizedText(in: f.window)
+            XCTAssertTrue(warning.contains("Some discussions are unavailable"), "Current-file warnings must be visible at width \(width): \(warning)")
+            XCTAssertTrue(warning.contains("Show Source"), "Recovery source must be available without editing Markdown")
+        }
+        XCTAssertEqual(Data(f.reader.source.utf8), bytes)
+        XCTAssertEqual(try Data(contentsOf: f.file), bytes)
+    }
+
+    func testMobileConversationOffersExplicitPassageNavigation() async throws {
+        let f = try await fixture(withThread: true)
+        f.window.frame.size = CGSize(width: 1120, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        f.reader.openDiscussion("t-mobile")
+        let composer = await poll { self.editor(in: f.host.view) != nil }; XCTAssertTrue(composer)
+        let text = try recognizedText(in: f.window)
+        XCTAssertTrue(text.contains("Go to Passage"), "A visible discussion needs a route to its actual passage: \(text)")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    private func recognizedText(in window: UIWindow) throws -> String {
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage)).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+    }
+
+    func testChangesAndConversationHistoryShareTheAdaptiveIPadPanel() async throws {
+        let f = try await fixture(withThread: true)
+        _ = try await f.web.evaluateJavaScript("window.panelReadingPage=document;true")
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this reply while switching panels.", for: .thread("t-mobile"))
+        for size in [CGSize(width: 1194, height: 834), CGSize(width: 834, height: 1194),
+                     CGSize(width: 1376, height: 1032), CGSize(width: 1032, height: 1376)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let discussionSettled = await settledNavigation(f)
+            XCTAssertTrue(discussionSettled, "Discussion layout must settle at \(size)")
+            guard discussionSettled else { return }
+            let docked = f.reader.discussionUsesMargin
+            if size.width == 834 {
+                XCTAssertFalse(docked, "11-inch portrait keeps readable document width")
+            } else if size.width >= 1194 {
+                XCTAssertTrue(docked, "The two landscape controls must exercise the docked panel")
+            } else {
+                // A resized host can reserve native chrome inside a 13-inch
+                // portrait frame. Judge its actual reading area, not its shell.
+                func navigation(in controller: UIViewController) -> UINavigationController? {
+                    if let value = controller as? UINavigationController { return value }
+                    return controller.children.lazy.compactMap { navigation(in: $0) }.first
+                }
+                let top = try XCTUnwrap(navigation(in: f.host)?.topViewController?.viewIfLoaded)
+                let minimum = DiscussionMarginLayout.minimumDocumentWidth(
+                    bodyFont: f.reader.discussionMargin?.bodyFont ?? 16 * f.reader.zoom,
+                    horizontalInsets: max(88, f.reader.discussionMargin?.horizontalInsets ?? 88), outlineWidth: 0)
+                let expected = !top.traitCollection.preferredContentSizeCategory.isAccessibilityCategory &&
+                    top.safeAreaLayoutGuide.layoutFrame.width >= minimum + 341
+                XCTAssertEqual(docked, expected, "Portrait docking follows actual native usable width and text size")
+            }
+            let historyReady = await pollAsync {
+                guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
+                return try await history.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+            }
+            XCTAssertTrue(historyReady, "The saved conversation must render before checking the panel")
+            guard historyReady else { return }
+            let discussionImage = UIGraphicsImageRenderer(bounds: f.window.bounds).image { _ in
+                f.window.drawHierarchy(in: f.window.bounds, afterScreenUpdates: true)
+            }
+            let discussionCapture = XCTAttachment(image: discussionImage)
+            discussionCapture.name = "Discussions-\(Int(size.width))x\(Int(size.height))"
+            discussionCapture.lifetime = .keepAlways; add(discussionCapture)
+            let readingWidth = f.web.bounds.width
+            f.reader.inspector = .changes
+            let reviewSettled = await settledNavigation(f)
+            XCTAssertTrue(reviewSettled, "Changing inspector must preserve native navigation at \(size)")
+            let presented = await poll {
+                if docked { return f.host.presentedViewController == nil && abs(f.web.bounds.width - readingWidth) < 1 }
+                return f.host.presentedViewController != nil
+            }
+            XCTAssertTrue(presented, "Review and discussions must use the same docking decision")
+            let changesImage = UIGraphicsImageRenderer(bounds: f.window.bounds).image { _ in
+                f.window.drawHierarchy(in: f.window.bounds, afterScreenUpdates: true)
+            }
+            let changesCapture = XCTAttachment(image: changesImage)
+            changesCapture.name = "Changes-\(Int(size.width))x\(Int(size.height))"
+            changesCapture.lifetime = .keepAlways; add(changesCapture)
+            f.reader.inspector = .discussions
+            let returned = await poll { self.visibleEditor(in: f.host.view)?.text == "Keep this reply while switching panels." }
+            XCTAssertTrue(returned, "The selected conversation and reply remain reachable")
+            XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"))
+            XCTAssertTrue(self.webView(in: f.host.view) === f.web)
+            let retained = try await f.web.evaluateJavaScript("window.panelReadingPage===document") as? Bool
+            XCTAssertEqual(retained, true)
+        }
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original, "Layout never writes comments or checkmarks")
+    }
+
+    func testNativeWidthTracksParentResizeWhenContentKeepsItsSize() async throws {
+        var reported: Double?
+        let content = NavigationStack {
+            Color.clear.frame(width: 120, height: 120)
+                .modifier(MobileWorkspaceWidthReporter(viewport: CGSize(width: 1120, height: 780),
+                    active: true, report: { reported = $0 }))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .navigationTitle("Width measurement")
+        }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: content)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1120, height: 780)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        host.loadViewIfNeeded(); host.view.layoutIfNeeded()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func navigation(in controller: UIViewController) -> UINavigationController? {
+            if let value = controller as? UINavigationController { return value }
+            return controller.children.lazy.compactMap { navigation(in: $0) }.first
+        }
+        func matchesNativeWidth() -> Bool {
+            guard let nav = navigation(in: host), nav.transitionCoordinator == nil,
+                  let top = nav.topViewController?.viewIfLoaded,
+                  top.bounds.size == window.bounds.size, let reported else { return false }
+            return abs(reported - Double(top.safeAreaLayoutGuide.layoutFrame.width)) < 1
+        }
+        let initial = await poll { matchesNativeWidth() }
+        XCTAssertTrue(initial, "The native-width fixture must establish its initial wide measurement")
+        guard initial else { return }
+        let wide = try XCTUnwrap(reported)
+        window.frame.size = CGSize(width: 390, height: 780)
+        host.view.frame = window.bounds; host.view.layoutIfNeeded()
+        let resized = await poll { matchesNativeWidth() && (reported ?? wide) < wide - 100 }
+        XCTAssertTrue(resized,
+                      "Available width must follow the native parent when the reader content keeps its own size")
+    }
+
     func testActualFormattedSelectionStartsAnUnpostedNativeComposer() async throws {
         let f = try await fixture()
         _ = try await f.web.callAsyncJavaScript("""
@@ -135,14 +381,14 @@ import XCTest
         let f = try await fixture(withThread: true)
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("Keep this reply in the wide margin.", for: .thread("t-mobile"))
-        f.window.frame.size = CGSize(width: 1000, height: 780)
+        f.window.frame.size = CGSize(width: 1120, height: 780)
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         let initial = await settledNavigation(f)
         XCTAssertTrue(initial && f.reader.discussionUsesMargin)
         guard initial, f.reader.discussionUsesMargin else { return }
         let presentation = f.reader.discussionLayoutGeneration
-        for size in [CGSize(width: 1120, height: 780), CGSize(width: 1000, height: 780),
-                     CGSize(width: 890, height: 626)] {
+        for size in [CGSize(width: 1240, height: 780), CGSize(width: 1120, height: 780),
+                     CGSize(width: 1100, height: 780)] {
             f.window.frame.size = size
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
             let settled = await settledNavigation(f)
@@ -154,6 +400,33 @@ import XCTest
             XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this reply in the wide margin.")
         }
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testOpeningConversationDuringThresholdResizeSettlesAndKeepsItsReply() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this reply through the threshold transition.", for: .thread("t-mobile"))
+        // This is the original failing sequence. Its 1000-point window has only
+        // 828 usable points on Duo, so it must settle without assuming a margin.
+        for size in [CGSize(width: 1000, height: 780), CGSize(width: 1120, height: 780),
+                     CGSize(width: 1000, height: 780), CGSize(width: 890, height: 626)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f)
+            XCTAssertTrue(settled, "A threshold resize must settle into the layout that fits its actual navigation area")
+            XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"), "Resizing must keep the selected conversation")
+            XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body,
+                           "Keep this reply through the threshold transition.")
+            if f.reader.discussionUsesMargin {
+                let minimum = DiscussionMarginLayout.minimumDocumentWidth(
+                    bodyFont: f.reader.discussionMargin?.bodyFont ?? 16 * f.reader.zoom,
+                    horizontalInsets: f.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+                XCTAssertGreaterThanOrEqual(f.web.bounds.width, minimum - 1,
+                                           "A visible margin must preserve the minimum reading width")
+            }
+            XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+            guard settled else { return }
+        }
     }
 
     func testNativeBackStillWorksAfterAMarginRoundTrip() async throws {
@@ -338,7 +611,7 @@ import XCTest
             if let value = controller as? UINavigationController { return value }
             return controller.children.lazy.compactMap { navigation(in: $0) }.first
         }
-        return await poll {
+        let result = await poll {
             guard let navigation = navigation(in: fixture.host),
                   let top = navigation.topViewController?.viewIfLoaded,
                   navigation.transitionCoordinator == nil,
@@ -348,13 +621,60 @@ import XCTest
             // actual top controller's usable area, including vertical bars.
             let minimum = DiscussionMarginLayout.minimumDocumentWidth(
                 bodyFont: fixture.reader.discussionMargin?.bodyFont ?? 16 * fixture.reader.zoom,
-                horizontalInsets: fixture.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+                horizontalInsets: max(88, fixture.reader.discussionMargin?.horizontalInsets ?? 88), outlineWidth: 0)
             let canDock = !top.traitCollection.preferredContentSizeCategory.isAccessibilityCategory &&
                 top.safeAreaLayoutGuide.layoutFrame.width >= minimum + 341
             guard fixture.reader.discussionUsesMargin == canDock else { return false }
             let showsReading = fixture.reader.discussionUsesMargin || fixture.reader.discussionNavigationPath.isEmpty
             return fixture.web.isDescendant(of: top) == showsReading
         }
+        if !result { recordFailedNavigation(fixture) }
+        return result
+    }
+
+    // Failure-only diagnostics: the original success predicate and poll are unchanged.
+    private func recordFailedNavigation(_ fixture: Fixture) {
+        func navigation(in controller: UIViewController) -> UINavigationController? {
+            if let value = controller as? UINavigationController { return value }
+            return controller.children.lazy.compactMap { navigation(in: $0) }.first
+        }
+        let nav = navigation(in: fixture.host)
+        let top = nav?.topViewController?.viewIfLoaded
+        let minimum = DiscussionMarginLayout.minimumDocumentWidth(
+            bodyFont: fixture.reader.discussionMargin?.bodyFont ?? 16 * fixture.reader.zoom,
+            horizontalInsets: max(88, fixture.reader.discussionMargin?.horizontalInsets ?? 88), outlineWidth: 0)
+        let modelMargin = fixture.reader.discussionUsesMargin
+        let showsReading = modelMargin || fixture.reader.discussionNavigationPath.isEmpty
+        let nativeCanDock = top.map { !$0.traitCollection.preferredContentSizeCategory.isAccessibilityCategory &&
+            $0.safeAreaLayoutGuide.layoutFrame.width >= minimum + 341 }
+        let stack: [[String: Any]] = (nav?.viewControllers ?? []).map { controller in
+            var record: [String: Any] = ["class": String(describing: type(of: controller)),
+                "holdsDocument": fixture.web.isDescendant(of: controller.viewIfLoaded ?? UIView())]
+            if let view = controller.viewIfLoaded {
+                record["bounds"] = String(describing: view.bounds)
+                record["safeFrame"] = String(describing: view.safeAreaLayoutGuide.layoutFrame)
+                record["accessibilitySize"] = view.traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+            }
+            return record
+        }
+        let report: [String: Any] = [
+            "afterFailedOriginalPoll": true, "navigationExists": nav != nil, "topLoaded": top != nil,
+            "transitionActive": nav?.transitionCoordinator != nil,
+            "topMatchesWindow": top.map { $0.bounds.size == fixture.window.bounds.size } ?? false,
+            "modelMatchesTopCanDock": nativeCanDock.map { $0 == modelMargin } ?? false,
+            "webAncestryMatches": top.map { fixture.web.isDescendant(of: $0) == showsReading } ?? false,
+            "windowFrame": String(describing: fixture.window.frame), "windowBounds": String(describing: fixture.window.bounds),
+            "windowIsKey": fixture.window.isKeyWindow, "windowHidden": fixture.window.isHidden,
+            "sceneState": fixture.window.windowScene?.activationState.rawValue ?? -1,
+            "modelMargin": modelMargin, "minimumProse": String(describing: minimum),
+            "bodyFont": String(describing: fixture.reader.discussionMargin?.bodyFont ?? 16 * fixture.reader.zoom),
+            "horizontalInsets": String(describing: fixture.reader.discussionMargin?.horizontalInsets ?? 48),
+            "pathCount": fixture.reader.discussionNavigationPath.count,
+            "unpostedDraft": fixture.reader.discussions.hasUnpostedDrafts,
+            "threadState": String(describing: fixture.reader.rendered?.discussions?.threads.first?.state),
+            "webBounds": String(describing: fixture.web.bounds), "navigationStack": stack]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) { print("MARGINED-NAV-FAIL " + text) }
     }
 
     private func resizeReadingMetrics(_ web: WKWebView) async throws -> [String: Any] {
@@ -447,15 +767,24 @@ import XCTest
     }
 
     func testExternalResolveKeepsTheUnpostedReplyReachableInTheRegularMargin() async throws {
+        try await assertExternalResolvePreservesReply(width: 1_120, requiresMargin: true)
+    }
+
+    func testExternalResolveKeepsTheUnpostedReplyReachableAtTheOriginalWindowWidth() async throws {
+        try await assertExternalResolvePreservesReply(width: 1_024, requiresMargin: false)
+    }
+
+    private func assertExternalResolvePreservesReply(width: CGFloat, requiresMargin: Bool) async throws {
         let f = try await fixture(withThread: true)
-        f.window.frame.size = CGSize(width: 1_024, height: 780)
+        f.window.frame.size = CGSize(width: width, height: 780)
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
-        let regular = await poll { f.reader.discussionUsesMargin }
-        XCTAssertTrue(regular, "The fixture must actually use the measured regular-width margin")
+        let settled = await settledNavigation(f)
+        XCTAssertTrue(settled, "The layout must agree with its actual native usable width and rendered font")
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("Keep this reply while another author resolves.", for: .thread("t-mobile"))
         let before = await poll { self.editor(in: f.host.view)?.text == "Keep this reply while another author resolves." }
         XCTAssertTrue(before)
+        await assertVisibleDiscussionMargin(f, required: requiresMargin)
         let parsed = try DiscussionCodec.parse(MarkdownSource.read(f.file))
         let replacement = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for:
             .resolve(threadID: "t-mobile", author: "Other Author", created: "2026-10-24T10:00:00Z"), in: parsed),
@@ -466,8 +795,24 @@ import XCTest
         XCTAssertEqual(f.reader.rendered?.discussions?.threads.first?.state, .resolved)
         let retained = await poll { self.editor(in: f.host.view)?.text == "Keep this reply while another author resolves." }
         XCTAssertTrue(retained, "A filter-changing refresh must not remove the only visible route to an unposted reply")
+        await assertVisibleDiscussionMargin(f, required: requiresMargin)
         XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this reply while another author resolves.")
         XCTAssertEqual(try Data(contentsOf: f.file), replacement, "Refresh and retained draft presentation must not write")
+    }
+
+    private func assertVisibleDiscussionMargin(_ f: Fixture, required: Bool) async {
+        let settled = await settledNavigation(f)
+        XCTAssertTrue(settled, "Opening and refreshing the conversation must preserve a settled native layout")
+        if required {
+            XCTAssertTrue(f.reader.discussionUsesMargin, "The wide positive control must exercise the discussion margin")
+        }
+        if f.reader.discussionUsesMargin {
+            let minimum = DiscussionMarginLayout.minimumDocumentWidth(
+                bodyFont: f.reader.discussionMargin?.bodyFont ?? 16 * f.reader.zoom,
+                horizontalInsets: f.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
+            XCTAssertGreaterThanOrEqual(f.web.bounds.width, minimum - 1,
+                "The margin must leave readable prose after native navigation chrome")
+        }
     }
 
     func testNoSelectionOffersNativePassagesAndStartsAnUnpostedComment() async throws {
@@ -1187,7 +1532,7 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), bytes)
     }
 
-    private var historyPixel: Data { Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5iQAAAAASUVORK5CYII=")! }
+    private var historyPixel: Data { Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")! }
     private func appendHistoryReply(_ body: String, id: String, file: URL, threadID: String) throws -> Data {
         let data = try Data(contentsOf: file), source = try MarkdownSource.decode(data)
         let message = DiscussionMessage(id: id, author: "Guest", created: "2026-10-24T10:00:00Z", body: body,
@@ -1267,6 +1612,26 @@ import XCTest
             try? FileManager.default.removeItem(at: file)
         }
         let mounted = await poll { self.webView(in: host.view)?.estimatedProgress == 1 && self.webView(in: host.view)?.isLoading == false }
+        if !mounted {
+            // Observe only after the original wait fails; never issue pre-commit JavaScript.
+            let web = webView(in: host.view)
+            let report: [String: Any] = [
+                "afterOriginalMountWaitFailed": true,
+                "applicationState": UIApplication.shared.applicationState.rawValue,
+                "sceneState": scene.activationState.rawValue,
+                "windowIsKey": window.isKeyWindow, "windowHidden": window.isHidden,
+                "windowBounds": String(describing: window.bounds),
+                "hostAttached": host.view.window === window,
+                "webExists": web != nil, "webProgress": web?.estimatedProgress ?? -1,
+                "webLoading": web?.isLoading ?? false, "webURLScheme": web?.url?.scheme ?? "none",
+                "webBounds": web.map { String(describing: $0.bounds) } ?? "none",
+                "webAttached": web?.window === window, "webHidden": web?.isHidden ?? true,
+                "renderedExists": reader.rendered != nil, "rendering": reader.isRendering,
+                "sourceBytes": reader.source.utf8.count,
+                "otherSceneCount": UIApplication.shared.connectedScenes.count - 1]
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+               let text = String(data: data, encoding: .utf8) { print("MARGINED-MOUNT-FAIL " + text) }
+        }
         XCTAssertTrue(mounted, "Wait for a committed navigation before querying WebKit")
         guard mounted else { throw FixtureFailure.documentDidNotLoad }
         let web = try XCTUnwrap(webView(in: host.view))

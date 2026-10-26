@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Rename MDView to Margined; add iPhone/iPad, Files sharing and folder setup.
-- Add portable passage discussions, replies, import/export and conversation Read Aloud.
-- Add iOS printing; improve navigation, playback and Finder image previews.
+- Rename to Margined; add iPhone/iPad with adaptive panels and Files sharing.
+- Add portable passage discussions, replies and conversation Read Aloud.
+- Improve printing, images, playback and live file updates.
 
 ## 1.7.0 — 2026-10-22
 

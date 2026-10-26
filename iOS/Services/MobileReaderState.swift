@@ -10,9 +10,10 @@ final class MobileReaderState {
     let playback: MobilePlaybackOwner
     let access: MobileDocumentAccess
     let discussions = DiscussionSession()
-    enum Inspector: Equatable { case changes, discussions }
+    enum Inspector: Hashable { case changes, discussions }
     var inspector: Inspector?
     var discussionRoute: DiscussionSession.DraftKey?
+    var discussionPassageRequest: MobileDiscussionPassageRequest?
     var discussionDecision: MobileDiscussionDecision?
     var discussionCopyRequest: MobileDiscussionCopyRequest?
     var discussionImportReview: MobileDiscussionImportReview?
@@ -357,6 +358,7 @@ final class MobileReaderState {
         showChecklistConfirmation = false; fileUpdatesPaused = false
         undoStack.removeAll(); redoStack.removeAll(); externalRevision += 1
         errorMessage = nil; localImageError = nil; loadRemoteImages = false
+        discussionPassageRequest = nil
         navigationTarget = nil; navigationGeneration += 1
         searchText = ""; searchMatch = nil; searchGeneration += 1
         speechStartRequest = nil; speechRequestedFingerprint = nil
@@ -534,7 +536,10 @@ final class MobileReaderState {
         }
     }
 
-    func navigate(to id: String) { navigationTarget = id; navigationGeneration += 1 }
+    func navigate(to id: String) {
+        discussionPassageRequest = nil
+        navigationTarget = id; navigationGeneration += 1
+    }
     func find(backwards: Bool = false) { searchBackwards = backwards; searchGeneration += 1 }
     func changeZoom(by amount: Double) { zoom = min(2, max(0.6, zoom + amount)) }
     func selectChange(_ index: Int) { currentChangeIndex = max(0, min(index, changes.count - 1)) }

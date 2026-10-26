@@ -27,6 +27,7 @@ struct MobileWebView: UIViewRepresentable {
         let discussionFilter: DiscussionSession.Filter
         let discussionSelection: DiscussionSession.DraftKey?
         let discussionRequest: Int
+        let discussionPassageRequest: UUID?
         let documentGeneration: UUID
         let html: String?
         let source: String
@@ -58,6 +59,7 @@ struct MobileWebView: UIViewRepresentable {
             discussionFilter = reader.discussions.filter
             discussionSelection = reader.discussions.selection
             discussionRequest = reader.discussionSelectionGeneration
+            discussionPassageRequest = reader.discussionPassageRequest?.id
             documentGeneration = reader.documentGeneration
             html = reader.rendered?.html
             source = reader.source
@@ -109,7 +111,8 @@ struct MobileWebView: UIViewRepresentable {
         configuration.setURLSchemeHandler(coordinator.images, forURLScheme: "margined-resource")
         configuration.userContentController.add(coordinator, contentWorld: Coordinator.contentWorld, name: "taskToggle")
         configuration.userContentController.add(coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = MobileDocumentWebView(frame: .zero, configuration: configuration)
+        webView.geometryChanged = { [weak coordinator] in coordinator?.requestPassageVisibilityCheck() }
         webView.navigationDelegate = coordinator
         webView.allowsLinkPreview = false
         webView.isOpaque = false
@@ -134,6 +137,7 @@ struct MobileWebView: UIViewRepresentable {
 
     @MainActor
     static func disposeUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        (webView as? MobileDocumentWebView)?.geometryChanged = nil
         coordinator.invalidate()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "taskToggle", contentWorld: Coordinator.contentWorld)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "discussion", contentWorld: Coordinator.discussionWorld)
@@ -170,6 +174,9 @@ struct MobileWebView: UIViewRepresentable {
         private var speechRequestID: UUID?
         private var readingPosition: [String: Any]?
         private var pendingNavigation: String?
+        private var passageVisibilityCheckQueued = false
+        private var passageTransition: UUID?
+        private var passageInFlight: UUID?
         private var loadingTask: Task<Void, Never>?
         private var isInvalidated = false
 
@@ -398,6 +405,50 @@ struct MobileWebView: UIViewRepresentable {
             }
         }
 
+        fileprivate func requestPassageVisibilityCheck() {
+            guard !isInvalidated, reader.discussionPassageRequest != nil,
+                  !passageVisibilityCheckQueued else { return }
+            passageVisibilityCheckQueued = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.passageVisibilityCheckQueued = false
+                self.configureDiscussions()
+            }
+        }
+
+        private func canRevealPassage(_ request: UUID) -> Bool {
+            guard let webView, let window = webView.window,
+                  webView.bounds.width > 0, webView.bounds.height > 0,
+                  webView.convert(webView.bounds, to: window).intersects(window.bounds) else { return false }
+            var ancestor: UIView? = webView
+            while let view = ancestor {
+                guard !view.isHidden, view.alpha > 0 else { return false }
+                ancestor = view.superview
+            }
+            var responder: UIResponder? = webView
+            while let current = responder {
+                if let controller = current as? UIViewController,
+                   let navigation = controller.navigationController {
+                    if let transition = navigation.transitionCoordinator {
+                        if passageTransition != request {
+                            passageTransition = request
+                            let registered = transition.animate(alongsideTransition: nil) { [weak self] _ in
+                                guard let self else { return }
+                                if self.passageTransition == request { self.passageTransition = nil }
+                                self.requestPassageVisibilityCheck()
+                            }
+                            if !registered { passageTransition = nil }
+                        }
+                        return false
+                    }
+                    guard let top = navigation.topViewController?.viewIfLoaded else { return false }
+                    return webView.isDescendant(of: top)
+                }
+                responder = current.next
+            }
+            return false
+        }
+
         private func configureDiscussions() {
             guard contentReady, !reader.isRendering, html == reader.rendered?.html,
                   let projection = reader.rendered?.discussionText, let webView else { return }
@@ -406,15 +457,32 @@ struct MobileWebView: UIViewRepresentable {
             let selected: String
             if case let .thread(id) = reader.discussions.selection { selected = id } else { selected = "" }
             let visible = reader.inspector == .discussions
-            let decorationKey = key + ":" + String(visible) + ":" + selected + ":" + reader.discussions.filter.rawValue
+            let passage = reader.discussionPassageRequest
+            let wantsPassage = passage.map {
+                reader.matchesDiscussionVersion($0.version) && $0.sourceID == projection.sourceID &&
+                projection.anchorResults[$0.threadID]?.status == .attached
+            } ?? false
+            if let passage, !wantsPassage {
+                Task { [weak self] in
+                    guard let self, reader.discussionPassageRequest?.id == passage.id else { return }
+                    reader.discussionPassageRequest = nil
+                }
+            }
+            let decorationKey = key + ":" + String(visible) + ":" + selected + ":" + reader.discussions.filter.rawValue +
+                ":" + (wantsPassage ? passage?.id.uuidString ?? "" : "")
             let configure = discussionConfiguration != key
             let decorate = discussionDecorationKey != decorationKey
             let wantsSelection = discussionSelectionGeneration != reader.discussionSelectionGeneration
-            guard configure || decorate || wantsSelection else { return }
+            guard configure || decorate || wantsSelection || wantsPassage else { return }
             discussionConfiguration = key; discussionDecorationKey = decorationKey
             let selectionGeneration = reader.discussionSelectionGeneration
             discussionSelectionGeneration = selectionGeneration
-            let anchors: [[String: Any]] = reader.filteredDiscussionThreads.compactMap { thread in
+            var anchoredThreads = reader.filteredDiscussionThreads
+            if wantsPassage, let passage, !anchoredThreads.contains(where: { $0.id == passage.threadID }),
+               let thread = reader.rendered?.discussions?.threads.first(where: { $0.id == passage.threadID }) {
+                anchoredThreads.append(thread)
+            }
+            let anchors: [[String: Any]] = anchoredThreads.compactMap { thread in
                 let id = thread.id
                 guard let anchor = projection.anchorResults[id], anchor.status == .attached, let range = anchor.range,
                       let selection = projection.selection(range, renderID: token) else { return nil }
@@ -440,6 +508,20 @@ struct MobileWebView: UIViewRepresentable {
                         in: nil, contentWorld: Self.discussionWorld)
                     if discussionDecorationKey == decorationKey, let value,
                        let snapshot = DiscussionMarginSnapshot.read(value, context: context) { reader.acceptDiscussionMargin(snapshot) }
+                }
+                if wantsPassage, let passage, reader.discussionPassageRequest?.id == passage.id,
+                   passageInFlight != passage.id, reader.matchesDiscussionVersion(passage.version),
+                   passage.sourceID == projection.sourceID, canRevealPassage(passage.id) {
+                    passageInFlight = passage.id
+                    defer { if passageInFlight == passage.id { passageInFlight = nil } }
+                    arguments.merge(["operation": "goTo", "threadID": passage.threadID, "focus": true],
+                        uniquingKeysWith: { _, value in value })
+                    let moved = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script,
+                        arguments: arguments, in: nil, contentWorld: Self.discussionWorld) as? Bool
+                    guard contentReady, String(generation) == token,
+                          reader.matchesDiscussionVersion(passage.version),
+                          reader.discussionPassageRequest?.id == passage.id else { return }
+                    if moved == true { reader.discussionPassageRequest = nil }
                 }
                 if wantsSelection, reader.discussionSelectionGeneration == selectionGeneration {
                     arguments["operation"] = "selection"
@@ -696,6 +778,19 @@ private extension URL {
         guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else { return nil }
         components.fragment = nil
         return components.url
+    }
+}
+
+@MainActor
+private final class MobileDocumentWebView: WKWebView {
+    var geometryChanged: (() -> Void)?
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        geometryChanged?()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        geometryChanged?()
     }
 }
 

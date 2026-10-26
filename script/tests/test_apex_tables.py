@@ -19,6 +19,11 @@ class Tables(HTMLParser):
 class ApexTableTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if supplied := os.environ.get("MARGINED_TABLE_RUNNER"):
+            cls.runner = Path(supplied)
+            if not cls.runner.is_file():
+                raise RuntimeError("MARGINED_TABLE_RUNNER must name a compiled regression caller")
+            return
         cls.temp = tempfile.TemporaryDirectory(prefix="margined-table-regression-")
         cls.addClassCleanup(cls.temp.cleanup)
         cls.runner = Path(cls.temp.name) / "table-convert"
@@ -62,6 +67,32 @@ class ApexTableTests(unittest.TestCase):
         self.assertTrue(any(tag == "figcaption" for tag, _ in tags))
         self.assertIn("Inventory", html)
         self.assertIn("Alpha", html)
+
+    def test_row_headers_and_column_alignment_are_preserved(self):
+        html = self.convert("| | Left | Right |\n| --- | :--- | ---: |\n| Row A | One | Two |\n| Row B | Three | Four |\n")
+        tags = Tables(html).tags
+        self.assertTrue(any(tag == "th" and attrs.get("scope") == "row" for tag, attrs in tags))
+        self.assertTrue(any(attrs.get("align") == "right" or "right" in attrs.get("style", "") for _, attrs in tags))
+        self.assertIn("Row B", html)
+
+    def test_footer_after_removed_separator_preserves_body_and_footer(self):
+        html = self.convert("| Item | Count |\n| --- | --- |\n| Alpha | 1 |\n| Beta | 2 |\n| === | === |\n| Total | 3 |\n")
+        self.assertTrue(any(tag == "tfoot" for tag, _ in Tables(html).tags))
+        self.assertIn("Alpha", html)
+        self.assertIn("Beta", html)
+        self.assertIn("Total", html)
+
+    def test_raw_span_text_and_unicode_are_not_removed(self):
+        html = self.convert("| Item | Notes |\n| --- | --- |\n| 日本語 | raw << |\n| Café | `<<` and **text** |\n")
+        self.assertEqual(sum(tag == "td" for tag, _ in Tables(html).tags), 4)
+        self.assertIn("日本語", html)
+        self.assertIn("raw &lt;&lt;", html)
+
+    def test_code_and_escaped_span_markers_stay_literal(self):
+        html = self.convert("| Item | Notes |\n| --- | --- |\n| Code | `<<` |\n| Escape | \\<< |\n")
+        self.assertEqual(sum(tag == "td" for tag, _ in Tables(html).tags), 4)
+        self.assertIn("<code>&lt;&lt;</code>", html)
+        self.assertIn("Escape", html)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -174,6 +174,33 @@ final class ReaderUpdatesTests: XCTestCase {
         func release() { continuation?.resume(); continuation = nil }
     }
 
+    func testStoppingTheReaderEndsObservationWithoutPublishingLaterSaves() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let source = "# Closed document\n"
+        try source.write(to: file, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let reader = ReaderState(); reader.fileURL = file; reader.source = source
+        reader.installLoadedSnapshot(try SourceFileEdit.read(file))
+        var finished = false
+        let watcher = Task { await reader.watchFile(); finished = true }
+        defer { watcher.cancel(); reader.stop() }
+        let readyDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while (reader.rendered == nil || reader.isRendering) && ContinuousClock.now < readyDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let ready = reader.rendered != nil && !reader.isRendering
+        XCTAssertTrue(ready, "Start the actual observation before testing its close fence")
+        guard ready else { watcher.cancel(); await watcher.value; return }
+        reader.stop()
+        try "# Saved after close\n".write(to: file, atomically: true, encoding: .utf8)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !finished && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(finished, "A closed reader must release its file observation even when the URL is unchanged")
+        XCTAssertEqual(reader.source, source)
+        XCTAssertNil(reader.errorMessage)
+        watcher.cancel(); await watcher.value
+    }
+
     private func settle(_ reader: ReaderState) async throws {
         for _ in 0..<300 {
             if !reader.isRendering && !reader.checklistSaving { return }

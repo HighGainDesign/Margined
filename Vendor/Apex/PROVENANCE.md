@@ -24,11 +24,18 @@ including the documented patch below, are checked by script/verify-vendor.py.
 ## Table performance patch
 
 `src/extensions/table_html_postprocess.c` skips previous-row rowspan searches when
-the current table has no collected rowspan attributes. The rowspan path itself is
-unchanged; captions, column spans, alignment, footers and row headers are retained.
+the current table has no collected rowspan attributes. Removed-row marker positions are computed once per table, and visible columns
+are collected once per row. The existing 100-row marker-search and 50-column
+mapping boundaries are preserved. The rowspan path itself is unchanged; captions,
+column spans, alignment, footers and row headers are retained.
 CPU-only regressions: `python3 script/tests/test_apex_tables.py` after an optimized
 build (see Benchmarks/README.md).
 
 Original upstream SHA256: `c0cc4d948487809a8ec2ea36f3611b8bf7a5667f4c7b6ca3bbbaefed4a8ec9d3`.
 Current patched SHA256 is recorded in SOURCE-HASHES.json. The remaining 205
 upstream files, including Package.swift, are byte-identical to the pinned revision.
+
+The postprocessor also preserves literal span-like text and formatted code by
+requiring a complete cell marker, and no longer removes a real footer row because
+the preceding AST row is a separator. Regression controls cover both content-loss
+cases, true spans, escaped markers, row headers, captions and alignment.

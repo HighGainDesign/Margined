@@ -7,8 +7,13 @@ final class ReaderState {
     private let checklistWriter: ChecklistWriter?
     @ObservationIgnored private var sourceGate = SourceFileGate()
     @ObservationIgnored private var classifyUpdateTask: Task<Void, Never>?
-    @ObservationIgnored private var sourceSnapshot: SourceFileEdit.Snapshot?
-    private var pendingDiskSnapshot: SourceFileEdit.Snapshot?
+    @ObservationIgnored private var snapshotGeneration: UInt64 = 0
+    @ObservationIgnored private var sourceSnapshot: SourceFileEdit.Snapshot? {
+        didSet { if sourceSnapshot != oldValue { snapshotGeneration &+= 1 } }
+    }
+    private var pendingDiskSnapshot: SourceFileEdit.Snapshot? {
+        didSet { if pendingDiskSnapshot != oldValue { snapshotGeneration &+= 1 } }
+    }
     @ObservationIgnored private var sourceContext = UUID()
     @ObservationIgnored private var renderedContext: UUID?
     let announcements: ReaderAnnouncements
@@ -529,8 +534,8 @@ final class ReaderState {
         if let displayed = sourceSnapshot, displayed != snapshot {
             checklistUndo.removeAll(); checklistRedo.removeAll()
         }
-        if fileUpdatesPaused || playbackHolding {
-            pendingDiskSnapshot = snapshot == sourceSnapshot ? nil : snapshot
+        if (fileUpdatesPaused || playbackHolding) && !text.utf8.elementsEqual(source.utf8) {
+            pendingDiskSnapshot = snapshot
         } else { sourceSnapshot = snapshot; pendingDiskSnapshot = nil }
         receiveFileUpdate(text)
     }
@@ -803,7 +808,7 @@ final class ReaderState {
         }
     }
 
-    /// Poll the pathname, rather than an inode, to support atomic saves by agents/editors.
+    /// Observe saves promptly; the pathname backstop also supports file providers.
     /// The SwiftUI task cancels when its document window closes.
     func watchFile() async {
         #if MARGINED_BENCHMARK
@@ -813,21 +818,46 @@ final class ReaderState {
         if reviewedSource == nil { reviewedSource = source }
         render()
         guard let fileURL else { return }
+        let context = sourceContext
+        let watcher = SourceFileWatcher(url: fileURL)
+        defer { watcher.cancel() }
         var lastStamp = FileStamp(url: fileURL)
-        while !Task.isCancelled {
-            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        var lastSnapshotGeneration = snapshotGeneration
+        var pending = false
+        var initialRead = true
+        for await hint in watcher.events {
+            guard !Task.isCancelled, sourceContext == context, self.fileURL == fileURL else { return }
+            switch hint {
+            case .initial, .change: pending = true
+            case .backstop: break
+            }
+            // Wait for accepted writes to publish before interpreting their echo.
+            while fileSaving {
+                do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
+                guard !Task.isCancelled, sourceContext == context, self.fileURL == fileURL else { return }
+            }
             let stamp = FileStamp(url: fileURL)
-            guard !fileSaving, stamp != lastStamp || errorMessage != nil else { continue }
+            guard pending || stamp != lastStamp || errorMessage != nil else { continue }
+            pending = true
             let reading = sourceGate.enqueue { try SourceFileEdit.read(fileURL) }
             do {
                 let snapshot = try await reading.value()
-                guard !Task.isCancelled, self.fileURL == fileURL else { return }
-                // A save during the asynchronous read makes that snapshot obsolete.
-                guard FileStamp(url: fileURL) == stamp else { continue }
-                lastStamp = stamp
-                receiveDiskSnapshot(snapshot)
+                guard !Task.isCancelled, sourceContext == context, self.fileURL == fileURL else { return }
+                guard !fileSaving, FileStamp(url: fileURL) == stamp else { continue }
+                let latestSnapshot = hasPendingFileUpdate ? pendingDiskSnapshot ?? sourceSnapshot : sourceSnapshot
+                let alreadyAccepted = snapshot == latestSnapshot &&
+                    (stamp == lastStamp || snapshotGeneration != lastSnapshotGeneration)
+                if initialRead, sourceSnapshot == nil, !hasPendingFileUpdate,
+                   (try? snapshot.source.utf8.elementsEqual(source.utf8)) == true {
+                    installLoadedSnapshot(snapshot)
+                } else if !alreadyAccepted {
+                    receiveDiskSnapshot(snapshot)
+                }
+                lastStamp = stamp; lastSnapshotGeneration = snapshotGeneration
+                pending = false; initialRead = false
+                errorMessage = nil
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, sourceContext == context, self.fileURL == fileURL else { return }
                 errorMessage = String(localized: "Could not refresh: \(error.localizedDescription)")
             }
         }
@@ -929,18 +959,5 @@ final class ReaderState {
         isRendering = false
         readTask?.cancel()
         announcements.cancel()
-    }
-}
-
-private struct FileStamp: Equatable {
-    let modified: Date?
-    let size: UInt64?
-    let inode: UInt64?
-
-    init(url: URL) {
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        modified = attributes?[.modificationDate] as? Date
-        size = attributes?[.size] as? UInt64
-        inode = attributes?[.systemFileNumber] as? UInt64
     }
 }
