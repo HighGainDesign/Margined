@@ -27,8 +27,8 @@ Open a Markdown file through Finder's **Open With → Margined**, or use **File 
 The setup guide explains the optional Quick Look extension and Drafts action;
 both are also available in Settings. You can return to the guide at any time.
 
-Margined is the new name for MDView; existing release downloads and media still
-use the previous name. [Version 2.0](ROADMAP.md) is in development around iOS,
+Margined was previously named MDView; older releases and demo media use that name.
+[Version 2.0](ROADMAP.md) is in development around iOS,
 portable margin discussions and measured viewing speed. Collaboration is planned,
 not yet available.
 

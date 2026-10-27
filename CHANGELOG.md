@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.1 — 2026-10-27
 
 - Renamed MDView to Margined.
 
