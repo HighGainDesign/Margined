@@ -78,8 +78,8 @@ For ordinary local prose, tables, images and annotated documents, use complete
 
 About 50 ms warm opening is a stretch target. Large files, math/Mermaid, expanded
 conversations, mobile and system Quick Look need separately labeled cohorts;
-a fast parser or HTML reply is not a visible-document result. Final 2.0 viewing
-acceptance remains incomplete until actual runs satisfy the agreed scope.
+a fast parser or HTML reply is not a visible-document result. Run complete
+cohorts on the target hardware before claiming viewing acceptance.
 
 ## iPhone and iPad Simulator
 
@@ -132,8 +132,9 @@ screens before accepting a run. Simulator dispatch and verification overhead are
 included; these numbers do not establish physical-device latency. No mobile
 numeric release gate is defined.
 
-System Quick Look needs a separate native host and actual provider dispatch.
-Internal HTML packaging timings cannot stand in for system preview display.
+System Quick Look uses a separate native host and actual provider dispatch;
+see the [private-host recipe](QuickLook/README.md). Internal HTML packaging
+timings cannot stand in for system preview display.
 
 The CPU-only table regression can run without an unlocked desktop after building
 optimized products:
