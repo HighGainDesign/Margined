@@ -4,12 +4,15 @@ A native Markdown reader for Mac, iPhone and iPad, with live updates, change
 review, checklists, Read Aloud and portable passage discussions. Documents stay
 ordinary `.md` files that people and agents can use in their own tools.
 
-**2.0 is in internal beta.** The iOS and macOS TestFlight builds are invitation-only;
-public release acceptance and viewing benchmarks are still in progress.
+**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.1)
+to try passage discussions alongside the established reading, Quick Look, live
+streaming and change-review features. Discussions remain experimental, with known
+scrolling and layout issues. iPhone/iPad TestFlight testing remains invitation-only.
+Public Mac TestFlight availability will be linked here after Apple's beta review.
 
 ## Install and open
 
-Download the public Mac DMG from the [latest release](https://github.com/HighGainDesign/Margined/releases/latest),
+For the stable Mac version, download the DMG from the [latest release](https://github.com/HighGainDesign/Margined/releases/latest),
 drag Margined to **Applications**, then eject the installer. Quit the app before
 replacing it with an update. Requires macOS 14+; the iPhone/iPad app requires iOS 17+.
 

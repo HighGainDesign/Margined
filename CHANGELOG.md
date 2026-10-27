@@ -1,11 +1,14 @@
 # Changelog
 
-## Unreleased
+## 2.0-beta.1 — 2026-10-27
 
-- Rename to Margined; add iPhone/iPad with adaptive panels and Files sharing.
-- Add portable passage discussions, replies and conversation Read Aloud.
-- Improve printing, images, playback and live file updates.
-- Fix Mac printing, Find cleanup and discussion markers.
+- Add experimental passage discussions, replies and conversation Read Aloud.
+- Improve Mac printing, Find cleanup and discussion markers.
+- Mac beta only; discussion layout and scrolling need further polish.
+
+## 1.7.1 — 2026-10-27
+
+- Renamed MDView to Margined.
 
 ## 1.7.0 — 2026-10-22
 
