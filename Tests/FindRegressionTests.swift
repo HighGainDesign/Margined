@@ -71,8 +71,16 @@ final class FindRegressionTests: XCTestCase {
                 if let web = findWeb(in: host.view), web.url != nil, !web.isLoading, !reader.isRendering,
                    (try? await web.evaluateJavaScript("document.querySelector('main')?.textContent.includes('violet lighthouse')")) as? Bool == true {
                     reader.showFind = true
-                    for _ in 0..<20 { await Task.yield() }
-                    return (reader,host,window,web)
+                    for _ in 0..<100 {
+                        host.view.layoutSubtreeIfNeeded()
+                        if findSearch(in: host.view) != nil, web.window === window,
+                           NSApp.isActive, window.isKeyWindow {
+                            try await Task.sleep(for: .milliseconds(100))
+                            return (reader,host,window,web)
+                        }
+                        try await Task.sleep(for: .milliseconds(25))
+                    }
+                    throw CocoaError(.coderInvalidValue)
                 }
                 try await Task.sleep(for: .milliseconds(25))
             }
@@ -94,7 +102,9 @@ final class FindRegressionTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
         }
         let match = try await web.find("violet lighthouse", configuration: WKFindConfiguration())
-        print("Find fixture diagnostics: active=\(NSApp.isActive), key=\(web.window?.isKeyWindow == true), modelMatch=\(String(describing: reader.searchMatch)), nativeMatch=\(match.matchFound), frame=\(web.frame)")
+        try await Task.sleep(for: .milliseconds(100))
+        let afterNativeFind = try await yellowPixels(in: web)
+        print("Find fixture diagnostics: active=\(NSApp.isActive), key=\(web.window?.isKeyWindow == true), query=\(reader.searchText), nativeMatch=\(match.matchFound), afterNativeFind=\(afterNativeFind), frame=\(web.frame)")
         return 0
     }
     private func yellowPixels(in web: WKWebView) async throws -> Int {
