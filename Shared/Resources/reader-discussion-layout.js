@@ -71,6 +71,12 @@ function marginedDiscussionLayout() {
         if(!layout.visible){publish();return;}
         const layer=document.createElement('div');layer.className='margined-note-layer margined-discussion-decoration';
         const groups=new Map(),documentHeight=document.documentElement.scrollHeight;
+        // innerWidth includes classic scrollbars. Decorations belong inside the
+        // usable page, and their leader lines stay outside the prose column.
+        const viewportWidth=document.documentElement.clientWidth;
+        const markerLeft=Math.max(0,viewportWidth-28);
+        const mainRect=main.getBoundingClientRect(),mainStyle=getComputedStyle(main);
+        const gutterStart=Math.max(0,mainRect.right-(parseFloat(mainStyle.paddingRight)||0)+4);
         for(const item of ranges) {
             if(!item.range.startContainer.isConnected)continue;
             const rects=Array.from(item.range.getClientRects()).filter(r=>r.width>0 && r.height>0);
@@ -90,8 +96,8 @@ function marginedDiscussionLayout() {
             const marker=document.createElement('button');marker.type='button';marker.className='margined-note-button'+color;
             marker.dataset.marginedThread=(group.items.find(item=>item.id===layout.selected) ?? group.items[0]).id;
             marker.textContent=String(group.items.length);marker.setAttribute('aria-label',`${layout.label} (${group.items.length})`);marker.title=marker.getAttribute('aria-label');
-            Object.assign(marker.style,{left:`${innerWidth-28+scrollX}px`,top:`${Math.max(0,y)}px`});layer.appendChild(marker);
-            positioned('margined-note-connector'+color,{left:first.right,top:first.top+first.height/2,width:Math.max(0,innerWidth-30-first.right),height:1},layer);
+            Object.assign(marker.style,{left:`${markerLeft+scrollX}px`,top:`${Math.max(0,y)}px`});layer.appendChild(marker);
+            if(gutterStart<markerLeft-2) positioned('margined-note-connector'+color,{left:gutterStart,top:first.top+first.height/2,width:markerLeft-2-gutterStart,height:1},layer);
         }
         document.body.appendChild(layer);layout.overlay=layer;publish();
     }

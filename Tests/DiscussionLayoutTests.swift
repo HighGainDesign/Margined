@@ -47,6 +47,19 @@ import XCTest
         let delta = authorTop - passageTop
         XCTAssertGreaterThanOrEqual(delta, -8, "Author top \(authorTop), passage top \(passageTop)")
         XCTAssertLessThanOrEqual(delta, 40, "The card should align with its passage, allowing only its own inner padding; author top \(authorTop), passage top \(passageTop)")
+        for (width, zoom) in [(1_200.0, 1.0), (1_000.0, 1.0), (1_200.0, 1.25)] {
+            window.setContentSize(.init(width: width, height: 780)); reader.zoom = zoom
+            for _ in 0..<20 { root.layoutSubtreeIfNeeded(); await Task.yield() }
+            _ = try await web.takeSnapshot(configuration: WKSnapshotConfiguration())
+            let value = try await web.evaluateJavaScript("""
+            ({overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+              outside:Array.from(document.querySelectorAll('.margined-note-button'),n=>n.getBoundingClientRect()).some(r=>r.right>document.documentElement.clientWidth)})
+            """) as? [String: Any]
+            let metrics = try XCTUnwrap(value)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(metrics["overflow"] as? Double), 1,
+                "The actual split reader must not scroll sideways at width \(width), zoom \(zoom): \(metrics)")
+            XCTAssertEqual(metrics["outside"] as? Bool, false)
+        }
         XCTAssertEqual(try Data(contentsOf: file), original)
     }
 

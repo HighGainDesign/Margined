@@ -5,6 +5,7 @@
 - Rename to Margined; add iPhone/iPad with adaptive panels and Files sharing.
 - Add portable passage discussions, replies and conversation Read Aloud.
 - Improve printing, images, playback and live file updates.
+- Fix Mac printing, Find cleanup and discussion markers.
 
 ## 1.7.0 — 2026-10-22
 

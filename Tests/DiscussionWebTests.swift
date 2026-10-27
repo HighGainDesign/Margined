@@ -168,6 +168,43 @@ final class DiscussionWebTests: XCTestCase {
         let hidden = try await view.evaluateJavaScript("document.querySelectorAll('[data-margined-thread]').length") as? Int
         XCTAssertEqual(hidden, 0)
     }
+    func testPassageConnectorsStayOutOfTextAndDoNotWidenTheDocument() async throws {
+        let body = "<h1>Plan</h1><p>Find <strong>violet lighthouse</strong>. The remaining words must stay readable.</p>" +
+            String(repeating: "<p>Following prose fills the scrollable page.</p>", count: 30)
+        let projection = try DiscussionText.project(html: body, source: "inline-connector")
+        let view = try await browser(body)
+        var arguments = try decorationArguments(projection, quote: "Find violet lighthouse.", ids: ["t1"])
+        _ = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world)
+        _ = try await view.evaluateJavaScript("document.documentElement.style.overflowY='scroll'; true")
+        for zoom in [1.0, 1.25] {
+            view.pageZoom = zoom
+            try await present(view)
+            arguments["operation"] = "decorate"
+            _ = try await view.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments, in: nil, contentWorld: world)
+            try await present(view)
+            let value = try await view.callAsyncJavaScript("""
+            const walker=document.createTreeWalker(document.querySelector('main'),NodeFilter.SHOW_TEXT);
+            const textRects=[];
+            while(walker.nextNode()) {
+                const range=document.createRange();range.selectNodeContents(walker.currentNode);
+                textRects.push(...Array.from(range.getClientRects()));
+            }
+            const connectors=Array.from(document.querySelectorAll('.margined-note-connector'),n=>n.getBoundingClientRect());
+            const intersects=(a,b)=>a.left<b.right && a.right>b.left && a.top<b.bottom && a.bottom>b.top;
+            const width=document.documentElement.clientWidth;
+            return {collisions:connectors.filter(a=>textRects.some(b=>intersects(a,b))).length,
+                overflow:document.documentElement.scrollWidth-width, viewport:innerWidth, client:width,
+                markers:document.querySelectorAll('.margined-note-button').length,
+                markerOutside:Array.from(document.querySelectorAll('.margined-note-button'),n=>n.getBoundingClientRect()).some(r=>r.left<0 || r.right>width)};
+            """, arguments: [:], in: nil, contentWorld: world) as? [String: Any]
+            let metrics = try XCTUnwrap(value)
+            XCTAssertEqual(metrics["markers"] as? Int, 1)
+            XCTAssertEqual(metrics["collisions"] as? Int, 0, "A connector must never look like strikethrough: \(metrics)")
+            XCTAssertLessThanOrEqual(try XCTUnwrap(metrics["overflow"] as? Double), 1, "Discussion decorations cannot add a page scrollbar: \(metrics)")
+            XCTAssertEqual(metrics["markerOutside"] as? Bool, false, "Keep the marker inside the visible viewport: \(metrics)")
+        }
+    }
+
     func testOnlyExplicitGoToPassageScrollsToTheCurrentAllowedAnchor() async throws {
         let body = "<h1>Plan</h1>" + String(repeating: "<p>Padding paragraph.</p>", count: 45) + "<p>Target passage.</p>"
         let projection = try DiscussionText.project(html: body, source: "go-to")

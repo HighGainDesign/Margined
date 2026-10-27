@@ -22,6 +22,9 @@ struct ReaderFindField: NSViewRepresentable {
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.searchChanged(_:))
+        field.sendsSearchStringImmediately = true
         return field
     }
 
@@ -33,9 +36,11 @@ struct ReaderFindField: NSViewRepresentable {
 
     static func dismantleNSView(_ field: Field, coordinator: Coordinator) { field.stop() }
 
-    final class Coordinator: NSObject, NSTextFieldDelegate {
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
         var parent: ReaderFindField
         init(_ parent: ReaderFindField) { self.parent = parent }
+
+        @objc func searchChanged(_ field: NSSearchField) { parent.text = field.stringValue }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
@@ -49,7 +54,7 @@ struct ReaderFindField: NSViewRepresentable {
         }
     }
 
-    final class Field: NSTextField {
+    final class Field: NSSearchField {
         private var requestedGeneration = -1
         private var appliedGeneration = -1
         private var focusTask: Task<Void, Never>?
