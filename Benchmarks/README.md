@@ -81,8 +81,59 @@ conversations, mobile and system Quick Look need separately labeled cohorts;
 a fast parser or HTML reply is not a visible-document result. Final 2.0 viewing
 acceptance remains incomplete until actual runs satisfy the agreed scope.
 
-System Quick Look and iOS timings require separate native runs. Internal HTML
-packaging timings cannot stand in for system preview display.
+## iPhone and iPad Simulator
+
+Validate the launchers with `python3 -m unittest discover -s script/tests -p 'test_benchmark*.py'` (also run by CI).
+
+The mobile observer uses the same fixtures, frame predicate and result validator.
+Build a private copy so testing cannot open or stop the installed production app:
+
+```sh
+git worktree add --detach /tmp/Margined-mobile-source HEAD
+cd /tmp/Margined-mobile-source
+python3 - <<'PYTHON'
+from pathlib import Path
+p = Path("project.yml")
+p.write_text(p.read_text().replace(
+    "PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined",
+    "PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.benchmark.local"))
+PYTHON
+xcodegen generate
+xcodebuild -project Margined.xcodeproj -scheme MarginediOS -configuration Release \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/Margined-mobile-benchmarks CODE_SIGN_IDENTITY=- \
+  OTHER_SWIFT_FLAGS='$(inherited) -D MARGINED_BENCHMARK' build
+```
+
+Retain the build-time source manifest and optimized app hashes. Use `simctl list
+runtimes` and `simctl list devicetypes` to select an available runtime and profile,
+then create and boot a **new disposable** simulator. Install the private
+`Build/Products/Release-iphonesimulator/MarginediOS.app` on that UUID. Leave the
+screen unlocked, release native computer-control sessions, and avoid other builds
+or simulator work during measurement. Run from the same private source copy:
+
+```sh
+python3 script/benchmark-mobile.py --device YOUR_NEW_SIMULATOR_UUID \
+  --identifier design.highgain.margined.benchmark.local \
+  --fixture prose --kind cold --samples 20 --output dist/benchmarks/mobile-cold
+```
+
+Repeat with `--kind warm` and `--kind refresh`, each with a new output directory;
+select other corpus entries with `--fixture`. The command requires an explicit
+UUID and private bundle ID, refuses an already-running app, and stops only its
+owned app process. It neither installs nor deletes simulators. Archive results,
+then shut down and delete only the simulator you created.
+
+Cold uses an external Mach clock before `simctl launch`; warm retains a process;
+refresh waits for the real file presenter after atomic saves. Raw requests,
+results, phases, PNGs, actual simulator-screen spot checks and source/app hashes
+are retained. Clock/PID/census/geometry failures reject results. Inspect the saved
+screens before accepting a run. Simulator dispatch and verification overhead are
+included; these numbers do not establish physical-device latency. No mobile
+numeric release gate is defined.
+
+System Quick Look needs a separate native host and actual provider dispatch.
+Internal HTML packaging timings cannot stand in for system preview display.
 
 The CPU-only table regression can run without an unlocked desktop after building
 optimized products:

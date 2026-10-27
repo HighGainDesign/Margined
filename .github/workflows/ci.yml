@@ -26,6 +26,7 @@ jobs:
           brew install xcodegen
           python3 script/verify-vendor.py
           python3 script/validate-localizations.py
+          python3 -m unittest discover -s script/tests -p 'test_benchmark*.py'
           xcodegen generate
       - name: Run isolated macOS tests
         run: |
