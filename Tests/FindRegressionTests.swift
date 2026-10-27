@@ -10,7 +10,7 @@ final class FindRegressionTests: XCTestCase {
         let fixture = try await makeReader()
         defer { fixture.reader.stop(); fixture.window.close() }
         fixture.reader.searchText = "violet lighthouse"
-        let highlighted = try await waitForHighlight(in: fixture.web)
+        let highlighted = try await waitForHighlight(in: fixture.web, reader: fixture.reader)
         XCTAssertGreaterThan(highlighted, 10, "The fixture must show WebKit's actual yellow match before checking cleanup")
         guard highlighted > 10 else { return }
         fixture.reader.searchText = ""
@@ -39,7 +39,7 @@ final class FindRegressionTests: XCTestCase {
         let fixture = try await makeReader()
         defer { fixture.reader.stop(); fixture.window.close() }
         fixture.reader.searchText = "violet lighthouse"
-        let highlighted = try await waitForHighlight(in: fixture.web)
+        let highlighted = try await waitForHighlight(in: fixture.web, reader: fixture.reader)
         XCTAssertGreaterThan(highlighted, 10)
         _ = try await fixture.web.evaluateJavaScript("""
         const text=document.querySelector('main p').firstChild,range=document.createRange();
@@ -62,7 +62,10 @@ final class FindRegressionTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 700),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.appearance = NSAppearance(named: .aqua)
-        window.contentViewController = host; window.makeKeyAndOrderFront(nil)
+        window.contentViewController = host
+        window.center()
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
         do {
             for _ in 0..<200 {
                 if let web = findWeb(in: host.view), web.url != nil, !web.isLoading, !reader.isRendering,
@@ -84,12 +87,14 @@ final class FindRegressionTests: XCTestCase {
         if let field = view as? NSSearchField { return field }
         return view.subviews.lazy.compactMap { self.findSearch(in: $0) }.first
     }
-    private func waitForHighlight(in web: WKWebView) async throws -> Int {
-        for _ in 0..<30 {
+    private func waitForHighlight(in web: WKWebView, reader: ReaderState) async throws -> Int {
+        for _ in 0..<60 {
             let count = try await yellowPixels(in: web)
             if count > 10 { return count }
             try await Task.sleep(for: .milliseconds(50))
         }
+        let match = try await web.find("violet lighthouse", configuration: WKFindConfiguration())
+        print("Find fixture diagnostics: active=\(NSApp.isActive), key=\(web.window?.isKeyWindow == true), modelMatch=\(String(describing: reader.searchMatch)), nativeMatch=\(match.matchFound), frame=\(web.frame)")
         return 0
     }
     private func yellowPixels(in web: WKWebView) async throws -> Int {

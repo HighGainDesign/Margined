@@ -24,8 +24,21 @@ final class WindowLifecycleTests: XCTestCase {
         XCTAssertFalse(welcome.isVisible)
 
         let reader = try XCTUnwrap(document.windowControllers.first?.window)
-        XCTAssertEqual(reader.contentView?.bounds.size, NSSize(width: 920, height: 760))
-        XCTAssertEqual(reader.minSize, NSSize(width: 480, height: 320))
+        let screen = try XCTUnwrap(reader.screen ?? NSScreen.main)
+        let requested = reader.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 920, height: 760))
+        let fitted = reader.constrainFrameRect(requested, to: screen)
+        let expected = reader.contentRect(forFrameRect: fitted).size
+        let content = try XCTUnwrap(reader.contentView).bounds.size
+        XCTAssertEqual(content.width, expected.width, accuracy: 1)
+        XCTAssertEqual(content.height, expected.height, accuracy: 1,
+                       "AppKit may fit the default window to the available display")
+        // SwiftUI can raise the frame minimum to fit its 300-point content
+        // plus the OS title bar. Keep that adjustment bounded and resizable.
+        let hostingMinimum = reader.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 480, height: 300)).size
+        XCTAssertGreaterThanOrEqual(reader.minSize.width, 480)
+        XCTAssertGreaterThanOrEqual(reader.minSize.height, 320)
+        XCTAssertLessThanOrEqual(reader.minSize.width, max(480, hostingMinimum.width))
+        XCTAssertLessThanOrEqual(reader.minSize.height, max(320, hostingMinimum.height))
         XCTAssertEqual(reader.title, "Reader check")
         XCTAssertTrue(reader.styleMask.contains([.titled, .closable, .miniaturizable, .resizable]))
         XCTAssertFalse(reader.isReleasedWhenClosed, "The document controller owns the window")
