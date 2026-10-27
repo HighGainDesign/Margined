@@ -7,6 +7,84 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    func testLargestTextLeavesConversationSpaceWhileKeepingAnUnpostedReply() async throws {
+        let f = try await fixture(withThread: true)
+        try await assertAccessibleConversationFits(f, expectedSource: f.original)
+    }
+
+    func testLongQuoteStillLeavesConversationSpaceAtLargestText() async throws {
+        let f = try await fixture(withThread: true)
+        let passage = String(repeating: "Keep the complete quoted passage available to the reader. ", count: 8)
+            .trimmingCharacters(in: .whitespaces)
+        let source = """
+        # Plan
+
+        Before.
+
+        \(passage)
+
+        After.
+
+        <!-- margined:thread v1
+        id: t-mobile
+        state: open
+        target:
+          type: TextQuoteSelector
+          exact: "\(passage)"
+          prefix: "Before."
+          suffix: "After."
+        messages:
+          - id: m-mobile
+            author: Reviewer
+            created: "2026-10-23T10:00:00Z"
+            body: "A portable note."
+        -->
+
+        """
+        let data = Data(source.utf8)
+        try data.write(to: f.file, options: .atomic)
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        try await assertAccessibleConversationFits(f, expectedSource: data)
+    }
+
+    private func assertAccessibleConversationFits(_ f: Fixture, expectedSource: Data) async throws {
+        f.window.frame.size = CGSize(width: 402, height: 874)
+        f.host.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        f.reader.openDiscussion("t-mobile")
+        let reply = "Keep this unposted reply at the chosen text size."
+        f.reader.discussions.setDraft(reply, for: .thread("t-mobile"))
+        let ready = await pollAsync {
+            guard let history = self.history(in: f.host.view, excluding: f.web),
+                  self.editor(in: f.host.view)?.text == reply else { return false }
+            return try await history.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+        }
+        XCTAssertTrue(ready, "Measure the mounted conversation and real native composer, not an empty placeholder")
+        guard ready else { return }
+        let history = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
+        let editor = try XCTUnwrap(self.editor(in: f.host.view))
+        var ancestor = history.superview
+        while ancestor != nil && !(ancestor is UIScrollView) { ancestor = ancestor?.superview }
+        let conversation = try XCTUnwrap(ancestor as? UIScrollView)
+        // UIKit insets describe the actual unobscured viewport, including a
+        // SwiftUI safe-area composer that can otherwise cover the whole screen.
+        let insets = conversation.adjustedContentInset
+        let available = max(0, conversation.bounds.height - insets.top - insets.bottom)
+        XCTAssertGreaterThanOrEqual(available, 140,
+            "At the largest text size, the conversation still needs room to read several lines")
+        XCTAssertGreaterThanOrEqual(editor.font?.pointSize ?? 0, 35,
+            "Making room must not shrink the user's chosen accessibility text")
+        XCTAssertEqual(editor.text, reply)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, reply)
+        XCTAssertEqual(try Data(contentsOf: f.file), expectedSource)
+        let image = UIGraphicsImageRenderer(bounds: f.window.bounds).image { _ in
+            f.window.drawHierarchy(in: f.window.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Largest-text-conversation"
+        attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     func testGoToPassageReturnsToTheRetainedDocumentAndRejectsStaleActions() async throws {
         let tail = (0..<120).map { "Long paragraph \($0) keeps the quoted passage above the current reading position.\n\n" }.joined()
         let f = try await fixture(withThread: true, tail: tail)

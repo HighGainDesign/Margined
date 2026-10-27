@@ -59,26 +59,53 @@ struct MobileDiscussionThread: View {
     }
     private var quote: String { thread?.target.exact ?? reader.discussions.drafts[key]?.target?.exact ?? "" }
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: quote)
-                .font(.body).textSelection(.enabled).padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading).background(.quaternary)
-                .accessibilityLabel(String(localized: "Quoted passage") + ", " + quote)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    if let thread { MobileDiscussionControls(reader: reader, thread: thread) }
-                    MobileDiscussionDecisionView(reader: reader, key: key)
-                    if let thread { MobileDiscussionMessages(reader: reader, thread: thread) }
-                    if let error = reader.discussionError {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red).textSelection(.enabled)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 0) {
+                MobileDiscussionScrollSection(maxHeight: min(140, geometry.size.height * 0.25)) {
+                    Text(verbatim: quote)
+                        .font(.body).textSelection(.enabled).padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(String(localized: "Quoted passage") + ", " + quote)
+                }.background(.quaternary)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        if let thread { MobileDiscussionControls(reader: reader, thread: thread) }
+                        MobileDiscussionDecisionView(reader: reader, key: key)
+                        if let thread { MobileDiscussionMessages(reader: reader, thread: thread) }
+                        if let error = reader.discussionError {
+                            Label(error, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.red).textSelection(.enabled)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                }.layoutPriority(1)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                MobileDiscussionScrollSection(maxHeight: max(110, geometry.size.height * 0.45)) {
+                    MobileDiscussionComposer(reader: reader, key: key).padding(16)
+                }.background(.bar)
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { MobileDiscussionComposer(reader: reader, key: key).padding(16).background(.bar) }
         .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: !reader.discussionUsesMargin && reader.discussionNavigationPath.last == .thread(key), report: contentWidthChanged))
         .navigationTitle("Discussion").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Keep the conversation readable without reducing Dynamic Type or dropping
+/// form fields. One stable subtree retains the native editor across size changes.
+private struct MobileDiscussionScrollSection<Content: View>: View {
+    let maxHeight: CGFloat
+    @ViewBuilder var content: Content
+    @State private var contentHeight: CGFloat?
+
+    var body: some View {
+        ScrollView {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: min(maxHeight, contentHeight ?? maxHeight))
     }
 }
 
