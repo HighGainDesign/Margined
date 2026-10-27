@@ -1,6 +1,10 @@
 import Foundation
 import XCTest
+#if os(iOS)
+@testable import MarginediOS
+#else
 @testable import Margined
+#endif
 
 final class ViewingBenchmarkMetricsTests: XCTestCase {
     func testSessionReadsOnlyItsRegularSyntheticFixture() throws {

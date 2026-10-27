@@ -523,6 +523,9 @@ final class MobileReaderState {
                     reviewedUnits: units, loadRemoteImages: remote, appearance: appearance, mapTasks: mapTasks,
                     prepareSpeech: true, speechOptions: options, previousDiscussionProjection: previousProjection, previousDiscussions: previousDiscussions)
                 guard let self, !Task.isCancelled, generation == openGeneration, source.utf8.elementsEqual(text.utf8) else { return }
+                #if MARGINED_BENCHMARK
+                MobileViewingBenchmarkSession.current?.didRender(reader: self, output: output)
+                #endif
                 let sameReview = rendered?.changes.entries == output.changes.entries
                 rendered = output; isRendering = false
                 if fileUpdateNeedsReviewReset && !sameReview { currentChangeIndex = 0 }

@@ -176,6 +176,7 @@ targets:
       - path: App/Services/SpeechSession.swift
       - path: App/Services/SpeechDriver.swift
       - path: App/Services/SpeechPreferences.swift
+      - path: App/Services/ViewingBenchmarkMetrics.swift
       - path: LICENSE
         buildPhase: resources
       - path: Fixtures/Rendering.md
@@ -282,6 +283,9 @@ targets:
     platform: iOS
     sources:
       - iOSTests
+      - Tests/ViewingBenchmarkMetricsTests.swift
+      - path: Benchmarks/Fixtures
+        buildPhase: resources
       - Tests/PreviewDocumentTests.swift
       - Tests/PrintContentTests.swift
       - Tests/ConversationPlaybackTests.swift

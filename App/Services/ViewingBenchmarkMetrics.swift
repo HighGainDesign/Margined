@@ -89,3 +89,20 @@ struct ViewingBenchmarkDiscussionLayout: Codable, Sendable {
 }
 
 enum ViewingBenchmarkError: Error { case invalidRequest, invalidMeasurement }
+
+#if MARGINED_BENCHMARK
+/// Exact document/artwork predicate shared by the native Mac and mobile probes.
+enum ViewingBenchmarkDOM {
+    static let script = """
+        const main = document.querySelector('main#document');
+        if (document.readyState !== 'complete' || document.fonts.status !== 'loaded' || main?.querySelector('h1')?.textContent !== marker) return false;
+        const math = Array.from(main.querySelectorAll('span.margined-math'));
+        const diagrams = Array.from(main.querySelectorAll('figure.margined-diagram'));
+        return math.length === expectedMath && diagrams.length === expectedDiagrams
+            && math.every(node => node.querySelectorAll('math').length === 1)
+            && diagrams.every(node => node.querySelectorAll(':scope > img').length === 1
+                && node.querySelector(':scope > img').getAttribute('src').startsWith('data:image/svg+xml'))
+            && Array.from(main.querySelectorAll('img')).every(image => image.complete && image.naturalWidth > 0);
+        """
+}
+#endif

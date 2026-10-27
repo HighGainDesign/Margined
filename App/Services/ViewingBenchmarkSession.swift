@@ -270,17 +270,7 @@ enum ViewingBenchmarkFrame {
     private static let world = WKContentWorld.world(name: "MarginedBenchmark")
 
     static func isCurrent(_ web: WKWebView, marker: String, expectedMath: Int = 0, expectedDiagrams: Int = 0) async throws -> Bool {
-        try await web.callAsyncJavaScript("""
-        const main = document.querySelector('main#document');
-        if (document.readyState !== 'complete' || document.fonts.status !== 'loaded' || main?.querySelector('h1')?.textContent !== marker) return false;
-        const math = Array.from(main.querySelectorAll('span.margined-math'));
-        const diagrams = Array.from(main.querySelectorAll('figure.margined-diagram'));
-        return math.length === expectedMath && diagrams.length === expectedDiagrams
-            && math.every(node => node.querySelectorAll('math').length === 1)
-            && diagrams.every(node => node.querySelectorAll(':scope > img').length === 1
-                && node.querySelector(':scope > img').getAttribute('src').startsWith('data:image/svg+xml'))
-            && Array.from(main.querySelectorAll('img')).every(image => image.complete && image.naturalWidth > 0);
-        """, arguments: ["marker": marker, "expectedMath": expectedMath, "expectedDiagrams": expectedDiagrams], in: nil, contentWorld: world) as? Bool == true
+        try await web.callAsyncJavaScript(ViewingBenchmarkDOM.script, arguments: ["marker": marker, "expectedMath": expectedMath, "expectedDiagrams": expectedDiagrams], in: nil, contentWorld: world) as? Bool == true
     }
 
     static func historyIsCurrent(_ web: WKWebView, thread: DiscussionThread) async throws -> Bool {

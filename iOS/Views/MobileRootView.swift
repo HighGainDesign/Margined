@@ -65,6 +65,10 @@ struct MobileRootView: View {
             if previous == .guide && current == nil { setupGuideSeen = true }
         }
         .task {
+            #if MARGINED_BENCHMARK
+            if MobileViewingBenchmarkSession.startIfRequested(reader: reader,
+                open: { url in await open(url) }) { return }
+            #endif
             await imageFolders.restore()
             if !setupGuideSeen && activeSheet == nil { activeSheet = .guide }
         }
