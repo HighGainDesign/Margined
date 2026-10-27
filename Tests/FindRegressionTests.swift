@@ -56,6 +56,7 @@ final class FindRegressionTests: XCTestCase {
 
     private func makeReader() async throws -> (reader: ReaderState, host: NSHostingController<ReaderView>, window: NSWindow, web: WKWebView) {
         let reader = ReaderState()
+        reader.showFind = true
         reader.source = "# Find test\n\nThe violet lighthouse stands beside the harbor.\n"
         reader.render()
         let host = NSHostingController(rootView: ReaderView(reader: reader))
@@ -70,17 +71,10 @@ final class FindRegressionTests: XCTestCase {
             for _ in 0..<200 {
                 if let web = findWeb(in: host.view), web.url != nil, !web.isLoading, !reader.isRendering,
                    (try? await web.evaluateJavaScript("document.querySelector('main')?.textContent.includes('violet lighthouse')")) as? Bool == true {
-                    reader.showFind = true
-                    for _ in 0..<100 {
-                        host.view.layoutSubtreeIfNeeded()
-                        if findSearch(in: host.view) != nil, web.window === window,
-                           NSApp.isActive, window.isKeyWindow {
-                            try await Task.sleep(for: .milliseconds(100))
-                            return (reader,host,window,web)
-                        }
-                        try await Task.sleep(for: .milliseconds(25))
+                    if findSearch(in: host.view) != nil, web.window === window {
+                        try await Task.sleep(for: .milliseconds(100))
+                        if findWeb(in: host.view) === web { return (reader,host,window,web) }
                     }
-                    throw CocoaError(.coderInvalidValue)
                 }
                 try await Task.sleep(for: .milliseconds(25))
             }
