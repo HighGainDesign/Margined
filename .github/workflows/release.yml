@@ -56,7 +56,7 @@ jobs:
           xcodegen generate
           xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
-            CODE_SIGN_IDENTITY=- test > "$RUNNER_TEMP/tests.log" 2>&1 || {
+            CODE_SIGN_IDENTITY=- MARGINED_CI_HEADLESS=1 test > "$RUNNER_TEMP/tests.log" 2>&1 || {
               grep -n -E 'error:|failed|Failing tests:' "$RUNNER_TEMP/tests.log" || true
               tail -80 "$RUNNER_TEMP/tests.log"
               exit 1

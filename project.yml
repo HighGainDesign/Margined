@@ -314,6 +314,7 @@ schemes:
       targets: [MarginedTests]
       environmentVariables:
         MARGINED_TEST_PREFERENCES: '1'
+        MARGINED_CI_HEADLESS: $(MARGINED_CI_HEADLESS)
   MarginedAppStore:
     build:
       targets:

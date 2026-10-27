@@ -35,7 +35,7 @@ jobs:
           xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
             -resultBundlePath "$RUNNER_TEMP/Margined-tests.xcresult" \
-            CODE_SIGN_IDENTITY=- test > "$RUNNER_TEMP/tests.log" 2>&1 || {
+            CODE_SIGN_IDENTITY=- MARGINED_CI_HEADLESS=1 test > "$RUNNER_TEMP/tests.log" 2>&1 || {
               python3 - <<'PY'
           import os
           from pathlib import Path
