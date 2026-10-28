@@ -6,8 +6,10 @@ struct SetupView: View {
     var tutorial = TutorialSession()
     var openPractice: (TutorialLesson) -> Void = { (NSApp.delegate as? AppDelegate)?.openTutorialPractice($0) }
 
+    var resumePractice: (URL) -> Void = { (NSApp.delegate as? AppDelegate)?.openTutorialPractice(at: $0) }
+
     var body: some View {
-        TutorialGuide(session: tutorial, done: done, openPractice: openPractice) { lesson in
+        TutorialGuide(session: tutorial, done: done, openPractice: openPractice, resumePractice: resumePractice) { lesson in
             switch lesson {
             case .quickLook:
                 VStack(alignment: .leading, spacing: 14) {

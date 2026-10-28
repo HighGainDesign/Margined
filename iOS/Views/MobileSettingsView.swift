@@ -6,6 +6,7 @@ struct MobileSettingsView: View {
     @Bindable var imageFolders: MobileImageFolders
     let tutorial: TutorialSession
     let openPractice: (TutorialLesson) -> Void
+    var resumePractice: (URL) -> Void = { _ in }
     @State private var showTour = false
     @State private var showFolderPicker = false
     @State private var folderError: String?
@@ -83,7 +84,8 @@ struct MobileSettingsView: View {
         }
         .sheet(isPresented: $showTour) {
             MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial,
-                openPractice: { lesson in showTour = false; openPractice(lesson) })
+                openPractice: { lesson in showTour = false; openPractice(lesson) },
+                resumePractice: { url in showTour = false; resumePractice(url) })
                 .preferredColorScheme(appearance == "system" ? nil : (appearance == "dark" ? .dark : .light))
         }
         .onChange(of: appearance) { _, value in reader.appearance = DocumentAppearance(rawValue: value) ?? .system }

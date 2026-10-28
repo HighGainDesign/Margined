@@ -164,6 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         }
     }
 
+    func openTutorialPractice(at url: URL) {
+        guard tutorial.practice(for: url) != nil else { return }
+        application(NSApp, open: [url])
+    }
+
     func showStartupTips(force: Bool = false) {
         if let setup, setup.window?.isVisible == true {
             setup.showWindow(nil)

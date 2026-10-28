@@ -65,9 +65,9 @@ struct MobileRootView: View {
         .sheet(item: $activeSheet, onDismiss: openPendingPractice) { destination in
             Group {
                 switch destination {
-                case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders, tutorial: tutorial, openPractice: preparePractice)
+                case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders, tutorial: tutorial, openPractice: preparePractice, resumePractice: resumePractice)
                 case .guide:
-                    MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial, openPractice: preparePractice)
+                    MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial, openPractice: preparePractice, resumePractice: resumePractice)
                 }
             }
             .preferredColorScheme(appearance == .system ? nil : (appearance == .dark ? .dark : .light))
@@ -140,6 +140,12 @@ struct MobileRootView: View {
             catch { tutorial.error = error.localizedDescription }
         }
     }
+    private func resumePractice(_ url: URL) {
+        guard tutorial.practice(for: url) != nil else { return }
+        pendingPractice = url
+        activeSheet = nil
+    }
+
     private func openPendingPractice() {
         guard let url = pendingPractice else { return }
         pendingPractice = nil

@@ -7,12 +7,13 @@ struct MobileSetupGuide: View {
     var foldersChanged: () -> Void
     @Bindable var tutorial: TutorialSession
     var openPractice: (TutorialLesson) -> Void
+    var resumePractice: (URL) -> Void = { _ in }
     @State private var showFolderPicker = false
     @State private var folderError: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        TutorialGuide(session: tutorial, done: { dismiss() }, openPractice: openPractice) { lesson in
+        TutorialGuide(session: tutorial, done: { dismiss() }, openPractice: openPractice, resumePractice: resumePractice) { lesson in
             if lesson == .images {
                 VStack(alignment: .leading, spacing: 12) {
                     Button("Choose Image Folders…", systemImage: "folder.badge.plus") { showFolderPicker = true }

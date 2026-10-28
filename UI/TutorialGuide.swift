@@ -4,6 +4,7 @@ struct TutorialGuide<Actions: View, Footer: View>: View {
     @Bindable var session: TutorialSession
     let done: () -> Void
     let openPractice: (TutorialLesson) -> Void
+    var resumePractice: (URL) -> Void = { _ in }
     @ViewBuilder var actions: (TutorialLesson) -> Actions
     @ViewBuilder var footer: () -> Footer
     private var lessons: [TutorialLesson] { TutorialLesson.lessons(for: session.platform) }
@@ -57,6 +58,9 @@ struct TutorialGuide<Actions: View, Footer: View>: View {
                 actions(lesson)
                 if lesson != .streaming {
                     VStack(alignment: .leading, spacing: 8) {
+                        if let practice = session.latestPractice(for: lesson) {
+                            Button("Continue Practice") { resumePractice(practice.url) }.buttonStyle(.bordered)
+                        }
                         Button("Open Practice Document") { openPractice(lesson) }
                             .buttonStyle(.borderedProminent).disabled(session.preparing)
                         Text("A fresh disposable copy opens in the reader.").font(.caption).foregroundStyle(.secondary)

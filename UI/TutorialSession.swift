@@ -10,6 +10,7 @@ final class TutorialSession {
     private(set) var applying = false
     private let root: URL
     private var practices: [URL: TutorialPractice] = [:]
+    private var latest: [TutorialLesson: URL] = [:]
     private var updated: Set<URL> = []
     private var updateErrors: [URL: String] = [:]
 
@@ -29,7 +30,12 @@ final class TutorialSession {
         }.value
         try Task.checkCancellation()
         practices[practice.url.standardizedFileURL] = practice
+        latest[lesson] = practice.url.standardizedFileURL
         return practice.url
+    }
+
+    func latestPractice(for lesson: TutorialLesson) -> TutorialPractice? {
+        latest[lesson].flatMap { practices[$0] }
     }
 
     func practice(for url: URL?) -> TutorialPractice? {

@@ -98,15 +98,6 @@ final class LayoutPolishTests: XCTestCase {
     }
 
     private func capture(_ view: NSView, at url: URL) throws {
-        if let window = view.window {
-            window.displayIfNeeded()
-            let capture = Process()
-            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), url.path]
-            try capture.run()
-            capture.waitUntilExit()
-            if capture.terminationStatus == 0 { return }
-        }
         let image = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: image)
         try XCTUnwrap(image.representation(using: .png, properties: [:])).write(to: url)

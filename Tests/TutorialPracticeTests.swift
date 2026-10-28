@@ -96,6 +96,23 @@ final class TutorialPracticeTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: other), bytes)
     }
 
+    @MainActor
+    func testSessionCanResumeSavedPracticeAfterClosingTheReader() async throws {
+        let root = try temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = TutorialSession(platform: .mobile, root: root)
+        XCTAssertNil(session.latestPractice(for: .checklists))
+        let first = try await session.makePractice(.checklists)
+        let checked = try String(contentsOf: first, encoding: .utf8).replacingOccurrences(of: "- [ ]", with: "- [x]")
+        try Data(checked.utf8).write(to: first)
+        XCTAssertEqual(session.latestPractice(for: .checklists)?.url, first,
+                       "The guide must reopen the same saved practice, not silently replace progress with a fresh copy")
+        XCTAssertEqual(try String(contentsOf: XCTUnwrap(session.latestPractice(for: .checklists)?.url), encoding: .utf8), checked)
+        let second = try await session.makePractice(.checklists)
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(session.latestPractice(for: .checklists)?.url, second)
+        XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), checked)
+    }
+
     private func temporaryRoot() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("MarginedTour-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 import WebKit
 @testable import MarginediOS
@@ -23,6 +24,31 @@ final class MobileDocumentBrowserTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertNotNil(browser(in: host), "The home screen must host Apple's real browser for provider locations, Recents, search and grid/list controls")
+    }
+
+    func testNativeBrowserKeepsPlainTextClassifiedDocumentsSelectable() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: MobileDocumentBrowser(open: { _ in true }, tour: {}, settings: {}))
+        let window = UIWindow(windowScene: scene); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let mounted = await poll { self.browser(in: host) != nil }; XCTAssertTrue(mounted)
+        let browser = try XCTUnwrap(browser(in: host))
+        XCTAssertTrue(browser.contentTypesForRecentDocuments.contains(.plainText),
+                      "Keep the previous picker's plain-text support for provider-classified Markdown and .txt files")
+    }
+
+    func testNativeBrowserRetainsUsableHeightWithLargeTextInACompactWindow() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let root = MobileDocumentBrowser(open: { _ in true }, tour: {}, settings: {})
+            .environment(\.dynamicTypeSize, .accessibility5).frame(width: 844, height: 320)
+        let host = UIHostingController(rootView: root)
+        let window = UIWindow(windowScene: scene); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let mounted = await poll { self.browser(in: host)?.view.window != nil }; XCTAssertTrue(mounted)
+        for _ in 0..<20 { host.view.layoutIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
+        let browser = try XCTUnwrap(browser(in: host))
+        XCTAssertGreaterThanOrEqual(browser.view.bounds.height, 180,
+                                    "Large launch actions must not squeeze Files out of a short viewing window")
     }
 
     func testNativeSelectionReturnsToTheBrowserAndPreservesUnpostedReplies() async throws {
