@@ -7,42 +7,21 @@ stay ordinary text files that people and agents can use in their own tools.
 
 | Pillar | Release requirements |
 | --- | --- |
-| **iOS and iPadOS** | Native Files access, opening and sharing Markdown, reading, checklists, change review and Read Aloud. Add share-sheet access. Implement a custom Quick Look extension where supported and verify that Files invokes it for Markdown. |
+| **iOS and iPadOS** | Native Files access, opening and sharing Markdown, reading, checklists, change review and Read Aloud. Share-sheet access; iPhone Duo inner/outer displays and live resizing that preserves reading position and unfinished replies. Quick Look where Files supports Markdown extensions. |
 | **File-based collaboration** | Passage-attached discussions, multiple threads on the same text, named replies and open/resolved status. The document and conversation live in one `.md` file, editable with Margined or another text editor. |
 | **Fast viewing** | Reproducible cold-open, warm-open, refresh and Quick Look benchmarks. Record request-to-visible-document and completed diagrams separately, with hardware, fixtures, median and p95. Fix measured bottlenecks against agreed targets. |
 
-### Collaboration design review
+### Collaboration design
 
-**The collaboration design and mockups require user review and approval before
-implementation.** Review Mac/iPad margin layouts and the compact iPhone flow,
-then settle the portable file convention and ordinary-editor round trip.
+The approved design uses a margin on wider screens and a dedicated thread screen
+on compact layouts. Named messages, dates, replies and resolution history live in
+bounded HTML comments containing readable YAML. Quote and context selectors anchor
+them to the prose; ambiguous or missing passages need explicit reattachment.
 
-The design must cover:
-
-- Several independent discussions on one passage, with author, date and replies.
-- Discussion, explicit approval and acknowledgement of a saved change as distinct
-  actions. Resolving a thread preserves its history.
-- Stable anchors when text moves; a visible recovery path when a passage changes,
-  disappears or matches ambiguously. Never silently attach a different passage.
-- Existing document metadata, duplicate quotations, overlapping selections,
-  Unicode, tables and multi-paragraph comments.
-- Human/agent edits to the same file, stale-write protection and reconciliation
-  when copies diverge. Passing a file around must work without a hosted service.
-- Keyboard, VoiceOver and touch use; accessible thread navigation and notes in
-  read-only previews. A clean-copy export should intentionally omit discussions.
-
-Evaluate these as complementary building blocks, not interchangeable formats:
-
-| Candidate | What it provides | What still needs design |
-| --- | --- | --- |
-| [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit) | Plain-text editorial marks and comments; parser support already exists in Apex. | Stable thread/message IDs, authors, reply relationships and overlapping discussions. It does not require adopting all of MultiMarkdown. |
-| [W3C Web Annotation](https://www.w3.org/TR/annotation-model/) | Annotation relationships and quote/context selectors for anchoring. | A readable serialization inside a single Markdown file and conflict behavior. |
-| [Mist](https://github.com/inanimate-tech/mist/blob/main/docs/markdown-and-criticmarkup.md) | A precedent for CriticMarkup plus single-file thread metadata. | Ordinary-editor usability, durable IDs and fit with the shared native reader. |
-| [HackMD](https://hackmd.io/) | Useful reference for commenting and reply interactions. | Its hosted collaboration model must not become a requirement for local files. |
-
-The file convention remains undecided. Full MultiMarkdown compatibility is a
-separate decision; assess its useful features and compatibility without replacing
-Apex or claiming blanket support.
+See [the file format](DISCUSSIONS.md). Other text editors can edit the same file;
+ordinary Markdown previews hide the notes. No account, cloud service or sidecar is
+required. Native accessibility, safe writes, divergent-copy reconciliation and
+cross-editor round trips remain release acceptance checks.
 
 ### Performance acceptance
 
@@ -55,10 +34,14 @@ established cold-launch target or a measured Margined result.
 
 ### Delivery
 
-The iOS reader MVP exists locally; share/Quick Look integration, collaboration and
-performance acceptance remain 2.0 work. Prepare Mac and iOS test builds and verify
-real File Providers, background audio, accessibility and file handoff. A roadmap
-entry or Simulator build alone is not release acceptance.
+Mac and iPhone/iPad builds are in internal TestFlight. Quick Look dispatch and
+local-image gaps, collaboration acceptance and performance acceptance remain open.
+Verify real File Providers, background audio, accessibility and file handoff
+before release.
+
+## Future enhancements
+
+- Syntax-highlighted JSON, YAML, TOML and other text files; evaluate HTML separately.
 
 ## Released foundation
 

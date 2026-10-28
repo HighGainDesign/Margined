@@ -217,6 +217,9 @@ enum SpeechDocumentBuilder {
         }
 
         static func chunks(_ text: String) -> [String] {
+            // Short text is already one unchanged utterance; sentence discovery
+            // and character-by-character reconstruction cannot split it.
+            if text.utf16.count <= 1200 { return text.isEmpty ? [] : [text] }
             var chunks: [String] = [], current = "", count = 0
             let tokenizer = NLTokenizer(unit: .sentence); tokenizer.string = text
             var cursor = text.startIndex

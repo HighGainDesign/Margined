@@ -3,8 +3,23 @@ import WebKit
 
 @MainActor
 final class ImageSchemeHandler: NSObject, WKURLSchemeHandler {
-    var documentURL: URL?
+    #if os(macOS) && MARGINED_APP_STORE
+    private let folderAccess = SandboxImageFolders.shared
+    #endif
+    var documentURL: URL? {
+        didSet { if documentURL != oldValue { cancelPendingLoads() } }
+    }
     var loadFailed: ((String) -> Void)?
+    private var requests: [ObjectIdentifier: Task<Void, Never>] = [:]
+
+    deinit {
+        for request in requests.values { request.cancel() }
+    }
+
+    func cancelPendingLoads() {
+        for request in requests.values { request.cancel() }
+        requests.removeAll()
+    }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url, url.host == "local",
@@ -14,23 +29,46 @@ final class ImageSchemeHandler: NSObject, WKURLSchemeHandler {
             urlSchemeTask.didFailWithError(URLError(.noPermissionsToReadFile))
             return
         }
-        do {
-            guard try image.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
-                throw URLError(.cannotOpenFile)
+        let identifier = ObjectIdentifier(urlSchemeTask)
+        requests.removeValue(forKey: identifier)?.cancel()
+        requests[identifier] = Task { [weak self] in
+            do {
+                // A provider may need to download the image. Keep that work off
+                // MainActor, and never finish a request WebKit has stopped.
+                let data = try await LocalImageData.read(image)
+                try Task.checkCancellation()
+                guard let self else { return }
+                requests[identifier] = nil
+                urlSchemeTask.didReceive(URLResponse(url: url, mimeType: LocalImage.mimeType(for: image),
+                                                    expectedContentLength: data.count, textEncodingName: nil))
+                urlSchemeTask.didReceive(data)
+                urlSchemeTask.didFinish()
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                requests[identifier] = nil
+                loadFailed?(String(localized: "Couldn’t load “\(image.lastPathComponent)”: \(error.localizedDescription)"))
+                urlSchemeTask.didFailWithError(error)
             }
-            let file = try FileHandle(forReadingFrom: image)
-            defer { try? file.close() }
-            let data = try file.read(upToCount: MarkdownSource.maximumBytes + 1) ?? Data()
-            guard data.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
-            urlSchemeTask.didReceive(URLResponse(url: url, mimeType: LocalImage.mimeType(for: image),
-                                                expectedContentLength: data.count, textEncodingName: nil))
-            urlSchemeTask.didReceive(data)
-            urlSchemeTask.didFinish()
-        } catch {
-            loadFailed?(String(localized: "Couldn’t load “\(image.lastPathComponent)”: \(error.localizedDescription)"))
-            urlSchemeTask.didFailWithError(error)
         }
     }
 
-    func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
+    func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
+        requests.removeValue(forKey: ObjectIdentifier(urlSchemeTask))?.cancel()
+    }
+}
+
+/// Namespace custom-scheme image requests to the currently authorized resource
+/// tree. A new file or explicit folder reload cannot reuse another file's cache.
+enum ImageResourceNamespace {
+    static func authorizes(_ url: URL, token: String) -> Bool {
+        guard url.scheme == "margined-resource", url.host == "local",
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        let generations = parts.queryItems?.filter { $0.name == "generation" } ?? []
+        return generations.count == 1 && generations[0].value == token
+    }
+
+    static func html(_ html: String, token: String) -> String {
+        html.replacingOccurrences(of: #"(<img\b[^>]*\ssrc=")(margined-resource://local/[^"]*)(")"#,
+            with: "$1$2?generation=\(token)$3", options: .regularExpression)
+    }
 }

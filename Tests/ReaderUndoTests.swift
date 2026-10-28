@@ -41,9 +41,43 @@ final class ReaderUndoTests: XCTestCase {
         XCTAssertEqual(try MarkdownSource.read(file), "- [x] Task\n")
     }
 
+    func testDocumentUndoRedoUsesTheLastDiscussionWriteWithoutUndoingCheckmarks() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let source = "# Plan\n\n- [ ] Task\n\nPassage.\n"
+        try Data(source.utf8).write(to: file)
+        let reader = ReaderState(); reader.fileURL = file; reader.source = source; reader.render()
+        defer { reader.discussions.discardDrafts(); reader.stop(); try? FileManager.default.removeItem(at: file) }
+        try await settle(reader)
+        reader.checklistMode = true; reader.setTaskChecked(0, checked: true); try await settle(reader)
+        let checked = try Data(contentsOf: file)
+        reader.discussions.displayName = "Reviewer"
+        let projection = try XCTUnwrap(reader.rendered?.discussionText)
+        let selection = try XCTUnwrap(projection.selection((projection.text as NSString).range(of: "Passage."), renderID: "undo-route"))
+        let key = try reader.discussions.beginDraft(selection, in: projection)
+        reader.discussions.setDraft("A saved discussion.", for: key)
+        reader.postDiscussion(); try await settle(reader)
+        let posted = try Data(contentsOf: file)
+        XCTAssertNotEqual(posted, checked)
+
+        let emptyEditor = NSTextView()
+        emptyEditor.isEditable = true
+        let editing = ReaderUndo(responder: emptyEditor, reader: reader)
+        XCTAssertFalse(editing.canUndo, "An active text editor never falls back to document history")
+        editing.undo(); try await settle(reader)
+        XCTAssertEqual(try Data(contentsOf: file), posted)
+
+        let actions = ReaderUndo(responder: nil, reader: reader)
+        XCTAssertTrue(actions.canUndo)
+        actions.undo(); try await settle(reader)
+        XCTAssertEqual(try Data(contentsOf: file), checked)
+        XCTAssertTrue(actions.canRedo)
+        actions.redo(); try await settle(reader)
+        XCTAssertEqual(try Data(contentsOf: file), posted)
+    }
+
     private func settle(_ reader: ReaderState) async throws {
         for _ in 0..<200 {
-            if !reader.isRendering && !reader.checklistSaving { return }
+            if !reader.isRendering && !reader.fileSaving { return }
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTFail("Checklist did not settle")

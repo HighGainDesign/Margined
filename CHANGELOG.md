@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0-beta.1 — 2026-10-27
+
+- Add experimental passage discussions, replies and conversation Read Aloud.
+- Improve Mac printing, Find cleanup and discussion markers.
+- Mac beta only; discussion layout and scrolling need further polish.
+
 ## 1.7.1 — 2026-10-27
 
 - Renamed MDView to Margined.

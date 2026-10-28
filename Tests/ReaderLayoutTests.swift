@@ -6,6 +6,120 @@ import XCTest
 
 @MainActor
 final class ReaderLayoutTests: XCTestCase {
+    func testReaderPagesKeepCookiesAndRemoteImageConsentSeparate() async throws {
+        let first = try await makeIsolatedPage(heading: "First", remoteImages: true)
+        defer { first.window.close(); first.reader.stop() }
+        let firstWeb = try await waitForIsolatedPage(in: first.controller, heading: "First")
+        let firstStore = firstWeb.configuration.websiteDataStore
+        let cookie = try XCTUnwrap(HTTPCookie(properties: [
+            .domain: "isolation.invalid", .path: "/", .name: "margined-owner", .value: "first-only"
+        ]))
+        await firstStore.httpCookieStore.setCookie(cookie)
+        let firstCookies = await firstStore.httpCookieStore.allCookies()
+        XCTAssertTrue(firstCookies.contains { $0.name == "margined-owner" && $0.value == "first-only" },
+                      "The first store must actually contain the cookie before checking isolation")
+
+        let second = try await makeIsolatedPage(heading: "Second")
+        defer { second.window.close(); second.reader.stop() }
+        let secondWeb = try await waitForIsolatedPage(in: second.controller, heading: "Second")
+        let secondStore = secondWeb.configuration.websiteDataStore
+        XCTAssertFalse(firstStore.isPersistent)
+        XCTAssertFalse(secondStore.isPersistent)
+        XCTAssertFalse(firstStore === secondStore)
+        XCTAssertFalse(firstWeb === secondWeb)
+        let secondCookies = await secondStore.httpCookieStore.allCookies()
+        XCTAssertFalse(secondCookies.contains { $0.name == "margined-owner" })
+        let policyScript = "return document.querySelector('meta[http-equiv=\"Content-Security-Policy\"]')?.content ?? '';"
+        let firstPolicy = try await firstWeb.callAsyncJavaScript(policyScript, arguments: [:], in: nil,
+            contentWorld: .world(name: "MarginedPageIsolationTest")) as? String
+        let secondPolicy = try await secondWeb.callAsyncJavaScript(policyScript, arguments: [:], in: nil,
+            contentWorld: .world(name: "MarginedPageIsolationTest")) as? String
+        XCTAssertTrue(try XCTUnwrap(firstPolicy).contains("https:"))
+        XCTAssertFalse(try XCTUnwrap(secondPolicy).contains("https:"))
+        XCTAssertFalse(second.reader.loadRemoteImages)
+    }
+
+    func testReaderPagesResolveTheSameImageNameInTheirOwnFolders() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let firstFolder = root.appendingPathComponent("first", isDirectory: true)
+        let secondFolder = root.appendingPathComponent("second", isDirectory: true)
+        for folder in [firstFolder, secondFolder] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        try pageFixturePNG(width: 31).write(to: firstFolder.appendingPathComponent("figure.png"))
+        try pageFixturePNG(width: 73).write(to: secondFolder.appendingPathComponent("figure.png"))
+        let firstFile = firstFolder.appendingPathComponent("notes.md")
+        let secondFile = secondFolder.appendingPathComponent("notes.md")
+        let first = try await makeIsolatedPage(heading: "First image", fileURL: firstFile,
+                                               image: "figure.png")
+        defer { first.window.close(); first.reader.stop() }
+        _ = try await waitForIsolatedPage(in: first.controller, heading: "First image", imageWidth: 31)
+        let second = try await makeIsolatedPage(heading: "Second image", fileURL: secondFile,
+                                                image: "figure.png")
+        defer { second.window.close(); second.reader.stop() }
+        _ = try await waitForIsolatedPage(in: second.controller, heading: "Second image", imageWidth: 73)
+        XCTAssertNil(first.reader.localImageError)
+        XCTAssertNil(second.reader.localImageError)
+    }
+
+    func testPreparationNavigationFailureDoesNotBecomeADocumentError() throws {
+        let reader = ReaderState()
+        let coordinator = MarkdownWebView.Coordinator(reader: reader)
+        let web = WKWebView(frame: .zero)
+        defer { web.stopLoading(); reader.stop() }
+        coordinator.webView = web
+        // A real navigation started before this reader owns a document load.
+        let preparation = try XCTUnwrap(web.loadHTMLString("<!doctype html><title>Preparing</title>", baseURL: nil))
+        coordinator.webView(web, didFailProvisionalNavigation: preparation,
+                            withError: URLError(.cannotFindHost))
+        XCTAssertNil(reader.errorMessage, "An unused page's navigation is not the current document's failure")
+    }
+
+    private func makeIsolatedPage(heading: String, fileURL: URL? = nil, image: String? = nil,
+                                  remoteImages: Bool = false) async throws
+        -> (reader: ReaderState, controller: NSHostingController<MarkdownWebView>, window: NSWindow) {
+        let source = "# \(heading)\n\n" + (image.map { "![Fixture](\($0))\n" } ?? "Private document.\n")
+        if let fileURL { try source.write(to: fileURL, atomically: true, encoding: .utf8) }
+        let reader = ReaderState(); reader.fileURL = fileURL; reader.source = source
+        reader.loadRemoteImages = remoteImages
+        let output = try await MarkdownRenderer.shared.render(source, wide: true, loadRemoteImages: remoteImages)
+        reader.rendered = output
+        let controller = NSHostingController(rootView: MarkdownWebView(reader: reader, html: output.html))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 760),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentViewController = controller
+        window.makeKeyAndOrderFront(nil)
+        return (reader, controller, window)
+    }
+
+    private func waitForIsolatedPage(in controller: NSHostingController<MarkdownWebView>,
+                                     heading: String, imageWidth: Int = 0) async throws -> WKWebView {
+        for _ in 0..<200 {
+            if let web = findWebView(controller.view), web.url != nil, !web.isLoading {
+                let ready = try? await web.callAsyncJavaScript("""
+                const image = document.querySelector('main#document img');
+                return document.readyState === 'complete'
+                    && document.querySelector('main#document h1')?.textContent === heading
+                    && (width === 0 || (image?.complete && image.naturalWidth === width));
+                """, arguments: ["heading": heading, "width": imageWidth], in: nil,
+                contentWorld: .world(name: "MarginedPageIsolationTest")) as? Bool
+                if ready == true { return web }
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("The actual reader page and its own image did not become ready")
+        throw CocoaError(.coderInvalidValue)
+    }
+
+    private func pageFixturePNG(width: Int) throws -> Data {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: 3,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        for x in 0..<width { for y in 0..<3 { bitmap.setColor(.blue, atX: x, y: y) } }
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    }
+
     func testArabicDocumentAtLargeZoomUsesRTLTextAndConfinesWideTables() async throws {
         let source = "# خطة العمل\n\nهذه وثيقة للمراجعة والقراءة.\n\n| المهمة | النتيجة |\n| --- | --- |\n| مهمة طويلة للمراجعة | نتيجة مفصلة للعمل المطلوب |\n\n```swift\nlet result = \"Example code\"\n```\n"
         let output = try await MarkdownRenderer.shared.render(source,wide:true,documentLanguage:"ar")

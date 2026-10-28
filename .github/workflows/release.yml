@@ -20,6 +20,7 @@ jobs:
     environment: release
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Check out the release tag
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -34,11 +35,10 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a vX.Y.Z release tag.' >&2; exit 1; }
+          python3 -m unittest discover -s script/tests -p test_release_version.py
           version=$(ruby -ryaml -e 'print YAML.safe_load(File.read("project.yml"))["settings"]["base"]["MARKETING_VERSION"]')
-          [[ "$RELEASE_TAG" == "v$version" ]] || { echo 'Tag must match MARKETING_VERSION in project.yml.' >&2; exit 1; }
+          python3 script/release_version.py "$RELEASE_TAG" "$version" >> "$GITHUB_OUTPUT"
           git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH" || { echo 'Release only commits merged into the default branch.' >&2; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Prepare build tools
         run: |
@@ -56,7 +56,7 @@ jobs:
           xcodegen generate
           xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
-            CODE_SIGN_IDENTITY=- test > "$RUNNER_TEMP/tests.log" 2>&1 || {
+            CODE_SIGN_IDENTITY=- MARGINED_CI_HEADLESS=1 test > "$RUNNER_TEMP/tests.log" 2>&1 || {
               grep -n -E 'error:|failed|Failing tests:' "$RUNNER_TEMP/tests.log" || true
               tail -80 "$RUNNER_TEMP/tests.log"
               exit 1
@@ -64,7 +64,7 @@ jobs:
 
       - name: Prepare brief release notes
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_VERSION: ${{ steps.version.outputs.notes_version }}
         run: |
           mkdir -p dist
           python3 script/release-notes.py "$RELEASE_VERSION" > dist/release-notes.md
@@ -165,6 +165,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          IS_PRERELEASE: ${{ needs.build.outputs.prerelease }}
         run: |
           set -euo pipefail
           (cd dist; sha256sum -c "Margined-$RELEASE_VERSION.dmg.sha256")
@@ -173,11 +174,11 @@ jobs:
             exit 1
           fi
           release_flags=()
-          if [[ "$RELEASE_VERSION" == 0.* ]]; then
-            release_flags+=(--prerelease)
+          if [[ "$IS_PRERELEASE" == true ]]; then
+            release_flags+=(--prerelease --latest=false)
           else
             release_flags+=(--latest)
           fi
           gh release create "$RELEASE_TAG" \
             "dist/Margined-$RELEASE_VERSION.dmg" "dist/Margined-$RELEASE_VERSION.dmg.sha256" \
-            --verify-tag --title "Margined $RELEASE_VERSION" --notes-file dist/release-notes.md "${release_flags[@]}"
+            --verify-tag --title "Margined ${RELEASE_TAG#v}" --notes-file dist/release-notes.md "${release_flags[@]}"

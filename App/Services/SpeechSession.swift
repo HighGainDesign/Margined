@@ -5,10 +5,12 @@ import Observation
 final class SpeechCoordinator {
     static let shared = SpeechCoordinator()
     private weak var owner: SpeechSession?
+    private(set) var intentGeneration = UUID()
     func claim(_ session: SpeechSession) {
         if let owner, owner !== session { owner.stop() }
-        owner = session
+        owner = session; intentGeneration = UUID()
     }
+    func noteIntent(_ session: SpeechSession) { if owner === session { intentGeneration = UUID() } }
     func release(_ session: SpeechSession) { if owner === session { owner = nil } }
 }
 
@@ -40,6 +42,8 @@ final class SpeechSession {
         driver.eventHandler = { [weak self] event in self?.receive(event) }
     }
 
+    var playbackIntentGeneration: UUID { coordinator.intentGeneration }
+
     var currentSegment: SpeechSegment? {
         guard let document, document.segments.indices.contains(currentIndex) else { return nil }
         return document.segments[currentIndex]
@@ -64,7 +68,13 @@ final class SpeechSession {
         }
         resolveVoice()
         guard resolvedVoice != nil else {
-            status = .failed; notice = String(localized: "No system voice is available. Add a voice in System Settings."); onStop?(); return
+            status = .failed
+            #if os(iOS)
+            notice = String(localized: "No system voice is available. Add a voice in Settings.")
+            #else
+            notice = String(localized: "No system voice is available. Add a voice in System Settings.")
+            #endif
+            onStop?(); return
         }
         coordinator.claim(self)
         enqueue()
@@ -72,6 +82,7 @@ final class SpeechSession {
 
     func pause() {
         guard status == .playing else { return }
+        coordinator.noteIntent(self)
         if !driver.pause() {
             // The synthesizer may still be starting. Cancel its queue so a
             // fast Pause cannot turn into speech later without another Play.
@@ -87,6 +98,7 @@ final class SpeechSession {
         else { needsRestart = true; enqueue() }
     }
     func stop() {
+        coordinator.noteIntent(self)
         invalidate(); status = .idle; coordinator.release(self); onProgress?(); onStop?()
     }
     func setRate(_ value: Double) {
@@ -114,6 +126,7 @@ final class SpeechSession {
     func seek(_ index: Int, offset: Int = 0) {
         guard isActive, let document, document.segments.indices.contains(index) else { return }
         let wasPaused = status == .paused
+        coordinator.noteIntent(self)
         invalidate(); currentIndex = index; self.offset = max(0, offset)
         if wasPaused { status = .paused; needsRestart = true }
         else { coordinator.claim(self); enqueue() }
@@ -126,7 +139,12 @@ final class SpeechSession {
         guard isActive else { return }
         if resolvedVoice == nil {
             invalidate(); status = .failed; coordinator.release(self)
-            notice = String(localized: "No system voice is available. Add a voice in System Settings."); onStop?()
+            #if os(iOS)
+            notice = String(localized: "No system voice is available. Add a voice in Settings.")
+            #else
+            notice = String(localized: "No system voice is available. Add a voice in System Settings.")
+            #endif
+            onStop?()
         } else if previous != resolvedVoice?.id { reconfigure() }
     }
 

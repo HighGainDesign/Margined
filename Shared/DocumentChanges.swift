@@ -1,7 +1,7 @@
 import Foundation
 import SwiftSoup
 
-struct DocumentChange: Identifiable, Sendable {
+struct DocumentChange: Identifiable, Equatable, Sendable {
     enum Kind: String, Sendable {
         case added = "Added", edited = "Edited", removed = "Removed"
         var localizedTitle: String {
@@ -102,11 +102,11 @@ enum DocumentChanges {
     }
 
     static func annotate(current: Document, baseline: [ReadingUnit]) throws -> ChangeSummary {
-        let old = try baseline.map { try $0.element() }
         let new = try units(in: current)
         let oldKeys = baseline
         let newKeys = try new.map { try ReadingUnit($0) }
         guard oldKeys != newKeys else { return ChangeSummary() }
+        let old = try baseline.map { try $0.element() }
         // Bound worst-case sequence work for huge generated documents. The
         // fallback is explicit in the review panel and preserves every block.
         let coarse = max(old.count, new.count) > 2_500

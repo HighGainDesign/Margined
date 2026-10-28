@@ -5,6 +5,11 @@ import WebKit
 struct MarkdownWebView: NSViewRepresentable {
     let reader: ReaderState
     let html: String
+    var discussionSelectionRequest = 0
+    var discussionsVisible = false
+    var discussionFilter = DiscussionSession.Filter.open
+    var selectedDiscussion: DiscussionSession.DraftKey?
+    var discussionPassageRequest = 0
     var speechRequestID: UUID? = nil
     var speechElementID: String? = nil
     var speechFollowReading = true
@@ -17,16 +22,21 @@ struct MarkdownWebView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(reader: reader) }
 
     func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: "margined-resource")
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-        configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.taskWorld, name: "taskToggle")
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        #if MARGINED_BENCHMARK
+        ViewingBenchmarkSession.current?.recordOpening("webview_started_ns", source: reader.source)
+        #endif
+        let page = ReaderPagePreparation.shared.take()
+        let webView = page.webView
+        context.coordinator.bindImages(page.images)
+        webView.configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.taskWorld, name: "taskToggle")
+        webView.configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
         webView.navigationDelegate = context.coordinator
         webView.setAccessibilityLabel(String(localized: "Markdown document"))
         webView.allowsLinkPreview = false
         context.coordinator.webView = webView
+        #if MARGINED_BENCHMARK
+        ViewingBenchmarkSession.current?.recordOpening("webview_created_ns", source: reader.source)
+        #endif
         return webView
     }
 
@@ -54,19 +64,27 @@ struct MarkdownWebView: NSViewRepresentable {
 
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "taskToggle", contentWorld: Coordinator.taskWorld)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "discussion", contentWorld: Coordinator.discussionWorld)
         webView.navigationDelegate = nil
     }
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        private static let findWorld = WKContentWorld.world(name: "MarginedFind")
         static let taskWorld = WKContentWorld.world(name: "MarginedChecklist")
+        static let discussionWorld = WKContentWorld.world(name: "MarginedDiscussions")
+        private var discussionConfiguration: String?
+        private var discussionSelectionGeneration = 0
+        private var discussionDecorationKey: String?
+        private var discussionPassageGeneration = 0
         let reader: ReaderState
-        let images = ImageSchemeHandler()
+        private(set) var images = ImageSchemeHandler()
         weak var webView: WKWebView?
         var html: String?
         var imageReloadGeneration = -1
         var navigationGeneration = -1
         var searchGeneration = -1
+        private var lastFindQuery: String?
         private var speechRequestID: UUID?
         private var speechHighlightKey: String?
         private var readingPosition: [String: Any]?
@@ -91,6 +109,12 @@ struct MarkdownWebView: NSViewRepresentable {
 
         init(reader: ReaderState) {
             self.reader = reader
+            super.init()
+            bindImages(images)
+        }
+
+        func bindImages(_ handler: ImageSchemeHandler) {
+            images = handler
             images.loadFailed = { [weak reader] in reader?.localImageError = $0 }
         }
 
@@ -136,12 +160,18 @@ struct MarkdownWebView: NSViewRepresentable {
                 }
                 guard generation == loadGeneration else { return }
                 activeLoadGeneration = generation
+                #if MARGINED_BENCHMARK
+                ViewingBenchmarkSession.current?.recordOpening("navigation_requested_ns", source: reader.source)
+                #endif
                 activeNavigation = webView.loadHTMLString(html, baseURL: reader.fileURL?.deletingLastPathComponent())
             }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard navigation === activeNavigation, activeLoadGeneration == loadGeneration else { return }
+            #if MARGINED_BENCHMARK
+            ViewingBenchmarkSession.current?.recordOpening("navigation_finished_ns", source: reader.source)
+            #endif
             contentReady = true
             let position = readingPosition
             let generation = loadGeneration, focusIntent = readingPositionFocusIntent
@@ -160,6 +190,7 @@ struct MarkdownWebView: NSViewRepresentable {
             configureTasks()
             synchronizeSpeech()
             if !reader.searchText.isEmpty { find() }
+            Task { @MainActor in ReaderPagePreparation.shared.prepareIfNeeded() }
         }
 
         func synchronizeSpeech() {
@@ -175,7 +206,7 @@ struct MarkdownWebView: NSViewRepresentable {
                     speech.completeStart(request, elementID: result?["elementID"] as? String, offset: result?["offset"] as? Int ?? 0)
                 }
             }
-            let element = speech.session.isActive ? speech.session.currentSegment?.elementID : nil
+            let element = speech.conversationID == nil && speech.session.isActive ? speech.session.currentSegment?.elementID : nil
             let follow = speech.session.followReading
             let key = "\(element ?? "none"):\(follow)"
             guard speechHighlightKey != key else { return }
@@ -191,6 +222,7 @@ struct MarkdownWebView: NSViewRepresentable {
 
         func configureTasks() {
             guard contentReady, let webView else { return }
+            defer { configureDiscussions() }
             let enabled = !reader.playbackHolding && reader.fileURL != nil && !reader.isStreamingPreview && !reader.hasPendingFileUpdate && !reader.checklistSaving && !reader.isRendering && !reader.showChecklistConfirmation && html == reader.rendered?.html
             let canSave = reader.checklistMode
             let token = String(activeLoadGeneration)
@@ -272,7 +304,87 @@ struct MarkdownWebView: NSViewRepresentable {
             }
         }
 
+        private func configureDiscussions() {
+            guard contentReady, !reader.isRendering, html == reader.rendered?.html,
+                  let projection = reader.rendered?.discussionText, let webView else { return }
+            let token = String(activeLoadGeneration), ids = reader.rendered?.discussions?.threads.map(\.id) ?? []
+            let key = token + ":" + projection.sourceID
+            let selected: String
+            if case let .thread(id) = reader.discussions.selection { selected = id } else { selected = "" }
+            let visible = reader.showDiscussions
+            let decorationKey = key + ":" + String(visible) + ":" + selected + ":" + reader.discussions.filter.rawValue
+            let configure = discussionConfiguration != key
+            let decorate = discussionDecorationKey != decorationKey
+            let wantsSelection = discussionSelectionGeneration != reader.discussionSelectionGeneration
+            let wantsPassage = discussionPassageGeneration != reader.discussionPassageGeneration
+            guard configure || decorate || wantsSelection || wantsPassage else { return }
+            discussionConfiguration = key; discussionDecorationKey = decorationKey
+            let selectionGeneration = reader.discussionSelectionGeneration
+            let passageGeneration = reader.discussionPassageGeneration, passageID = reader.discussionPassageID
+            discussionSelectionGeneration = selectionGeneration; discussionPassageGeneration = passageGeneration
+            let anchors: [[String: Any]] = reader.filteredDiscussionThreads.compactMap { thread in
+                let id = thread.id
+                guard let anchor = projection.anchorResults[id], anchor.status == .attached, let range = anchor.range,
+                      let selection = projection.selection(range, renderID: token) else { return nil }
+                return ["id": id, "location": selection.range.location, "length": selection.range.length,
+                    "startUnit": selection.domRange.start.unit, "startOffset": selection.domRange.start.offset,
+                    "endUnit": selection.domRange.end.unit, "endOffset": selection.domRange.end.offset]
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                let context = DiscussionBridge.Context(token: token, sourceID: projection.sourceID, enabled: true, allowedThreadIDs: Set(ids))
+                var arguments: [String: Any] = ["operation": "configure", "token": token,
+                    "sourceID": projection.sourceID, "allowedThreadIDs": ids]
+                if configure {
+                    _ = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments,
+                        in: nil, contentWorld: Self.discussionWorld)
+                }
+                guard contentReady, String(activeLoadGeneration) == token, html == reader.rendered?.html,
+                      reader.rendered?.discussionText?.sourceID == projection.sourceID else { return }
+                if decorate, discussionDecorationKey == decorationKey {
+                    arguments.merge(["operation": "decorate", "anchors": anchors, "expectedText": projection.text,
+                        "visible": visible, "selectedID": selected, "markerLabel": String(localized: "Open discussion")], uniquingKeysWith: { _, value in value })
+                    let value = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments,
+                        in: nil, contentWorld: Self.discussionWorld)
+                    if discussionDecorationKey == decorationKey, let value,
+                       let snapshot = DiscussionMarginSnapshot.read(value, context: context) { reader.acceptDiscussionMargin(snapshot) }
+                }
+                if wantsSelection, reader.discussionSelectionGeneration == selectionGeneration {
+                    arguments["operation"] = "selection"
+                    let value = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments,
+                        in: nil, contentWorld: Self.discussionWorld)
+                    guard contentReady, String(activeLoadGeneration) == token, html == reader.rendered?.html,
+                          reader.discussionSelectionGeneration == selectionGeneration else { return }
+                    if let value, case let .selection(selection) = DiscussionBridge.request(value, isMainFrame: true,
+                        context: context, projection: projection) { reader.acceptNewDiscussionSelection(selection) }
+                    else { reader.acceptNewDiscussionSelection(nil) }
+                }
+                if wantsPassage, let passageID, reader.discussionPassageGeneration == passageGeneration,
+                   String(activeLoadGeneration) == token, reader.rendered?.discussionText?.sourceID == projection.sourceID {
+                    webView.window?.makeFirstResponder(webView)
+                    arguments.merge(["operation": "goTo", "threadID": passageID, "focus": true], uniquingKeysWith: { _, value in value })
+                    let moved = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script, arguments: arguments,
+                        in: nil, contentWorld: Self.discussionWorld) as? Bool
+                    if moved == true, let quote = reader.rendered?.discussions?.threads.first(where: { $0.id == passageID })?.target.exact {
+                        reader.announcements.schedule(quote, topic: .navigation)
+                    }
+                }
+            }
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "discussion" {
+                guard contentReady, !reader.isRendering, html == reader.rendered?.html,
+                      let projection = reader.rendered?.discussionText else { return }
+                let context = DiscussionBridge.Context(token: String(activeLoadGeneration), sourceID: projection.sourceID,
+                    enabled: true, allowedThreadIDs: Set(reader.rendered?.discussions?.threads.map(\.id) ?? []))
+                guard message.frameInfo.isMainFrame else { return }
+                if let snapshot = DiscussionMarginSnapshot.read(message.body, context: context) { reader.acceptDiscussionMargin(snapshot) }
+                else if case let .openThread(id) = DiscussionBridge.request(message.body, isMainFrame: true,
+                    context: context, projection: projection) { reader.openDiscussion(id) }
+                return
+            }
+
             guard contentReady, message.frameInfo.isMainFrame, message.name == "taskToggle",
                   let body = message.body as? [String: Any],
                   body["token"] as? String == String(activeLoadGeneration),
@@ -314,26 +426,66 @@ struct MarkdownWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+            guard navigation === activeNavigation, activeLoadGeneration == loadGeneration else { return }
             if (error as NSError).code != NSURLErrorCancelled { reader.errorMessage = error.localizedDescription }
         }
 
         func find() {
             guard let webView else { return }
-            // An empty field has no search request. In particular, do not
-            // queue unnecessary native Find work during initial loading.
-            guard !reader.searchText.isEmpty else { reader.searchFound = true; return }
+            let query = reader.searchText
+            if query.isEmpty { reader.searchFound = true }
             guard contentReady else { return } // didFinish searches the latest query.
+            guard !query.isEmpty || lastFindQuery != nil else { return }
             let configuration = WKFindConfiguration()
             configuration.backwards = reader.searchBackwards
             configuration.caseSensitive = false
             configuration.wraps = true
-            let query = reader.searchText
             let generation = reader.searchGeneration
+            let documentGeneration = loadGeneration
             Task { [weak self] in
+                guard let self, contentReady, generation == reader.searchGeneration,
+                      documentGeneration == loadGeneration else { return }
+                if query.isEmpty {
+                    await clearFind(in: webView, previousQuery: lastFindQuery ?? "",
+                                    generation: generation, documentGeneration: documentGeneration)
+                    return
+                }
+                lastFindQuery = query
                 let result = try? await webView.find(query, configuration: configuration)
-                guard let self, generation == reader.searchGeneration else { return }
+                guard generation == reader.searchGeneration, documentGeneration == loadGeneration else { return }
                 reader.searchFound = result?.matchFound == true || query.isEmpty
             }
+        }
+
+        private func clearFind(in webView: WKWebView, previousQuery: String,
+                               generation: Int, documentGeneration: Int) async {
+            lastFindQuery = nil
+            let token = UUID().uuidString
+            // A failed search clears WebKit's Find UI; an empty search is a no-op.
+            // Parsed HTML replaces NUL, so this query cannot match document text.
+            // Retain a different selection the user may be preparing to discuss.
+            _ = try? await webView.callAsyncJavaScript("""
+            const selection=getSelection();
+            const different=selection && !selection.isCollapsed && selection.rangeCount===1 &&
+                selection.toString().normalize('NFC').toLowerCase()!==query.normalize('NFC').toLowerCase();
+            window.__marginedFindRestore={token,range:different ? selection.getRangeAt(0).cloneRange() : null};
+            return true;
+            """, arguments: ["query": previousQuery, "token": token], in: nil, contentWorld: Self.findWorld)
+            if generation == reader.searchGeneration, documentGeneration == loadGeneration, contentReady {
+                _ = try? await webView.find("\u{0}", configuration: WKFindConfiguration())
+            }
+            let current = generation == reader.searchGeneration && documentGeneration == loadGeneration && contentReady
+            _ = try? await webView.callAsyncJavaScript("""
+            const saved=window.__marginedFindRestore;
+            if(!saved || saved.token!==token) return false;
+            delete window.__marginedFindRestore;
+            const selection=getSelection(),range=saved.range;
+            if(restore && range?.startContainer.isConnected && range.endContainer.isConnected && selection?.isCollapsed) {
+                selection.removeAllRanges();selection.addRange(range);
+            }
+            return true;
+            """, arguments: ["token": token, "restore": current], in: nil, contentWorld: Self.findWorld)
+            if current { reader.searchFound = true }
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {

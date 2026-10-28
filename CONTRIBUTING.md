@@ -1,108 +1,131 @@
 # Contributing to Margined
 
-Margined is a small Markdown viewer, read-only by default. Explicit checklist saves
-are the exception and change only task markers. Changes should make reading faster
-or clearer while keeping the app simple. Version 1.x supports macOS; version 2.0
-is planned for macOS and iOS. See [ROADMAP.md](ROADMAP.md).
+Margined is a native Markdown reader with focused checklist and discussion edits.
+Keep files portable, reading fast, and writes safe. The 2.0 branch supports Mac,
+iPhone and iPad and is in internal beta; see [ROADMAP.md](ROADMAP.md).
 
 ## Issues and proposals
 
-For a bug, include your macOS version, Margined version, expected behavior, actual
-behavior, and a small Markdown example. Explain whether the problem occurs in
-the app, Finder Quick Look, or the Drafts action. Replace private content with a
-minimal example before sharing it.
+Include the OS/device, app version/build, expected and actual behavior, and a
+minimal Markdown sample. Identify the surface: app, Quick Look, Files/share or
+Drafts. Replace private content before sharing it. Discuss substantial features
+before opening a large pull request.
 
-Discuss substantial features before opening a large pull request. Specialized
-Markdown extensions, arbitrary text editing, and export workflows are outside the initial
-release scope.
+## Build and test
 
-## Local development
+Use Xcode 26+, its command-line tools and XcodeGen 2.44+. Deployment targets are
+macOS 14 and iOS 17. `project.yml` is authoritative; the generated Xcode project
+is ignored. Dependencies are pinned. Start the Mac development app with:
 
-Use Xcode 26 or later, its command-line tools, and XcodeGen 2.44 or later. The app
-supports macOS 14 and later. See the README for build and test commands.
+```sh
+./script/build_and_run.sh
+```
 
-`project.yml` is the authoritative project definition; the generated
-`Margined.xcodeproj` is ignored. Dependency versions are pinned there. Tests run
-with isolated preferences so an ad-hoc test host does not request access to the
-signed app's shared settings container.
+The script supports `--verify`, `--debug`, `--logs` and `--telemetry`. Products go
+to `/tmp/Margined-build-<uid>` to avoid Dropbox metadata signing failures; override
+with `MARGINED_BUILD_DIR`. It leaves the installed app untouched. It uses an
+existing Apple signing identity when available, otherwise ad-hoc signing;
+`MARGINED_SIGNING_IDENTITY` overrides the choice. Finder Quick Look needs separate
+verification with a properly signed installed bundle.
 
-For signed builds with your own Apple team, replace `DEVELOPMENT_TEAM` in
-`project.yml` and the team prefix in both application-group entitlement entries
-and `Shared/ReaderPreferences.swift`. Keep the app and Quick Look extension in
-the same group and sign both with the same team. App Group access is verified
-separately in a signed Finder preview. Never grant broad access to other apps'
-data to make an ad-hoc build work.
+Generate and test the Mac target:
 
-The main code boundaries are:
+```sh
+xcodegen generate
+xcodebuild -project Margined.xcodeproj -scheme Margined \
+  -destination 'platform=macOS' -derivedDataPath /tmp/Margined-tests \
+  CODE_SIGN_IDENTITY=- test
+```
 
-- `App/`: document lifecycle, SwiftUI reader, settings, and file refresh.
-- `QuickLook/`: Finder's data-based preview provider.
-- `Shared/`: parser, HTML adaptation, styles, and shared preferences. Keep this
-  layer free of AppKit so it can serve a future iOS reader.
-- `Tests/`: renderer, change review, preferences, WebKit, and window checks.
-- `Integrations/Drafts/`: action resource and URL integration.
-- `script/`: local build and release packaging.
+For iPhone/iPad, select an available Simulator and run the `MarginediOS` scheme:
 
-## Rendering dependencies
+```sh
+xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
+  -destination 'platform=iOS Simulator,id=SIMULATOR_UDID' \
+  -derivedDataPath /tmp/Margined-ios-tests CODE_SIGNING_ALLOWED=NO test
+```
 
-`Vendor/Apex` contains unchanged build sources for Apex1.1.34 and its pinned
-cmark-gfm/libyaml submodules. Verify them with `python3 script/verify-vendor.py`.
-Keep the revision/hash inventory and original licenses when updating the snapshot;
-do not edit generated source hashes to hide a parser change.
+Replace `SIMULATOR_UDID` with your device’s identifier. Real-device builds require
+your own team and profiles. Simulator checks do not replace real File Provider,
+background audio or share-sheet acceptance. [Viewing benchmarks](Benchmarks/README.md)
+use a separate optimized build and strict visible-frame checks.
 
-The app bundles the committed KaTeX/Mermaid resources. Users and ordinary Xcode
-builds do not need Node. To regenerate them, run `npm ci --ignore-scripts` and
-`npm run build` inside `Rendering/`, using its lockfile. Keep the KaTeX override,
-Safari17 target and generated license notices; rerun rendering/security tests.
+## Code boundaries
 
-## Localization
+- `App/`: Mac documents, reader UI, settings, speech and file refresh.
+- `iOS/`: native Files lifecycle, reader/navigation, image grants and audio controls.
+- `QuickLook/`: shared preview-provider entry point; `iOSQuickLook/` supplies iOS metadata.
+- `Shared/`: rendering, discussions, safe file formats, styles and preferences; keep platform dependencies isolated.
+- `Tests/` and `iOSTests/`: platform, renderer, lifecycle and native integration checks.
+- `Integrations/Drafts/`: Mac action resource and URL integration.
+- `script/`: validation, local builds and packaging.
 
-Build with `SWIFT_EMIT_LOC_STRINGS=YES` (enabled in `project.yml`), then run
-`python3 script/sync-localizations.py /path/to/DerivedData` to sync the shared
-String Catalog. Rebuild to compile catalog changes. Run `python3 script/test-localizations.py /path/to/DerivedData`
-after `build-for-testing` to check each language in a fresh process. Keep count messages pluralized
-and localize native menus, errors and accessibility text as well as SwiftUI labels.
-Run `python3 script/validate-localizations.py` before rebuilding. English, Spanish,
-Simplified/Traditional Chinese, Japanese, French and German are included;
-native-speaker corrections are welcome. Keep product names and URL schemes unchanged.
-Document language is separate, detected on-device or selected per window.
+## Rendering and localization
 
-## Pull requests
+`Vendor/Apex` pins Apex 1.1.34 and cmark-gfm/libyaml sources. Build overlays and
+table fixes are documented in [provenance](Vendor/Apex/PROVENANCE.md). Verify with
+`python3 script/verify-vendor.py`; retain original licenses and document patches.
+Never change hashes merely to conceal a parser change.
 
-Keep each pull request focused. Explain the user-visible problem, the resulting
-behavior, and how you checked it. Add a regression test when a change affects
-parsing, permissions, preferences, or document lifecycle. For layout changes,
-include a screenshot made with a non-private sample document.
+Ordinary builds need no Node. To regenerate bundled KaTeX/Mermaid resources, run
+`npm ci --ignore-scripts` and `npm run build` in `Rendering/`. Preserve its lockfile,
+KaTeX override, Safari 17 target and license notices; rerun rendering/security checks.
 
-Run the relevant tests and check Finder Quick Look when shared rendering or
-extension behavior changes. Verify light/dark appearance, tables, links, and
-automatic refresh when they are affected. Preserve read-only defaults, the
-consent-gated task-marker exception, bounded image reads, and inert HTML/scripts.
-The directly distributed main app uses normal macOS filesystem permissions; the
-Quick Look extension retains its required sandbox.
+`SWIFT_EMIT_LOC_STRINGS=YES` is enabled. After building, sync the String Catalog
+with `python3 script/sync-localizations.py /path/to/DerivedData`, rebuild, and run
+`python3 script/test-localizations.py /path/to/DerivedData` after `build-for-testing`.
+Run `python3 script/validate-localizations.py` before rebuilding. Keep plural forms,
+accessibility text and native menus localized across all seven interface languages.
+Document language is separate from interface language; keep product names and URL
+schemes unchanged.
 
-Do not commit signing certificates, private keys, provisioning profiles, build
-products, personal settings, or local agent notes. After testing, close and
-remove temporary app bundles and eject old installers; macOS can discover those
-copies in Open With and Extensions.
+## Safety and review
 
-## Releases
+Keep pull requests focused: explain the problem, resulting behavior and checks.
+Add regression coverage for parsing, permissions, file writes and lifecycle changes.
+Use non-private samples for layout captures. Changes to shared rendering require
+checks in both apps, Quick Look and print where affected.
 
-Maintainers use `script/release.sh` to build universal binaries, sign the app and
-extension, notarize both the app and DMG, and staple their tickets. The GitHub
-release workflow runs on a matching `vX.Y.Z` tag from the default branch. Its
-release environment is restricted to approved version tags; Apple credentials
-are encrypted environment secrets. Every tagged release runs tests before
-loading credentials, validates signatures and notarization, and publishes the
-DMG with its checksum. Versions below 1.0 are marked as previews. Contributions
-do not need access to release credentials.
+Preserve first-click checklist consent, exact task-marker writes, discussion
+conflict checks, source identity, encodings/line endings and Undo ownership.
+Discussion format changes must preserve unknown fields and unsupported blocks;
+see [DISCUSSIONS.md](DISCUSSIONS.md). Ordinary previews must keep notes hidden.
+Do not enable document scripts or silently fetch remote images.
 
-Local packaging defaults to the Keychain profile selected by
-`MARGINED_NOTARY_PROFILE` (default: `Notarize`). Alternatively, supply an existing
-App Store Connect API key file through `MARGINED_NOTARY_API_KEY_PATH`, with
-`MARGINED_NOTARY_API_KEY_ID` and `MARGINED_NOTARY_ISSUER_ID`. Keep private key files
-outside the repository. This option uses the key directly without creating a
-new Keychain profile.
+The Mac DMG uses normal OS file access. Mac TestFlight uses the AppStore
+configurations and sandbox entitlements; iOS also requires folder grants for
+sibling images. Keep those variants distinct. Signing with another team requires
+matching bundle IDs, App Groups, entitlements, profiles and shared-preference
+identifiers. Ad-hoc tests use isolated preferences, not the signed app’s container.
+Never grant broad access to other apps’ data to bypass signing setup.
 
-By submitting a contribution, you agree to license it under the repository's
-MIT license. Retain third-party license notices when changing dependencies.
+Do not commit credentials, profiles, build products, personal settings or local
+agent notes. Close and remove temporary app bundles and eject installers after QA;
+macOS can otherwise list extra copies in Open With and Extensions.
+
+## Mac distribution
+
+`script/release.sh` builds universal binaries, signs the app and extension,
+notarizes/staples the app, creates the DMG with an Applications link, then
+notarizes/staples the DMG. The script does not publish to GitHub.
+
+```sh
+python3 -m venv /tmp/margined-dmg-env
+/tmp/margined-dmg-env/bin/pip install ds_store==1.3.2
+MARGINED_DMG_PYTHON=/tmp/margined-dmg-env/bin/python ./script/release.sh
+```
+
+Set your `MARGINED_SIGNING_IDENTITY`, `MARGINED_TEAM_ID` and Keychain
+`MARGINED_NOTARY_PROFILE` (default `Notarize`). Alternatively use
+`MARGINED_NOTARY_API_KEY_PATH`, `MARGINED_NOTARY_API_KEY_ID` and
+`MARGINED_NOTARY_ISSUER_ID`; keep the key outside the repository.
+`--build-only` keeps the signed app; `--skip-notarize` makes a local signed DMG.
+Normal packaging preserves an app ZIP and removes temporary registered bundles.
+
+The GitHub release workflow accepts matching `vX.Y.Z` tags from the default branch.
+Tests run before loading encrypted release-environment credentials; signing and
+notarization are verified before publishing the DMG and checksum. Contributors
+need no release credentials. Internal TestFlight delivery is separate from public
+GitHub or App Store publication.
+
+Contributions use the repository’s MIT license. Retain third-party notices.

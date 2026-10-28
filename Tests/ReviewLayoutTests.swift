@@ -116,18 +116,45 @@ final class ReviewLayoutTests: XCTestCase {
         let window = LayoutTestWindow(contentViewController: controller)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: width, height: 720)); window.makeKeyAndOrderFront(nil)
-        for _ in 0..<200 {
-            if let web = findWebView(controller.view), web.url != nil, !web.isLoading, !reader.isRendering { break }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        try updated.write(to: file, atomically: true, encoding: .utf8)
-        reader.acceptFileUpdate(updated)
-        for _ in 0..<200 {
-            if !reader.isRendering, reader.changes.count == 2 { break }
-            try await Task.sleep(for: .milliseconds(20))
+        do {
+            try await waitForDocument(in: controller.view, reader: reader, updated: false)
+            try updated.write(to: file, atomically: true, encoding: .utf8)
+            reader.acceptFileUpdate(updated)
+            try await waitForDocument(in: controller.view, reader: reader, updated: true)
+        } catch {
+            window.close(); reader.stop(); try? FileManager.default.removeItem(at: file)
+            throw error
         }
         XCTAssertEqual(reader.changes.count, 2)
         return Fixture(reader: reader, controller: controller, window: window, file: file, updated: updated)
+    }
+
+    private func waitForDocument(in view: NSView, reader: ReaderState, updated: Bool) async throws {
+        for _ in 0..<200 {
+            if let web = findWebView(view), web.url != nil, !web.isLoading, !reader.isRendering,
+               (!updated || reader.changes.count == 2),
+               let text = try? await web.callAsyncJavaScript("""
+               const main = document.querySelector('main#document');
+               const text = main?.textContent ?? '';
+               const matches = updated
+                   ? text.includes('Updated paragraph.') && text.includes('Added paragraph.')
+                       && !text.includes('Original paragraph.')
+                   : text.includes('Original paragraph.');
+               return document.readyState === 'complete'
+                   && main?.querySelector('h1')?.textContent === 'Review test'
+                   && matches ? text : null;
+               """, arguments: ["updated": updated], in: nil,
+               contentWorld: .world(name: "MarginedReviewFixture")) as? String {
+                XCTContext.runActivity(named: updated ? "Verified updated document" : "Verified original document") { activity in
+                    let attachment = XCTAttachment(string: text)
+                    attachment.lifetime = .keepAlways; activity.add(attachment)
+                }
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("The actual review document did not become ready")
+        throw CocoaError(.coderInvalidValue)
     }
 
     private func waitForPanel(in view: NSView, below webView: WKWebView? = nil) async throws -> NSRect {

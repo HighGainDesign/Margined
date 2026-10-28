@@ -9,11 +9,18 @@ struct SpeechPlayerView: View {
             HStack(spacing: 10) {
                 Image(systemName: "headphones").foregroundStyle(.secondary).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Read Aloud").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Group {
+                        if speech.conversationID != nil {
+                            if speech.session.isActive { Text("Reading Conversation") }
+                            else { Text("Read Conversation") }
+                        }
+                        else { Text("Read Aloud") }
+                    }.font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Text(sectionTitle).font(.callout.weight(.medium)).lineLimit(1).help(sectionTitle)
                 }
                 Spacer(minLength: 8)
                 Menu {
+                    if speech.conversationID != nil { Button("Resume Document") { speech.resumeSaved() }; Divider() }
                     Button("From the Beginning") { speech.requestStart(.beginning) }
                     Button("From Current Section") { speech.requestStart(.visible) }
                     Button("From Selection") { speech.requestStart(.selection) }
@@ -65,7 +72,7 @@ struct SpeechPlayerView: View {
                 .accessibilityLabel(speech.session.status == .playing ? "Pause reading" : "Play reading")
             Button { speech.session.nextSection() } label: { Image(systemName: "forward.end.fill").frame(width: 24, height: 22) }
                 .disabled(!speech.session.isActive).accessibilityLabel("Next section").help("Next section")
-            Button("Stop", systemImage: "stop.fill") { speech.stop() }.disabled(!speech.session.isActive)
+            Button("Stop", systemImage: "stop.fill") { speech.stop() }.disabled(!speech.session.isActive && !speech.isPreparing)
         }.buttonStyle(.bordered).fixedSize()
     }
     private var options: some View {

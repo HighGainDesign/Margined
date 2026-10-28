@@ -24,14 +24,16 @@ jobs:
       - name: Prepare project
         run: |
           brew install xcodegen
+          python3 -m unittest discover -s script/tests -p test_release_version.py
           python3 script/verify-vendor.py
           python3 script/validate-localizations.py
+          python3 -m unittest discover -s script/tests -p 'test_benchmark*.py'
           xcodegen generate
       - name: Run isolated macOS tests
         run: |
           xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
-            CODE_SIGN_IDENTITY=- test > "$RUNNER_TEMP/tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/tests.log"; exit 1; }
+            CODE_SIGN_IDENTITY=- MARGINED_CI_HEADLESS=1 test > "$RUNNER_TEMP/tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/tests.log"; exit 1; }
 
       - name: Check each interface language in a fresh process
         run: |

@@ -18,8 +18,15 @@ struct RenderedMarkdown: Sendable {
     var tasks: [MarkdownTask] = []
     var taskSource = ""
     var checkboxCount = 0
+    var discussions: DiscussionDocument? = nil
+    var discussionText: DiscussionTextProjection? = nil
+    var discussionActivity = DiscussionActivity()
     var documentLanguage: String? = nil
     var speech: SpeechDocument? = nil
+    #if MARGINED_BENCHMARK
+    var benchmarkPhases: [String: UInt64] = [:]
+    var benchmarkTotalNS: UInt64 = 0
+    #endif
 }
 
 /// Serializes native Apex conversions off the UI actor. App and Quick Look use
@@ -29,38 +36,254 @@ actor MarkdownRenderer {
     private var stylesheet: String?
     private let mathTypesetter = MathTypesetter()
 
-    func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions()) async throws -> RenderedMarkdown {
+    /// Compare sanitized semantic reading units before releasing a held version.
+    /// Parsing stays on this actor; note payloads never enter the comparison.
+    func hasSameReadingContent(_ old: String, _ new: String) throws -> Bool {
+        try Task.checkCancellation()
+        guard old.utf8.count <= MarkdownSource.maximumBytes, new.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
+        let previous = try parse(DiscussionCodec.parse(old).readingSource, loadRemoteImages: false)
+        let current = try parse(DiscussionCodec.parse(new).readingSource, loadRemoteImages: false)
+        let same = try DocumentChanges.snapshot(in: previous) == DocumentChanges.snapshot(in: current)
+        try Task.checkCancellation()
+        return same
+    }
+
+    func render(_ source: String, title: String = "Markdown", wide: Bool = false, baseline: String? = nil, reviewedUnits: [ReadingUnit]? = nil, loadRemoteImages: Bool = false, appearance: DocumentAppearance = .system, mapTasks: Bool = false, documentLanguage: String? = nil, prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), previousDiscussionProjection: DiscussionTextProjection? = nil, previousDiscussions: DiscussionDocument? = nil, includeDiscussionAppendix: Bool = false) async throws -> RenderedMarkdown {
+        #if MARGINED_BENCHMARK
+        let benchmarkStart = DispatchTime.now().uptimeNanoseconds
+        #endif
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
+        try loadStylesheet()
+        #if MARGINED_BENCHMARK
+        var benchmarkLast = DispatchTime.now().uptimeNanoseconds
+        var benchmarkPhases: [String: UInt64] = [:]
+        func benchmarkMark(_ stage: String) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            benchmarkPhases[stage] = now - benchmarkLast
+            benchmarkLast = now
+        }
+        #endif
+        let discussions = try DiscussionCodec.parse(source)
+        let proseSource = discussions.readingSource
+        #if MARGINED_BENCHMARK
+        benchmarkMark("note_parse_ns")
+        #endif
+        let document = try parse(proseSource, loadRemoteImages: loadRemoteImages)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("markdown_parse_ns")
+        #endif
+        let targets = Dictionary(uniqueKeysWithValues: discussions.threads.map { ($0.id, $0.target) })
+        var discussionText = try DiscussionText.project(document, source: source, targets: targets)
+        discussionText.attachmentVersions = Dictionary(uniqueKeysWithValues: discussions.threads.map { ($0.id, $0.attachmentHistory.count) })
+        #if MARGINED_BENCHMARK
+        benchmarkMark("projection_ns")
+        #endif
+        discussionText.anchorResults = DiscussionAnchors.resolve(document: discussions, current: discussionText, previous: previousDiscussionProjection)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("anchor_ns")
+        #endif
+        // Reuse the clean DOM only for a byte-identical baseline. Capture it
+        // before speech/task markers; later edits still need the original units.
+        let initialBaseline: [ReadingUnit]?
+        if reviewedUnits == nil, let baseline, baseline.utf8.elementsEqual(source.utf8) {
+            initialBaseline = try DocumentChanges.snapshot(in: document)
+        } else {
+            initialBaseline = nil
+        }
+        // The semantic body is stable after a note-only update, unlike the full
+        // source hash. Fingerprints still include code/math/image semantics.
+        let speechSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        let headings = try document.select("h1, h2, h3, h4, h5, h6").array().map { heading in
+            MarkdownHeading(id: try heading.attr("id"), title: try heading.text(),
+                            level: Int(heading.tagName().dropFirst()) ?? 1)
+        }
+        let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
+        let speech = prepareSpeech ? try SpeechDocumentBuilder.prepare(document, source: speechSource, language: language, options: speechOptions) : nil
+        #if MARGINED_BENCHMARK
+        benchmarkMark("reading_metadata_ns")
+        #endif
+        var changes = ChangeSummary()
+        let comparisonBaseline: [ReadingUnit]?
+        if let reviewedUnits {
+            comparisonBaseline = reviewedUnits
+        } else if let initialBaseline {
+            comparisonBaseline = initialBaseline
+        } else if let baseline {
+            comparisonBaseline = try DocumentChanges.snapshot(in: parse(DiscussionCodec.parse(baseline).readingSource, loadRemoteImages: loadRemoteImages))
+        } else {
+            comparisonBaseline = nil
+        }
+        if let comparisonBaseline, initialBaseline == nil {
+            changes = try DocumentChanges.annotate(current: document, baseline: comparisonBaseline)
+        }
+        let checkboxCount = try document.select("input[type=checkbox]").size()
+        let tasks = mapTasks ? try MarkdownTasks.attach(to: document, source: source) : []
+        if includeDiscussionAppendix, !discussions.threads.isEmpty {
+            var remaining = MarkdownSource.maximumBytes
+            let bodies = try discussions.threads.map {
+                try parseDiscussionBodies($0, loadRemoteImages: loadRemoteImages, remaining: &remaining)
+            }
+            let ids = Set(try document.select("[id]").array().map { try $0.attr("id") })
+            let appendix = try DiscussionRendering.appendix(discussions.threads, bodies: bodies,
+                anchors: discussionText.anchorResults, existingIDs: ids, locale: .current, timeZone: .current)
+            try document.body()?.appendChild(appendix)
+        }
+        #if MARGINED_BENCHMARK
+        benchmarkMark("review_tasks_ns")
+        #endif
+        // Typeset after semantic review/speech, so generated artwork never changes
+        // comparison identity or duplicates MathML tokens in Read Aloud.
+        try await typeset(document)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("artwork_ns")
+        #endif
+        // Serialize the sanitized DOM itself, including newly attached task metadata.
+        // Source reuse can retain an input tag without its new attributes.
+        let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        let countSource = discussions.blocks.allSatisfy(\.hasCertainExtent) ? proseSource : discussions.wordCountSource
+        let count = countSource.split(whereSeparator: \.isWhitespace).count
+        let html = htmlDocument(body, title: title, wide: wide, loadRemoteImages: loadRemoteImages,
+                                appearance: appearance, language: language)
+        #if MARGINED_BENCHMARK
+        benchmarkMark("serialization_ns")
+        #endif
+        let output = RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
+        #if MARGINED_BENCHMARK
+        var measured = output
+        measured.benchmarkPhases = benchmarkPhases
+        measured.benchmarkTotalNS = DispatchTime.now().uptimeNanoseconds - benchmarkStart
+        return measured
+        #else
+        return output
+        #endif
+    }
+
+    /// Preserve the displayed prose/artwork rather than rereading a newer file.
+    /// Only saved notes from that same immutable result enter the optional appendix.
+    func printHTML(_ output: RenderedMarkdown, title: String, includeDiscussions: Bool,
+                   loadRemoteImages: Bool) async throws -> String {
+        try Task.checkCancellation()
+        let document = try SwiftSoup.parse(output.html)
+        document.outputSettings().prettyPrint(pretty: false)
+        guard let main = try document.select("main").first() else { throw ReaderError.rendererUnavailable }
+        try document.select(".discussion-appendix,.margined-note-layer").remove()
+        if includeDiscussions, let discussions = output.discussions, !discussions.threads.isEmpty {
+            var remaining = MarkdownSource.maximumBytes
+            let bodies = try discussions.threads.map {
+                try parseDiscussionBodies($0, loadRemoteImages: loadRemoteImages, remaining: &remaining)
+            }
+            let ids = Set(try document.select("[id]").array().map { try $0.attr("id") })
+            let appendix = try DiscussionRendering.appendix(discussions.threads, bodies: bodies,
+                anchors: output.discussionText?.anchorResults ?? [:], existingIDs: ids,
+                locale: .current, timeZone: .current, showReplyInstructions: false)
+            let artwork = try SwiftSoup.parseBodyFragment("")
+            try artwork.body()?.appendChild(appendix)
+            // Prose artwork is already rendered. Apply the bound once to the
+            // newly assembled notes without typesetting the prose a second time.
+            try await typeset(artwork)
+            try main.appendChild(appendix)
+        }
+        try document.select("input").attr("disabled", "")
+        try document.select("title").first()?.text(title)
+        if !loadRemoteImages {
+            for policy in try document.select("meta[http-equiv=Content-Security-Policy]").array() {
+                try policy.attr("content", "default-src 'none'; style-src 'unsafe-inline'; img-src margined-resource: data:; base-uri 'none'; form-action 'none'")
+            }
+        }
+        try Task.checkCancellation()
+        return try document.outerHtml()
+    }
+
+    /// Comment bodies use the same Apex/sanitizer and artwork stages as prose.
+    /// They are independent Markdown fragments, never nested document discussions.
+    func renderDiscussion(_ thread: DiscussionThread, loadRemoteImages: Bool = false,
+                          appearance: DocumentAppearance = .system, documentLanguage: String? = nil,
+                          prepareSpeech: Bool = false, speechOptions: SpeechOptions = SpeechOptions(), locale: Locale = .current,
+                          timeZone: TimeZone = .current, includeContext: Bool = true) async throws -> RenderedMarkdown {
+        try Task.checkCancellation()
+        try loadStylesheet()
+        let prepared = try prepareDiscussionContent(thread, loadRemoteImages: loadRemoteImages,
+            documentLanguage: documentLanguage, prepareSpeech: prepareSpeech, speechOptions: speechOptions,
+            locale: locale, timeZone: timeZone, includeContext: includeContext)
+        let (document, language, speech) = prepared
+        let headings = try document.select("h1, h2, h3, h4, h5, h6").array().map {
+            MarkdownHeading(id: try $0.attr("id"), title: try $0.text(), level: Int($0.tagName().dropFirst()) ?? 1)
+        }
+        let wordCount = try document.body()?.text().split(whereSeparator: \.isWhitespace).count ?? 0
+        // Apply one shared bound to the complete history, not one per message.
+        try await typeset(document)
+        let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        return RenderedMarkdown(html: htmlDocument(body, title: String(localized: "Discussion"), wide: true,
+            loadRemoteImages: loadRemoteImages, appearance: appearance, language: language,
+            extraBodyClass: "discussion-history", documentLabel: String(localized: "Discussion history")), headings: headings, wordCount: wordCount,
+            documentLanguage: language, speech: speech)
+    }
+
+    func conversationSpeech(_ thread: DiscussionThread, loadRemoteImages: Bool = false, documentLanguage: String? = nil,
+                            speechOptions: SpeechOptions, locale: Locale = .current,
+                            timeZone: TimeZone = .current) throws -> SpeechDocument {
+        try Task.checkCancellation()
+        let prepared = try prepareDiscussionContent(thread, loadRemoteImages: loadRemoteImages,
+            documentLanguage: documentLanguage, prepareSpeech: true, speechOptions: speechOptions,
+            locale: locale, timeZone: timeZone, includeContext: false)
+        guard let speech = prepared.speech else { throw ReaderError.rendererUnavailable }
+        try Task.checkCancellation()
+        return speech
+    }
+
+    /// A held conversation is compared with its immutable spoken messages,
+    /// rather than with prose. Skip artwork: it cannot change the spoken text.
+    func hasSameConversationReadingContent(_ source: String, threadID: String,
+                                          spoken: SpeechDocument) throws -> Bool {
+        try Task.checkCancellation()
+        guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
+        guard let thread = try DiscussionCodec.parse(source).threads.first(where: { $0.id == threadID }) else { return false }
+        let prepared = try prepareDiscussionContent(thread, loadRemoteImages: false,
+            documentLanguage: spoken.language, prepareSpeech: true, speechOptions: spoken.options,
+            locale: .current, timeZone: .current, includeContext: false)
+        try Task.checkCancellation()
+        return prepared.speech?.segments.map(\.text) == spoken.segments.map(\.text)
+    }
+
+    private func prepareDiscussionContent(_ thread: DiscussionThread, loadRemoteImages: Bool,
+        documentLanguage: String?, prepareSpeech: Bool, speechOptions: SpeechOptions,
+        locale: Locale, timeZone: TimeZone, includeContext: Bool)
+        throws -> (document: Document, language: String?, speech: SpeechDocument?) {
+        var remaining = MarkdownSource.maximumBytes
+        let bodies = try parseDiscussionBodies(thread, loadRemoteImages: loadRemoteImages, remaining: &remaining)
+        let document = try DiscussionRendering.document(thread, bodies: bodies, locale: locale,
+                                                        timeZone: timeZone, includeContext: includeContext)
+        let semanticSource = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
+        let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
+        let speech = prepareSpeech ? try SpeechDocumentBuilder.prepare(document, source: semanticSource,
+            language: language, options: speechOptions) : nil
+        return (document, language, speech)
+    }
+
+    private func parseDiscussionBodies(_ thread: DiscussionThread, loadRemoteImages: Bool,
+                                       remaining: inout Int) throws -> [Document] {
+        var bodies: [Document] = []
+        for message in thread.messages {
+            try Task.checkCancellation()
+            let count = message.body.utf8.count + message.author.utf8.count + message.created.utf8.count
+            guard count <= remaining else { throw ReaderError.tooLarge }
+            remaining -= count
+            bodies.append(try parse(message.body, loadRemoteImages: loadRemoteImages))
+        }
+        return bodies
+    }
+
+    private func loadStylesheet() throws {
         if stylesheet == nil {
             guard let cssURL = Bundle(for: RendererBundleMarker.self).url(forResource: "reader", withExtension: "css") else {
                 throw ReaderError.rendererUnavailable
             }
             stylesheet = try String(contentsOf: cssURL, encoding: .utf8)
         }
-        let document = try parse(source, loadRemoteImages: loadRemoteImages)
-        let headings = try document.select("h1, h2, h3, h4, h5, h6").array().map { heading in
-            MarkdownHeading(id: try heading.attr("id"), title: try heading.text(),
-                            level: Int(heading.tagName().dropFirst()) ?? 1)
-        }
-        let language = DocumentLanguage.resolve(selected: documentLanguage, text: try document.body()?.text() ?? "")
-        let speech = prepareSpeech ? try SpeechDocumentBuilder.prepare(document, source: source, language: language, options: speechOptions) : nil
-        var changes = ChangeSummary()
-        let comparisonBaseline: [ReadingUnit]?
-        if let reviewedUnits {
-            comparisonBaseline = reviewedUnits
-        } else if let baseline {
-            comparisonBaseline = try DocumentChanges.snapshot(in: parse(baseline, loadRemoteImages: loadRemoteImages))
-        } else {
-            comparisonBaseline = nil
-        }
-        if let comparisonBaseline {
-            changes = try DocumentChanges.annotate(current: document, baseline: comparisonBaseline)
-        }
-        let checkboxCount = try document.select("input[type=checkbox]").size()
-        let tasks = mapTasks ? try MarkdownTasks.attach(to: document, source: source) : []
-        // Typeset after semantic review/speech, so generated artwork never changes
-        // comparison identity or duplicates MathML tokens in Read Aloud.
+    }
+
+    private func typeset(_ document: Document) async throws {
         for (index, expression) in try document.select("span.margined-math").array().enumerated() {
             let tex = try expression.text(trimAndNormaliseWhitespace: false)
             try expression.attr("data-margined-math-source", tex)
@@ -82,21 +305,22 @@ actor MarkdownRenderer {
             try pre.remove()
             try details.appendChild(pre)
         }
-        // Serialize the sanitized DOM itself, including newly attached task metadata.
-        // Source reuse can retain an input tag without its new attributes.
-        let body = String(decoding: try document.body()?.htmlUTF8WithoutSourceReuse() ?? [], as: UTF8.self)
-        let count = source.split(whereSeparator: \.isWhitespace).count
+    }
+
+    private func htmlDocument(_ body: String, title: String, wide: Bool, loadRemoteImages: Bool,
+                              appearance: DocumentAppearance, language: String?, extraBodyClass: String = "",
+                              documentLabel: String = String(localized: "Markdown document")) -> String {
+        let bodyClass = ([wide ? "wide" : "", extraBodyClass].filter { !$0.isEmpty }).joined(separator: " ")
         let languageAttribute = language.map { " lang=\"\($0)\"" } ?? ""
-        let html = """
+        return """
         <!doctype html><html\(languageAttribute) data-appearance="\(appearance.rawValue)"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="referrer" content="no-referrer">
         <meta name="color-scheme" content="\(appearance.colorScheme)">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src margined-resource: data:\(loadRemoteImages ? " https:" : ""); base-uri 'none'; form-action 'none'">
         <title>\(Self.escapeHTML(title))</title><style>\(stylesheet ?? "")</style></head>
-        <body class="\(wide ? "wide" : "")"><main id="document" dir="auto" aria-label="\(Self.escapeHTML(String(localized: "Markdown document")))">\(body)</main></body></html>
+        <body class="\(bodyClass)"><main id="document" dir="auto" aria-label="\(Self.escapeHTML(documentLabel))">\(body)</main></body></html>
         """
-        return RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, documentLanguage: language, speech: speech)
     }
 
     private func parse(_ source: String, loadRemoteImages: Bool) throws -> Document {

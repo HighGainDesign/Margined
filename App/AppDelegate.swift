@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: true)
+        #if MARGINED_BENCHMARK
+        if ViewingBenchmarkSession.startIfRequested() { return }
+        #endif
         Task { @MainActor in
             await Task.yield()
             showStartupTips()
@@ -22,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         // AppKit calls this when launching without a document to open.
+        #if MARGINED_BENCHMARK
+        if ProcessInfo.processInfo.environment["MARGINED_BENCHMARK_REQUEST"] != nil { return false }
+        #endif
         showWelcome()
         return false
     }
@@ -85,14 +91,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         func saving() -> Bool {
-            NSDocumentController.shared.documents.compactMap { $0 as? MarkdownDocument }.contains { $0.reader.checklistSaving }
+            NSDocumentController.shared.documents.compactMap { $0 as? MarkdownDocument }.contains { $0.reader.fileSaving }
         }
-        guard saving() else { return .terminateNow }
+        guard saving() else { return confirmDiscardDiscussionDrafts() ? .terminateNow : .terminateCancel }
         Task {
             while saving() { try? await Task.sleep(for: .milliseconds(10)) }
-            sender.reply(toApplicationShouldTerminate: true)
+            sender.reply(toApplicationShouldTerminate: confirmDiscardDiscussionDrafts())
         }
         return .terminateLater
+    }
+
+    private func confirmDiscardDiscussionDrafts() -> Bool {
+        let readers = NSDocumentController.shared.documents.compactMap { ($0 as? MarkdownDocument)?.reader }
+        guard readers.contains(where: { $0.discussions.hasUnpostedDrafts }) else { return true }
+        let alert = DiscussionDraftAlert.make(quitting: true)
+        guard alert.runModal() == .alertSecondButtonReturn else { return false }
+        for reader in readers { reader.discussions.discardDrafts() }
+        return true
     }
 
     func showLiveStreamingPreview() {
@@ -137,10 +152,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
 
     private var reader: ReaderState? {
-        (NSDocumentController.shared.currentDocument as? MarkdownDocument)?.reader
+        guard !(NSApp.keyWindow?.windowController is ReaderDiscussionSourceWindow) else { return nil }
+        return (NSDocumentController.shared.currentDocument as? MarkdownDocument)?.reader
     }
 
-    @objc private func find(_ sender: Any?) { reader?.showFind = true }
+    private var sourceInspector: ReaderDiscussionSourceWindow? { NSApp.keyWindow?.windowController as? ReaderDiscussionSourceWindow }
+    @objc private func find(_ sender: Any?) {
+        if let sourceInspector { sourceInspector.showFind() }
+        else { reader?.showFind = true }
+    }
     @objc private func reload(_ sender: Any?) { reader?.reload() }
     @objc private func toggleFileUpdates(_ sender: Any?) {
         guard let reader else { return }
@@ -148,7 +168,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
     func openSpeechSettings() { SettingsNavigation.shared.page = .speech; showSettings(nil) }
     @objc private func toggleSpeech(_ sender: Any?) { reader?.speech.showPlayer = true; reader?.speech.togglePlayback() }
-    @objc private func stopSpeech(_ sender: Any?) { reader?.existingSpeech?.stop() }
+    @objc private func stopSpeech(_ sender: Any?) {
+        if let sourceInspector { sourceInspector.stopSpeech(sender) }
+        else { reader?.existingSpeech?.stop() }
+    }
     @objc private func speakBeginning(_ sender: Any?) { reader?.speech.requestStart(.beginning) }
     @objc private func speakSection(_ sender: Any?) { reader?.speech.requestStart(.visible) }
     @objc private func speakSelection(_ sender: Any?) { reader?.speech.requestStart(.selection) }
@@ -156,11 +179,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     @objc private func previousSpeechSection(_ sender: Any?) { reader?.existingSpeech?.session.previousSection() }
     @objc private func focusDocument(_ sender: Any?) { reader?.focusDocument() }
     @objc private func returnToNavigation(_ sender: Any?) { reader?.returnToNavigation() }
+    @objc private func addDiscussion(_ sender: Any?) { reader?.requestAddDiscussion() }
+    @objc private func toggleDiscussions(_ sender: Any?) {
+        guard let reader else { return }
+        reader.showDiscussions.toggle()
+        if reader.showDiscussions { reader.focusSelectedDiscussion() }
+    }
+    @objc private func nextDiscussion(_ sender: Any?) { reader?.selectNextDiscussion() }
+    @objc private func previousDiscussion(_ sender: Any?) { reader?.selectNextDiscussion(backwards: true) }
+    @objc private func goToDiscussion(_ sender: Any?) {
+        guard let reader, case let .thread(id) = reader.discussions.selection else { return }
+        reader.goToDiscussion(id)
+    }
     @objc private func nextUncheckedTask(_ sender: Any?) { reader?.jumpToUncheckedTask() }
     @objc private func previousUncheckedTask(_ sender: Any?) { reader?.jumpToUncheckedTask(backwards: true) }
     @objc private func nextChange(_ sender: Any?) { reader?.jumpToChange(focus: true) }
     @objc private func previousChange(_ sender: Any?) { reader?.jumpToChange(backwards: true, focus: true) }
-    @objc private func zoomIn(_ sender: Any?) { reader?.changeZoom(by: 0.1) }
+    @objc private func zoomIn(_ sender: Any?) {
+        if let sourceInspector { sourceInspector.changeZoom(by: 0.1) }
+        else { reader?.changeZoom(by: 0.1) }
+    }
     private var undoActions: ReaderUndo { ReaderUndo(responder: NSApp.keyWindow?.firstResponder, reader: reader) }
     @objc private func undoCheckbox(_ sender: Any?) { undoActions.undo() }
     @objc private func redoCheckbox(_ sender: Any?) { undoActions.redo() }
@@ -172,8 +210,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         if speechActions.contains(menuItem.action ?? #selector(toggleSpeech(_:))) && menuItem.action != nil {
             return reader?.rendered?.speech?.segments.isEmpty == false && reader?.isRendering == false && reader?.checklistSaving == false && reader?.showChecklistConfirmation == false
         }
-        if menuItem.action == #selector(stopSpeech(_:)) { return reader?.existingSpeech?.session.isActive == true }
+        if menuItem.action == #selector(stopSpeech(_:)) {
+            if let sourceInspector { return sourceInspector.validateMenuItem(menuItem) }
+            return reader?.existingSpeech?.session.isActive == true || reader?.existingSpeech?.isPreparing == true
+        }
         if menuItem.action == #selector(nextSpeechSection(_:)) || menuItem.action == #selector(previousSpeechSection(_:)) { return reader?.existingSpeech?.session.isActive == true }
+        if menuItem.action == #selector(toggleDiscussions(_:)) {
+            menuItem.title = reader?.showDiscussions == true ? String(localized: "Hide Discussions") : String(localized: "Show Discussions")
+            return reader?.rendered?.discussionText != nil
+        }
+        if menuItem.action == #selector(addDiscussion(_:)) {
+            return reader?.rendered?.discussionText != nil && reader?.isRendering == false && reader?.fileSaving == false
+        }
+        if menuItem.action == #selector(nextDiscussion(_:)) || menuItem.action == #selector(previousDiscussion(_:)) {
+            return reader?.isRendering == false && reader?.filteredDiscussionThreads.isEmpty == false
+        }
+        if menuItem.action == #selector(goToDiscussion(_:)) {
+            guard let reader, case let .thread(id) = reader.discussions.selection else { return false }
+            return !reader.isRendering && reader.rendered?.discussionText?.anchorResults[id]?.status == .attached
+        }
         if menuItem.action == #selector(focusDocument(_:)) { return reader?.rendered != nil }
         if menuItem.action == #selector(returnToNavigation(_:)) { return reader?.navigationReturnTarget != nil }
         if menuItem.action == #selector(nextUncheckedTask(_:)) || menuItem.action == #selector(previousUncheckedTask(_:)) {
@@ -187,18 +242,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             return reader?.fileURL != nil && reader?.isStreamingPreview == false
         }
         if menuItem.action == #selector(undoCheckbox(_:)) {
-            menuItem.title = undoActions.isEditingText ? String(localized: "Undo") : String(localized: "Undo Checkbox Change")
+            menuItem.title = undoActions.isEditingText ? String(localized: "Undo") :
+                reader?.canUndoDiscussion == true ? String(localized: "Undo Discussion Change") : String(localized: "Undo Checkbox Change")
             return undoActions.canUndo
         }
         if menuItem.action == #selector(redoCheckbox(_:)) {
-            menuItem.title = undoActions.isEditingText ? String(localized: "Redo") : String(localized: "Redo Checkbox Change")
+            menuItem.title = undoActions.isEditingText ? String(localized: "Redo") :
+                reader?.canRedoDiscussion == true ? String(localized: "Redo Discussion Change") : String(localized: "Redo Checkbox Change")
             return undoActions.canRedo
         }
         return true
     }
 
-    @objc private func zoomOut(_ sender: Any?) { reader?.changeZoom(by: -0.1) }
-    @objc private func actualSize(_ sender: Any?) { reader?.zoom = 1 }
+    @objc private func zoomOut(_ sender: Any?) {
+        if let sourceInspector { sourceInspector.changeZoom(by: -0.1) }
+        else { reader?.changeZoom(by: -0.1) }
+    }
+    @objc private func actualSize(_ sender: Any?) {
+        if let sourceInspector { sourceInspector.actualSize() }
+        else { reader?.zoom = 1 }
+    }
     @objc private func toggleOutline(_ sender: Any?) { reader?.showOutline.toggle() }
     @objc private func reviewChanges(_ sender: Any?) {
         guard let reader, reader.fileURL != nil else { return }
@@ -256,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         add(String(localized: "Close Window"), to: file, action: #selector(NSWindow.performClose(_:)), key: "w")
         file.addItem(.separator())
         add(String(localized: "Print…"), to: file, action: #selector(NSDocument.printDocument(_:)), key: "p")
+        add(String(localized: "Print with Discussions…"), to: file, action: #selector(MarkdownDocument.printWithDiscussions(_:)))
         attach(file, to: bar)
 
         let edit = NSMenu(title: String(localized: "Edit"))
@@ -285,6 +349,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         add(String(localized: "Zoom Out"), to: view, action: #selector(zoomOut(_:)), key: "-", target: self)
         add(String(localized: "Actual Size"), to: view, action: #selector(actualSize(_:)), key: "0", target: self)
         attach(view, to: bar)
+
+        let discussions = NSMenu(title: String(localized: "Discussions"))
+        add(String(localized: "Add Discussion…"), to: discussions, action: #selector(addDiscussion(_:)), key: "a", modifiers: [.command, .control], target: self)
+        add(String(localized: "Show Discussions"), to: discussions, action: #selector(toggleDiscussions(_:)), key: "d", modifiers: [.command, .shift], target: self)
+        discussions.addItem(.separator())
+        add(String(localized: "Next Discussion"), to: discussions, action: #selector(nextDiscussion(_:)), key: "]", modifiers: [.command, .control], target: self)
+        add(String(localized: "Previous Discussion"), to: discussions, action: #selector(previousDiscussion(_:)), key: "[", modifiers: [.command, .control], target: self)
+        add(String(localized: "Go to Passage"), to: discussions, action: #selector(goToDiscussion(_:)), key: "g", modifiers: [.command, .control], target: self)
+        attach(discussions, to: bar)
 
         let speech = NSMenu(title: String(localized: "Read Aloud"))
         add(String(localized: "Read Aloud"), to: speech, action: #selector(toggleSpeech(_:)), key: "l", modifiers: [.command, .option], target: self)

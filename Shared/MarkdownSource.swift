@@ -5,12 +5,19 @@ enum MarkdownSource {
 
     static func decode(_ data: Data) throws -> String {
         guard data.count <= maximumBytes else { throw ReaderError.tooLarge }
-        if let string = String(data: data, encoding: .utf8) {
-            return string.hasPrefix("\u{feff}") ? String(string.dropFirst()) : string
+        let body = data.starts(with: [239, 187, 191]) ? data.dropFirst(3) : data[...]
+        let utf8 = String(decoding: body, as: UTF8.self)
+        if utf8.utf8.elementsEqual(body) { return utf8 }
+        // Decode exactly one file BOM. Foundation's data initializer also strips
+        // a leading U+FEFF, which can otherwise consume actual document text.
+        if data.starts(with: [0xff, 0xfe]) || data.starts(with: [0xfe, 0xff]), data.count % 2 == 0 {
+            let bytes = Array(data.dropFirst(2)), little = data.first == 0xff
+            let units = stride(from: 0, to: bytes.count, by: 2).map { index in
+                little ? UInt16(bytes[index]) | UInt16(bytes[index + 1]) << 8 : UInt16(bytes[index]) << 8 | UInt16(bytes[index + 1])
+            }
+            let string = String(decoding: units, as: UTF16.self)
+            if string.utf16.elementsEqual(units) { return string }
         }
-        // Only interpret UTF-16 when a BOM is present, rather than guessing binary data.
-        if data.starts(with: [0xff, 0xfe]) || data.starts(with: [0xfe, 0xff]),
-           let string = String(data: data, encoding: .utf16) { return string }
         throw ReaderError.invalidEncoding
     }
 

@@ -560,6 +560,51 @@ static tfoot_row *collect_tfoot_rows(cmark_node *document) {
     return list;
 }
 
+/* Only a complete, unformatted cell is a span marker. Substrings and
+ * rendered code are ordinary content, even when they contain <<. */
+static bool is_table_cell_marker(const char *content, const char *marker) {
+    while (*content && isspace((unsigned char)*content)) content++;
+    size_t length = strlen(marker);
+    if (strncmp(content, marker, length) != 0) return false;
+    content += length;
+    while (*content && isspace((unsigned char)*content)) content++;
+    return *content == '\0';
+}
+
+/* These marker positions depend only on the collected AST, not the HTML row.
+ * Preserve the existing 100-row search boundary while computing them once per
+ * table instead of rescanning every cell for every candidate on every row. */
+typedef struct table_removed_rows {
+    int first_equals;
+    int first_removed;
+} table_removed_rows;
+
+static table_removed_rows find_removed_rows(all_cell *cells, cell_attr *attrs, int table_index) {
+    int totals[100] = {0};
+    int removed[100] = {0};
+    bool equals[100] = {false};
+    table_removed_rows result = {-1, -1};
+
+    for (all_cell *c = cells; c; c = c->next) {
+        if (c->table_index != table_index || c->row_index < 0 || c->row_index >= 100) continue;
+        totals[c->row_index]++;
+        if (c->is_removed) removed[c->row_index]++;
+    }
+    for (cell_attr *a = attrs; a; a = a->next) {
+        if (a->table_index != table_index || a->row_index < 0 || a->row_index >= 100 || !a->cell_text) continue;
+        const char *text = a->cell_text;
+        while (*text && isspace((unsigned char)*text)) text++;
+        if (text[0] == '=' && text[1] == '=' && text[2] == '=') equals[a->row_index] = true;
+    }
+    for (int row = 0; row < 100; row++) {
+        if (totals[row] > 0 && totals[row] == removed[row]) {
+            if (result.first_removed < 0) result.first_removed = row;
+            if (result.first_equals < 0 && (equals[row] || !attrs)) result.first_equals = row;
+        }
+    }
+    return result;
+}
+
 char *apex_inject_table_attributes(const char *html, cmark_node *document, int caption_position) {
     if (!html || !document) return (char *)html;
 
@@ -721,6 +766,8 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
     /* Pre-calculated mapping for current row: HTML position -> original column index */
     int row_col_mapping[50];  /* row_col_mapping[html_pos] = original_col_index */
     int row_col_mapping_size = 0;
+    bool table_has_rowspan = false;
+    table_removed_rows removed_rows = {-1, -1};
 
     /* Track if we should process alignment (only if alignment colons were detected) */
     bool should_process_alignment = has_alignment_colons;
@@ -774,6 +821,16 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
             table_idx++; /* New table */
             row_idx = -1; /* Reset for each new table */
             in_thead = false;
+            /* Attributes are collected before this pass. Without a rowspan in
+             * this table, the previous-row search cannot cover any column. */
+            removed_rows = find_removed_rows(all_cells, attrs, table_idx);
+            table_has_rowspan = false;
+            for (cell_attr *a = attrs; a; a = a->next) {
+                if (a->table_index == table_idx && strstr(a->attributes, "rowspan=")) {
+                    table_has_rowspan = true;
+                    break;
+                }
+            }
 
             /* Check if this table has a caption (before fixing spacing so we can add figure tag) */
             table_caption *cap = NULL;
@@ -1108,27 +1165,25 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
              * because they don't generate new <td> tags in this row. */
             row_col_mapping_size = 0;
 
+            /* Collect this row's visible columns in one pass, retaining the
+             * existing 50-column mapping and ascending column order. */
+            bool visible_columns[50] = {false};
+            for (all_cell *c = all_cells; c; c = c->next) {
+                if (c->table_index == table_idx && c->row_index == ast_row_idx &&
+                    c->col_index >= 0 && c->col_index < 50 && !c->is_removed) {
+                    visible_columns[c->col_index] = true;
+                }
+            }
+
             /* For each original column, check if it renders a NEW cell in this HTML row */
             for (int orig_col = 0; orig_col < 50 && row_col_mapping_size < 50; orig_col++) {
-                bool renders_new_cell = false;
-
-                /* Check if this column has a non-removed cell in current AST row */
-                for (all_cell *c = all_cells; c; c = c->next) {
-                    if (c->table_index == table_idx &&
-                        c->row_index == ast_row_idx &&
-                        c->col_index == orig_col &&
-                        !c->is_removed) {
-                        /* This column has a new cell in the current row */
-                        renders_new_cell = true;
-                        break;
-                    }
-                }
+                bool renders_new_cell = visible_columns[orig_col];
 
                 /* Check if this column is covered by an active rowspan from a previous row.
                  * If a previous row has a cell with rowspan that's still active (spans to this row),
                  * then this column won't render a new <td> tag in this HTML row. */
                 bool covered_by_rowspan = false;
-                if (renders_new_cell && row_idx > 0) {
+                if (table_has_rowspan && renders_new_cell && row_idx > 0) {
                     /* Check all previous HTML rows to see if any have a rowspan covering this column */
                     for (int prev_html_row = 0; prev_html_row < row_idx; prev_html_row++) {
                         /* Map previous HTML row to AST row */
@@ -1203,43 +1258,8 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
              * forced the first footer row into tbody for normal GFM tables. */
             current_row_is_tfoot = false;
 
-            /* First, find the === row's AST index */
-            int min_equals_row_idx = -1;
-            for (int r = 0; r < 100; r++) {
-                int eq_total = 0;
-                int eq_removed = 0;
-                for (all_cell *c = all_cells; c; c = c->next) {
-                    if (c->table_index == table_idx && c->row_index == r) {
-                        eq_total++;
-                        if (c->is_removed) eq_removed++;
-                    }
-                }
-                if (eq_total > 0 && eq_total == eq_removed) {
-                    /* Prefer rows that look like === markers when attrs are available */
-                    bool looks_like_equals = false;
-                    if (attrs) {
-                        for (cell_attr *a = attrs; a; a = a->next) {
-                            if (a->table_index != table_idx || a->row_index != r || !a->cell_text)
-                                continue;
-                            const char *text = a->cell_text;
-                            while (*text && isspace((unsigned char)*text)) text++;
-                            if (text[0] == '=' && text[1] == '=' && text[2] == '=') {
-                                looks_like_equals = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (looks_like_equals || !attrs) {
-                        min_equals_row_idx = r;
-                        break;
-                    }
-                    /* Fully-removed non-equals row (e.g. em-dash helper): keep looking */
-                    if (min_equals_row_idx < 0) {
-                        /* fall through and continue search for a real === row */
-                    }
-                    continue;
-                }
-            }
+            /* The collected cells and attributes are immutable during this pass. */
+            int min_equals_row_idx = removed_rows.first_equals;
 
             /* Check if this row is marked as tfoot in the AST */
             bool is_marked_tfoot = false;
@@ -1399,62 +1419,21 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                         }
                     }
                 }
-                /* If this row contains === markers, skip it */
-                /* BUT: Don't skip if force_keep_row is true (first few rows are protected) */
+                /* HTML and AST row indices map 1:1. The preceding separator
+                 * must not cause this real footer row to be discarded. */
                 if (has_equals && !force_keep_row) {
                     should_skip_row = true;
-                } else {
-                    /* Also check previous AST row in case row mapping is off */
-                    /* BUT: Only do this check if we're actually in tfoot.
-                     * If current_row_is_tfoot is false, this row was forced to tbody,
-                     * so don't skip it even if the previous row has === markers. */
-                    if (ast_row_idx > 0 && current_row_is_tfoot) {
-                        int prev_ast_row = ast_row_idx - 1;
-                        for (cell_attr *a = attrs; a; a = a->next) {
-                            if (a->table_index == table_idx && a->row_index == prev_ast_row &&
-                                strstr(a->attributes, "data-remove") && a->cell_text) {
-                                const char *text = a->cell_text;
-                                while (*text && isspace((unsigned char)*text)) text++;
-                                    if (text[0] == '=' && text[1] == '=' && text[2] == '=') {
-                                        has_equals = true;
-                                        /* If previous row has === and this is first tfoot row, this HTML row is the === row */
-                                        /* BUT: Don't skip if this row was forced to tbody (row_idx <= 3) or force_keep_row is true */
-                                        if (row_idx <= 4 && !force_keep_row && !(min_equals_row_idx >= 0 && row_idx <= 3)) {
-                                            should_skip_row = true;
-                                        }
-                                        break;
-                                    }
-                            }
-                        }
-                    }
                 }
             }
             /* FINAL CHECK: If this row was forced to tbody (because it appears before === in HTML),
              * NEVER skip it, regardless of any other conditions. This check happens after all
              * skip logic has been evaluated, to ensure rows forced to tbody are always rendered.
              *
-             * IMPORTANT: This check must recalculate min_equals_row_idx to ensure it's available,
-             * in case it wasn't calculated earlier or was calculated incorrectly. */
+             * Reuse the same table-wide removed-row fallback as the original scan. */
             bool was_forced_to_tbody = false;
 
-            /* First, find the === row's AST index (recalculate if needed) */
-            int final_min_equals_row_idx = min_equals_row_idx;
-            if (final_min_equals_row_idx < 0) {
-                for (int r = 0; r < 100; r++) {
-                    int eq_total = 0;
-                    int eq_removed = 0;
-                    for (all_cell *c = all_cells; c; c = c->next) {
-                        if (c->table_index == table_idx && c->row_index == r) {
-                            eq_total++;
-                            if (c->is_removed) eq_removed++;
-                        }
-                    }
-                    if (eq_total > 0 && eq_total == eq_removed) {
-                        final_min_equals_row_idx = r;
-                        break;
-                    }
-                }
-            }
+            int final_min_equals_row_idx = min_equals_row_idx >= 0
+                ? min_equals_row_idx : removed_rows.first_removed;
 
             if (final_min_equals_row_idx >= 0) {
                 int html_rows_before_equals = -1;
@@ -2094,9 +2073,9 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                 }
             }
 
-            /* Also check if this cell contains "<< " or "&lt;&lt;" (colspan marker) - these should be removed */
+            /* Only a complete << or &lt;&lt; cell is a colspan marker. */
             /* Check both the preview and the actual content in the HTML */
-            bool is_colspan_marker = (strstr(cell_preview, "<<") != NULL || strstr(cell_preview, "&lt;&lt;") != NULL);
+            bool is_colspan_marker = (is_table_cell_marker(cell_preview, "<<") || is_table_cell_marker(cell_preview, "&lt;&lt;"));
             if (!is_colspan_marker) {
                 /* Also check the actual HTML content for "<< " or "&lt;&lt;" */
                 const char *content_check = strstr(read, ">");
@@ -2107,7 +2086,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                         char check_buf[100];
                         strncpy(check_buf, content_check + 1, close_check - content_check - 1);
                         check_buf[close_check - content_check - 1] = '\0';
-                        is_colspan_marker = (strstr(check_buf, "<<") != NULL || strstr(check_buf, "&lt;&lt;") != NULL);
+                        is_colspan_marker = (is_table_cell_marker(check_buf, "<<") || is_table_cell_marker(check_buf, "&lt;&lt;"));
                     }
                 }
             }
@@ -2115,7 +2094,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
             /* Check if this cell should be removed:
              * 1. If it's matched and marked for removal
              * 2. If it contains "^^" (rowspan marker)
-             * 3. If it contains "<< " or "&lt;&lt;" (colspan marker)
+             * 3. If it is a complete "<<" or "&lt;&lt;" colspan marker
              * 4. If it's empty and the previous cell in the same row has colspan (empty cells after colspan should be removed) */
             bool should_remove_cell = false;
             if (matching && strstr(matching->attributes, "data-remove")) {

@@ -21,6 +21,9 @@ The action sends a snapshot to Margined without writing a file. Run it again aft
 
 `Preview in Margined.js` is an equivalent Script-step alternative. Use one approach per action.
 
+The iOS development build supports the same snapshot URL. Enable the URL step on
+iOS when testing it. Live streaming remains a Mac feature.
+
 Drafts’ [URL step documentation](https://docs.getdrafts.com/docs/actions/steps/advanced) explains URL-encoded template tags.
 
 ## Live preview

@@ -42,7 +42,11 @@ struct SettingsView: View {
     private var content: some View {
         Form {
             Section("Document content") {
+                #if MARGINED_APP_STORE
+                PolicyRow(String(localized: "Local images"), value: String(localized: "Folder access"), help: String(localized: "Choose image folders in a document’s Reading options when macOS blocks access. Margined remembers the folders you select. Finder Quick Look has separate file access."))
+                #else
                 PolicyRow(String(localized: "Local images"), value: String(localized: "Automatic"), help: String(localized: "Local images load automatically from relative paths, absolute paths, file URLs and symlinks wherever macOS allows access. Margined does not require image-folder grants. Image formats are handled by WebKit. Quick Look supports embedded data images only."))
+                #endif
                 PolicyRow(String(localized: "Remote images"), value: String(localized: "Off by default"), help: String(localized: "In a document’s Reading options (…) choose Load Remote Images to allow HTTPS images for that window. Hosts can see your IP address and image requests. Margined sends no document referrer. The choice resets on closing; Quick Look never loads remote images."))
                 PolicyRow(String(localized: "Embedded HTML"), value: String(localized: "Sanitized formatting"), help: String(localized: "Safe HTML formatting and image width/height are supported. Scripts, interactive controls and embedded websites are blocked. Remote images still require this document’s opt-in."))
             }

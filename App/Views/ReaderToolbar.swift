@@ -51,6 +51,19 @@ struct ReaderToolbar: View {
 
             }
 
+            Button { reader.showDiscussions.toggle() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                    Text("Discussions")
+                    if let count = reader.rendered?.discussions?.threads.count, count > 0 {
+                        Text(count.formatted()).font(.caption.weight(.semibold)).monospacedDigit()
+                    }
+                }
+            }
+            .fixedSize().tint(reader.showDiscussions ? .accentColor : .secondary)
+            .accessibilityLabel("Discussions")
+            .help("Show or hide discussions stored in this Markdown file")
+
             Spacer(minLength: 8)
 
             if reader.isStreamingPreview {
@@ -128,6 +141,9 @@ struct ReaderToolbar: View {
                     }
                 }
                 .help("For this document only. Automatic detects its language on this Mac when enough text is available; choose a language to control pronunciation. Interface language is separate.")
+                #if MARGINED_APP_STORE
+                Button("Allow Image Folder…") { reader.allowImageFolder() }
+                #endif
                 Toggle("Load Remote Images", isOn: $reader.loadRemoteImages)
                     .help("For this document only. HTTPS image hosts can see your IP address and that you opened their image. Off each time a document is opened.")
                 Divider()

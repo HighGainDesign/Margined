@@ -4,15 +4,28 @@ options:
   minimumXcodeGenVersion: 2.44.0
   deploymentTarget:
     macOS: '14.0'
+    iOS: '17.0'
+configs:
+  Debug: debug
+  Release: release
+  AppStoreDebug: debug
+  AppStoreRelease: release
 settings:
+  configs:
+    AppStoreDebug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) DEBUG MARGINED_APP_STORE
+    AppStoreRelease:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) MARGINED_APP_STORE
+      MARKETING_VERSION: '2.0'
+      CURRENT_PROJECT_VERSION: 10
   base:
     SWIFT_VERSION: '6.0'
     SWIFT_STRICT_CONCURRENCY: complete
     CODE_SIGN_IDENTITY: '-'
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: UX8BPNLPX5
-    MARKETING_VERSION: '1.7.1'
-    CURRENT_PROJECT_VERSION: 44
+    MARKETING_VERSION: '2.0'
+    CURRENT_PROJECT_VERSION: 10
     ENABLE_DEBUG_DYLIB: NO
     SWIFT_EMIT_LOC_STRINGS: YES
 packages:
@@ -26,6 +39,7 @@ targets:
     type: application
     platform: macOS
     sources:
+      - path: UI
       - path: App
         excludes: [Resources]
       - path: App/Resources
@@ -42,8 +56,11 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Margined
+        ITSAppUsesNonExemptEncryption: false
+        NSHumanReadableCopyright: Copyright © 2026 HighGainDesign
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
         NSPrincipalClass: NSApplication
         NSHighResolutionCapable: true
         CFBundleDocumentTypes:
@@ -62,15 +79,18 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: Markdown preview
             CFBundleURLSchemes: [margined]
-    entitlements:
-      path: App/Margined.entitlements
-      properties:
-        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.margined]
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: App/Margined.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        AppStoreDebug:
+          CODE_SIGN_ENTITLEMENTS: App/MarginedAppStore.entitlements
+        AppStoreRelease:
+          CODE_SIGN_ENTITLEMENTS: App/MarginedAppStore.entitlements
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_MAC_PROFILE)
     dependencies:
       - package: Apex
         product: ApexC
@@ -106,6 +126,7 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-only: true
+        com.apple.security.temporary-exception.files.absolute-path.read-only: ['/']
         com.apple.security.network.client: true
         com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.margined]
     settings:
@@ -114,6 +135,9 @@ targets:
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
         ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        AppStoreRelease:
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_MAC_QUICKLOOK_PROFILE)
     dependencies:
       - package: Apex
         product: ApexC
@@ -121,12 +145,165 @@ targets:
   MarginedTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [Tests]
+    sources:
+      - path: Tests
+      - path: Benchmarks/Fixtures
+        buildPhase: resources
     dependencies:
       - target: Margined
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.tests
+        GENERATE_INFOPLIST_FILE: YES
+  MarginediOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: UI
+      - path: iOS
+        excludes: [Resources]
+      - path: iOS/Resources
+        buildPhase: resources
+      - path: Shared
+        excludes: [Resources]
+      - path: Shared/Resources
+        buildPhase: resources
+      - path: App/Resources
+        buildPhase: resources
+      - path: App/AppIcon.icon
+        buildPhase: resources
+      - path: App/Services/ImageSchemeHandler.swift
+      - path: App/Services/SpeechSession.swift
+      - path: App/Services/SpeechDriver.swift
+      - path: App/Services/SpeechPreferences.swift
+      - path: App/Services/ViewingBenchmarkMetrics.swift
+      - path: LICENSE
+        buildPhase: resources
+      - path: Fixtures/Rendering.md
+        buildPhase: resources
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: Margined
+        ITSAppUsesNonExemptEncryption: false
+        NSHumanReadableCopyright: Copyright © 2026 HighGainDesign
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSSupportsOpeningDocumentsInPlace: true
+        UIFileSharingEnabled: true
+        UIBackgroundModes: [audio]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Markdown
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [net.daringfireball.markdown]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: net.daringfireball.markdown
+            UTTypeDescription: Markdown document
+            UTTypeConformsTo: [public.plain-text]
+            UTTypeTagSpecification:
+              public.filename-extension: [md, markdown, mdown, mkd, mkdn]
+              public.mime-type: text/markdown
+        CFBundleURLTypes:
+          - CFBundleURLName: Markdown preview
+            CFBundleURLSchemes: [margined]
+    entitlements:
+      path: iOS/MarginediOS.entitlements
+      properties:
+        com.apple.security.application-groups: [group.design.highgain.margined]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
+        PRODUCT_MODULE_NAME: MarginediOS
+        MARKETING_VERSION: '2.0'
+        CURRENT_PROJECT_VERSION: 10
+        TARGETED_DEVICE_FAMILY: '1,2'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MACCATALYST: NO
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_IOS_PROFILE)
+    dependencies:
+      - package: Apex
+        product: ApexC
+      - package: SwiftSoup
+      - target: MarginediOSQuickLook
+        embed: true
+  MarginediOSQuickLook:
+    type: app-extension
+    platform: iOS
+    sources:
+      - QuickLook/PreviewProvider.swift
+      - path: LICENSE
+        buildPhase: resources
+      - path: Shared
+        excludes: [Resources]
+      - path: Shared/Resources
+        buildPhase: resources
+      - path: App/Resources
+        buildPhase: resources
+    info:
+      path: iOSQuickLook/Info.plist
+      properties:
+        CFBundleDisplayName: Margined Quick Look
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.preview
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewProvider
+          NSExtensionAttributes:
+            QLSupportedContentTypes: [net.daringfireball.markdown]
+            QLSupportsSearchableItems: false
+            QLIsDataBasedPreview: true
+    entitlements:
+      path: iOSQuickLook/MarginedQuickLook.entitlements
+      properties:
+        com.apple.security.application-groups: [group.design.highgain.margined]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.quicklook
+        MARKETING_VERSION: '2.0'
+        CURRENT_PROJECT_VERSION: 10
+        TARGETED_DEVICE_FAMILY: '1,2'
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SUPPORTS_MACCATALYST: NO
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_IOS_QUICKLOOK_PROFILE)
+    dependencies:
+      - package: Apex
+        product: ApexC
+      - package: SwiftSoup
+  MarginediOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - iOSTests
+      - Tests/ViewingBenchmarkMetricsTests.swift
+      - path: Benchmarks/Fixtures
+        buildPhase: resources
+      - Tests/PreviewDocumentTests.swift
+      - Tests/PrintContentTests.swift
+      - Tests/ConversationPlaybackTests.swift
+      - Tests/MarkdownSourceEditsTests.swift
+      - Tests/SourceFileEditTests.swift
+      - Tests/SourceFileGateTests.swift
+      - Tests/DiscussionSessionTests.swift
+      - Tests/DiscussionCodecTests.swift
+      - Tests/DiscussionReconciliationTests.swift
+      - Tests/DiscussionMarginTests.swift
+      - Tests/DiscussionAnchorTests.swift
+      - Tests/DiscussionWebTests.swift
+      - Tests/DiscussionRenderingTests.swift
+    dependencies:
+      - target: MarginediOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.ios.tests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
   Margined:
@@ -135,5 +312,29 @@ schemes:
         Margined: all
     test:
       targets: [MarginedTests]
+      environmentVariables:
+        MARGINED_TEST_PREFERENCES: '1'
+        MARGINED_CI_HEADLESS: $(MARGINED_CI_HEADLESS)
+  MarginedAppStore:
+    build:
+      targets:
+        Margined: all
+    run:
+      config: AppStoreDebug
+    test:
+      config: AppStoreDebug
+      targets: [MarginedTests]
+      environmentVariables:
+        MARGINED_TEST_PREFERENCES: '1'
+    archive:
+      config: AppStoreRelease
+    profile:
+      config: AppStoreRelease
+  MarginediOS:
+    build:
+      targets:
+        MarginediOS: all
+    test:
+      targets: [MarginediOSTests]
       environmentVariables:
         MARGINED_TEST_PREFERENCES: '1'

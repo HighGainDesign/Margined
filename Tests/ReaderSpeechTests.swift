@@ -6,6 +6,33 @@ import XCTest
 
 @MainActor
 final class ReaderSpeechTests: XCTestCase {
+    func testSourceInspectionKeepsStopReadingAvailableForItsOwner() async throws {
+        let reader = makeReader()
+        reader.source = "# Original\n\nA passage being read.\n"
+        reader.render(); try await settle(reader)
+        reader.speech.start()
+        defer { reader.stop() }
+        XCTAssertEqual(reader.speech.session.status, .playing)
+
+        reader.inspectDiscussionSource()
+        let window = try XCTUnwrap(NSApp.windows.first {
+            $0.isVisible && $0.windowController is ReaderDiscussionSourceWindow
+        })
+        defer { window.close() }
+        XCTAssertEqual(reader.speech.session.status, .playing, "Inspecting source must not stop playback")
+        let controller = try XCTUnwrap(window.windowController)
+        let item = NSMenuItem(title: "Stop Reading", action: NSSelectorFromString("stopSpeech:"), keyEquivalent: "")
+        let validation = controller as? any NSMenuItemValidation
+        XCTAssertTrue(validation?.validateMenuItem(item) == true,
+            "The source controller must keep Stop available for its owner")
+        let action = try XCTUnwrap(item.action)
+        if controller.responds(to: action) {
+            XCTAssertTrue(NSApp.sendAction(action, to: controller, from: item))
+        } else { XCTFail("The source window must handle Stop Reading") }
+        XCTAssertEqual(reader.speech.session.status, .idle, "Stop in the source window must stop its owner")
+        XCTAssertFalse(validation?.validateMenuItem(item) == true)
+    }
+
     func testPlaybackHoldsLatestFileUntilExplicitShowLatestEvenAfterStop() async throws {
         let reader = makeReader(); defer { reader.stop() }
         reader.fileURL = URL(fileURLWithPath: "/tmp/speech-held.md")
@@ -23,6 +50,43 @@ final class ReaderSpeechTests: XCTestCase {
         XCTAssertFalse(reader.playbackHolding)
         XCTAssertEqual(reader.source, "# Latest\n\nAgent text.\n")
         XCTAssertFalse(reader.hasPendingFileUpdate)
+    }
+
+    func testDiscussionOnlyRefreshKeepsSpeechPlayingAndUpdatesNotes() async throws {
+        let source = """
+        # Title
+
+        A readable passage.
+
+        <!-- margined:thread v1
+        id: t1
+        state: open
+        target: {type: TextQuoteSelector, exact: A readable passage., prefix: Title, suffix: ''}
+        messages:
+          - id: m1
+            author: Reviewer
+            created: "2026-10-23T09:00:00Z"
+            body: First note.
+        -->
+        """
+        let reader = makeReader(); defer { reader.stop() }
+        reader.fileURL = URL(fileURLWithPath: "/tmp/note-only-speech.md")
+        reader.source = source; reader.render(); try await settle(reader)
+        reader.speech.start()
+        XCTAssertEqual(reader.speech.session.status, .playing)
+        let fingerprint = reader.rendered?.speech?.fingerprint
+        let message = DiscussionMessage(id: "m2", author: "Another reviewer", created: "2026-10-23T10:00:00Z", body: "An external reply.", inReplyTo: "m1")
+        let parsed = try DiscussionCodec.parse(source)
+        let data = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .reply(threadID: "t1", message: message, reopenResolved: false), in: parsed), to: Data(source.utf8), expectedSource: source)
+        reader.receiveFileUpdate(try MarkdownSource.decode(data))
+        for _ in 0..<300 {
+            if reader.rendered?.discussions?.threads.first?.messages.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(reader.rendered?.discussions?.threads.first?.messages.count, 2)
+        XCTAssertFalse(reader.hasPendingFileUpdate)
+        XCTAssertEqual(reader.rendered?.speech?.fingerprint, fingerprint)
+        XCTAssertEqual(reader.speech.session.status, .playing)
     }
 
     func testClosingPlayerKeepsPendingVersionVisibleUntilExplicitShowLatest() async throws {

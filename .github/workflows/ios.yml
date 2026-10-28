@@ -1,0 +1,51 @@
+name: iOS validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Prepare project
+        run: |
+          brew install xcodegen
+          python3 script/verify-vendor.py
+          python3 script/validate-localizations.py
+          xcodegen generate
+      - name: Test on iPhone
+        run: |
+          device_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if "iPhone" in d["name"]))')
+          xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
+            -destination "platform=iOS Simulator,id=$device_id" \
+            -derivedDataPath "$RUNNER_TEMP/Margined-ios" CODE_SIGNING_ALLOWED=NO \
+            -parallel-testing-enabled NO test > "$RUNNER_TEMP/ios-tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-tests.log"; exit 1; }
+      - name: Build for iPad and iPhone devices
+        run: |
+          xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/Margined-device" \
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/ios-device.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-device.log"; exit 1; }
+      - name: Preserve test failure details
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-test-failure-details
+          path: |
+            ${{ runner.temp }}/ios-tests.log
+            ${{ runner.temp }}/ios-device.log
+            ${{ runner.temp }}/Margined-ios/Logs/Test
+          retention-days: 7

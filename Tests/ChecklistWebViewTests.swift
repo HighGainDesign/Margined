@@ -14,6 +14,7 @@ final class ChecklistWebViewTests: XCTestCase {
         reader.render()
         let controller = NSHostingController(rootView: ReaderView(reader: reader))
         let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 600, height: 400)); window.makeKeyAndOrderFront(nil)
         defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
         try await waitForDisabled(false, in: controller.view)
@@ -34,6 +35,7 @@ final class ChecklistWebViewTests: XCTestCase {
         let reader = ReaderState(); reader.fileURL = file; reader.source = text; reader.render()
         let controller = NSHostingController(rootView: ReaderView(reader: reader))
         let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 600, height: 400)); window.makeKeyAndOrderFront(nil)
         defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
         try await waitForDisabled(false, in: controller.view)
@@ -56,6 +58,100 @@ final class ChecklistWebViewTests: XCTestCase {
         XCTAssertEqual(try MarkdownSource.read(file), "- [ ] First\n- [x] Second\n- [ ] Third\n")
     }
 
+    func testConsentDismissesOutsideHostingLayout() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let text = "- [ ] Check consent dismissal\n"
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        let reader = ReaderState(); reader.fileURL = file; reader.source = text; reader.render()
+        let host = ConsentLayoutHost(rootView: ReaderView(reader: reader))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        let observation = ConsentDismissalObservation()
+        observation.host = host
+        let token = NotificationCenter.default.addObserver(forName: NSWindow.didEndSheetNotification,
+                                                          object: window, queue: .main) { _ in
+            MainActor.assumeIsolated { observation.record() }
+        }
+        defer {
+            NotificationCenter.default.removeObserver(token)
+            window.close(); reader.stop(); try? FileManager.default.removeItem(at: file)
+        }
+        try await waitForDisabled(false, in: host)
+        reader.requestTaskChecked(0, checked: true)
+        try await waitForDisabled(true, in: host)
+        reader.cancelChecklistConfirmation()
+        try await waitForDisabled(false, in: host)
+        for _ in 0..<100 {
+            if !observation.duringLayout.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(observation.duringLayout, [false],
+                       "Closing the consent sheet during SwiftUI layout can recursively enter the macOS update cycle")
+        XCTAssertEqual(try MarkdownSource.read(file), text)
+    }
+
+    func testNativeConsentButtonsCancelThenSaveOnlyTheRequestedTask() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let text = "- [ ] First\n- [ ] Second\n"
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        let reader = ReaderState(); reader.fileURL = file; reader.source = text; reader.render()
+        let controller = NSHostingController(rootView: ReaderView(reader: reader))
+        let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 600, height: 400)); window.makeKeyAndOrderFront(nil)
+        defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
+        try await waitForDisabled(false, in: controller.view)
+        reader.requestTaskChecked(0, checked: true)
+        try await waitForDisabled(true, in: controller.view)
+        let cancel = try XCTUnwrap(button(named: String(localized: "Cancel"), in: window.attachedSheet?.contentView))
+        cancel.performClick(nil)
+        try await waitForDisabled(false, in: controller.view)
+        XCTAssertFalse(reader.checklistMode)
+        XCTAssertNil(reader.pendingChecklistConfirmation)
+        XCTAssertEqual(try MarkdownSource.read(file), text)
+        reader.requestTaskChecked(1, checked: true)
+        try await waitForDisabled(true, in: controller.view)
+        let save = try XCTUnwrap(button(named: String(localized: "Save Checkmarks"), in: window.attachedSheet?.contentView))
+        save.performClick(nil)
+        try await waitForDisabled(false, in: controller.view)
+        XCTAssertTrue(reader.checklistMode)
+        XCTAssertTrue(reader.canUndoChecklist)
+        XCTAssertEqual(try MarkdownSource.read(file), "- [ ] First\n- [x] Second\n")
+    }
+
+    func testRemovingReaderDuringConsentClosesItsSheetWithoutSaving() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let text = "- [ ] Leave unchanged\n"
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        let reader = ReaderState(); reader.fileURL = file; reader.source = text; reader.render()
+        let controller = NSHostingController(rootView: AnyView(ReaderView(reader: reader)))
+        let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 600, height: 400)); window.makeKeyAndOrderFront(nil)
+        defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
+        try await waitForDisabled(false, in: controller.view)
+        reader.requestTaskChecked(0, checked: true)
+        try await waitForDisabled(true, in: controller.view)
+        controller.rootView = AnyView(EmptyView())
+        for _ in 0..<150 {
+            if window.attachedSheet == nil && !reader.showChecklistConfirmation { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(window.attachedSheet)
+        XCTAssertFalse(reader.showChecklistConfirmation)
+        XCTAssertNil(reader.pendingChecklistConfirmation)
+        XCTAssertEqual(try MarkdownSource.read(file), text)
+    }
+
+    private func button(named title: String, in view: NSView?) -> NSButton? {
+        guard let view else { return nil }
+        if let button = view as? NSButton, button.title == title { return button }
+        return view.subviews.lazy.compactMap { self.button(named: title, in: $0) }.first
+    }
+
     private func waitForFocus(_ id: String, in webView: WKWebView) async throws {
         for _ in 0..<150 {
             if !webView.isLoading,
@@ -76,6 +172,7 @@ final class ChecklistWebViewTests: XCTestCase {
         let reader = ReaderState(); reader.fileURL = file; reader.source = text; reader.checklistMode = true; reader.render()
         let controller = NSHostingController(rootView: ReaderView(reader: reader))
         let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 600, height: 450)); window.makeKeyAndOrderFront(nil)
         defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
         try await waitForDisabled(false, in: controller.view)
@@ -122,6 +219,7 @@ final class ChecklistWebViewTests: XCTestCase {
         let reader = ReaderState(); reader.fileURL = file; reader.source = "- [ ] Task\n"; reader.render()
         let controller = NSHostingController(rootView: ReaderView(reader: reader))
         let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 600, height: 400)); window.orderFront(nil)
         defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
         try await waitForDisabled(false, in: controller.view)
@@ -142,13 +240,10 @@ final class ChecklistWebViewTests: XCTestCase {
     private func waitForDisabled(_ expected: Bool, in view: NSView) async throws {
         for _ in 0..<150 {
             // Wait for the native sheet lifecycle, not only the earlier DOM state.
-            // Disable animation in this fixture to avoid macOS27's UpdateCycle
-            // close-sheet crash; actual app consent behavior remains unchanged.
             if expected {
-                guard let sheet = view.window?.attachedSheet else {
+                guard view.window?.attachedSheet != nil else {
                     try await Task.sleep(for: .milliseconds(20)); continue
                 }
-                sheet.animationBehavior = .none
             } else if view.window?.attachedSheet != nil {
                 try await Task.sleep(for: .milliseconds(20)); continue
             }
@@ -165,4 +260,22 @@ final class ChecklistWebViewTests: XCTestCase {
         for child in view.subviews { if let found = findWebView(child) { return found } }
         return nil
     }
+}
+
+
+@MainActor
+private final class ConsentLayoutHost: NSHostingView<ReaderView> {
+    private(set) var layoutDepth = 0
+    override func layout() {
+        layoutDepth += 1
+        defer { layoutDepth -= 1 }
+        super.layout()
+    }
+}
+
+@MainActor
+private final class ConsentDismissalObservation {
+    weak var host: ConsentLayoutHost?
+    var duringLayout: [Bool] = []
+    func record() { duringLayout.append((host?.layoutDepth ?? 0) > 0) }
 }
