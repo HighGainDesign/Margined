@@ -21,7 +21,7 @@ struct PreviewDocument: Sendable {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let source = try MarkdownSource.read(url)
         let rendered = try await MarkdownRenderer.shared.render(source, title: url.lastPathComponent,
-            wide: true, appearance: appearance, includeDiscussionAppendix: true)
+            wide: true, appearance: appearance)
         return try await package(html: rendered.html, documentURL: url)
     }
 

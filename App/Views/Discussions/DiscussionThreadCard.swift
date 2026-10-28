@@ -4,6 +4,7 @@ import SwiftUI
 struct DiscussionThreadCard: View {
     let reader: ReaderState
     let thread: DiscussionThread
+    var revealComposer: () -> Void = {}
     @FocusState private var headerFocused: Bool
     @AccessibilityFocusState private var accessibleHeaderFocused: Bool
     private var selected: Bool { reader.discussions.selection == .thread(thread.id) }
@@ -56,7 +57,7 @@ struct DiscussionThreadCard: View {
                     .help("Select replacement text in the document, then compare the old and new passages before attaching.")
                 history
                 if thread.state == .resolved { Label("Resolved", systemImage: "checkmark.circle").font(.caption) }
-                DiscussionComposer(reader: reader, key: .thread(thread.id), isReply: true)
+                DiscussionComposer(reader: reader, key: .thread(thread.id), isReply: true, reveal: revealComposer)
             }
         }
         .padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))

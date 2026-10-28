@@ -101,15 +101,15 @@ struct ReaderToolbar: View {
             }
 
             Button {
-                if let speech = reader.existingSpeech, speech.showPlayer { speech.close() }
-                else { reader.speech.showPlayer = true }
+                reader.speech.showPlayer = true
+                reader.speech.togglePlayback()
             } label: {
                 if compact { Image(systemName: "headphones").frame(width: 18, height: 20) }
-                else { Label("Read Aloud", systemImage: "headphones") }
+                else { Label(speechActionTitle, systemImage: "headphones") }
             }
             .fixedSize().tint(reader.existingSpeech?.showPlayer == true ? .accentColor : .secondary)
             .disabled(reader.rendered?.speech?.segments.isEmpty ?? true)
-            .accessibilityLabel("Read Aloud controls").help("Show or hide Read Aloud controls")
+            .accessibilityLabel(speechActionTitle).help(speechActionTitle)
 
             Button { reader.showFind.toggle() } label: {
                 Image(systemName: "magnifyingglass").frame(width: 18, height: 20)
@@ -171,6 +171,13 @@ struct ReaderToolbar: View {
 
     private var toolSeparator: some View {
         Divider().frame(height: 18).padding(.horizontal, 2).accessibilityHidden(true)
+    }
+    private var speechActionTitle: String {
+        switch reader.existingSpeech?.session.status {
+        case .playing: String(localized: "Pause Reading")
+        case .paused: String(localized: "Resume Reading")
+        default: String(localized: "Read Aloud")
+        }
     }
 }
 

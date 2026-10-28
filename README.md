@@ -90,7 +90,8 @@ Quick Look, snapshots and live streams remain read-only.
 
 ## Read Aloud and print
 
-Open **Read Aloud** to play from the beginning, current section or selected text.
+On Mac, **Read Aloud** starts or resumes playback; click again to pause.
+The player also offers playback from the beginning, current section or selected text.
 Pause, stop, skip sections, choose a voice or adjust speed. **Follow Reading**
 scrolls without moving keyboard focus. **Read Conversation** includes saved
 messages; document language controls pronunciation, not interface language.
@@ -137,11 +138,13 @@ On iOS 27 and some earlier versions, Files currently shows standard Markdown as
 plain text instead of dispatching to Margined’s extension. Use **Open With** or
 **Share → Margined** for formatted reading. The app’s guide explains this limitation.
 Where Quick Look dispatches the extension, it uses the shared offline renderer
-and includes saved discussions as a read-only appendix.
+and previews the document. Open Margined for discussions; use **Print with
+Discussions** or **Export Conversations** to include them explicitly.
 
 ## Reading controls and accessibility
 
-Settings chooses appearance and the opening width default. The **↔** button changes
+Appearance applies to documents and app controls. Settings also chooses the
+opening width default. The **↔** button changes
 only the current document’s width. Tables fill that width and scroll horizontally
 when needed. Sidebars adapt to usable space and text size rather than device name
 or orientation. Interface language follows the operating system’s per-app setting.
