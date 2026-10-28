@@ -50,6 +50,7 @@ struct MobileDiscussionList: View {
 
 struct MobileDiscussionThread: View {
     @Bindable var reader: MobileReaderState
+    @Environment(\.dynamicTypeSize) private var textSize
     let key: DiscussionSession.DraftKey
     var viewport = CGSize.zero
     var contentWidthChanged: (Double) -> Void = { _ in }
@@ -61,26 +62,33 @@ struct MobileDiscussionThread: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 0) {
-                MobileDiscussionScrollSection(maxHeight: min(140, geometry.size.height * 0.25)) {
+                MobileDiscussionScrollSection(maxHeight: min(120, geometry.size.height * 0.15)) {
                     Text(verbatim: quote)
                         .font(.body).textSelection(.enabled).padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityLabel(String(localized: "Quoted passage") + ", " + quote)
                 }.background(.quaternary)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
-                        if let thread { MobileDiscussionControls(reader: reader, thread: thread) }
-                        MobileDiscussionDecisionView(reader: reader, key: key)
-                        if let thread { MobileDiscussionMessages(reader: reader, thread: thread) }
-                        if let error = reader.discussionError {
-                            Label(error, systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.red).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 12) {
+                    MobileDiscussionScrollSection(maxHeight: min(140, geometry.size.height * 0.18)) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let thread { MobileDiscussionControls(reader: reader, thread: thread) }
+                            MobileDiscussionDecisionView(reader: reader, key: key)
+                            if let error = reader.discussionError {
+                                Label(error, systemImage: "exclamationmark.triangle")
+                                    .foregroundStyle(.red).textSelection(.enabled)
+                            }
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                }.layoutPriority(1)
+                    }
+                    if let thread {
+                        // The history owns the conversation scroll; an outer
+                        // ScrollView must not clip or compete with WebKit.
+                        MobileDiscussionMessages(reader: reader, thread: thread, fillsAvailableSpace: true)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else { Spacer(minLength: 0) }
+                }.padding(16).layoutPriority(1)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                MobileDiscussionScrollSection(maxHeight: max(110, geometry.size.height * 0.45)) {
+                MobileDiscussionScrollSection(maxHeight: max(110, geometry.size.height * (textSize.isAccessibilitySize ? 0.30 : 0.45))) {
                     MobileDiscussionComposer(reader: reader, key: key).padding(16)
                 }.background(.bar)
             }
@@ -133,6 +141,7 @@ struct MobileDiscussionSummary: View {
 private struct MobileDiscussionMessages: View {
     let reader: MobileReaderState
     let thread: DiscussionThread
+    var fillsAvailableSpace = false
     var body: some View {
         let context = reader.documentGeneration, playback = reader.playback
         DiscussionHistoryView(documentID: context, thread: thread, fileURL: reader.fileURL,
@@ -163,7 +172,7 @@ private struct MobileDiscussionMessages: View {
                 }, resumeDocument: {
                     guard playback.ownerID == reader.id, playback.conversationID == thread.id else { return }
                     reader.resumeSpeechPosition()
-                }, showLatest: { reader.showLatest() }))
+                }, showLatest: { reader.showLatest() }), fillsAvailableSpace: fillsAvailableSpace)
     }
 }
 

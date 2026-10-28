@@ -299,6 +299,7 @@ targets:
       - Tests/DiscussionAnchorTests.swift
       - Tests/DiscussionWebTests.swift
       - Tests/DiscussionRenderingTests.swift
+      - Tests/DiscussionHistoryLifecycleTests.swift
     dependencies:
       - target: MarginediOS
     settings:

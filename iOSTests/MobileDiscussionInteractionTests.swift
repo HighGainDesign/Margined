@@ -7,6 +7,86 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    func testCompactConversationUsesAvailableHeightAndKeepsEveryReplyAcrossRotation() async throws {
+        let f = try await fixture(withThread: true)
+        let paragraphs = (0..<35).map { "Saved history paragraph \($0)." }.joined(separator: "\n\n")
+        let bytes = try appendHistoryReply(paragraphs + "\n\nLast saved message marker.",
+            id: "m-long-history", file: f.file, threadID: "t-mobile")
+        await f.reader.refresh(); await f.reader.waitForRendering()
+        f.window.frame.size = CGSize(width: 626, height: 1194)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this unposted reply through rotation.", for: .thread("t-mobile"))
+        let ready = await pollAsync {
+            guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
+            return try await history.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.body.style.fontSize!==''") as? Bool == true
+        }
+        XCTAssertTrue(ready); guard ready else { return }
+        let history = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
+        XCTAssertGreaterThan(history.bounds.height, 350,
+            "A tall portrait conversation must use its available reading space rather than a fixed 240-point viewport")
+        let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+        _ = try await history.takeSnapshot(configuration: configuration)
+        _ = try await history.callAsyncJavaScript("await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); return true;",
+            arguments: [:], in: nil, contentWorld: .defaultClient)
+        history.scrollView.setContentOffset(CGPoint(x: 0,
+            y: max(0, history.scrollView.contentSize.height - history.scrollView.bounds.height)), animated: false)
+        let tail = await pollAsync {
+            try await history.evaluateJavaScript("""
+            (()=>{const p=Array.from(document.querySelectorAll('article:last-of-type p')).find(p=>p.textContent.includes('Last saved message marker.')), r=p?.getBoundingClientRect();
+            return p?.textContent.includes('Last saved message marker.') && r.bottom<=innerHeight+2 && r.top>=-2;})()
+            """) as? Bool == true
+        }
+        if !tail {
+            let metrics = try await history.evaluateJavaScript("""
+            (()=>{const p=Array.from(document.querySelectorAll('article:last-of-type p')).find(p=>p.textContent.includes('Last saved message marker.'));
+            const r=p?.getBoundingClientRect();return {font:document.body.style.fontSize,y:scrollY,height:innerHeight,
+                page:document.documentElement.scrollHeight,top:r?.top??-1,bottom:r?.bottom??-1};})()
+            """)
+            print("MARGINED-HISTORY-TAIL \(String(describing: metrics)) nativeContent=\(history.scrollView.contentSize) offset=\(history.scrollView.contentOffset) bounds=\(history.bounds) insets=\(history.scrollView.adjustedContentInset)")
+        }
+        XCTAssertTrue(tail, "The native history scroll must reveal the last saved message")
+        for size in [CGSize(width: 1194, height: 834), CGSize(width: 626, height: 1194)] {
+            f.window.frame.size = size; f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled)
+            let restored = await pollAsync {
+                guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
+                return try await web.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.body.textContent.includes('Last saved message marker.')") as? Bool == true
+            }
+            XCTAssertTrue(restored, "Every saved reply must remain available in either layout")
+            XCTAssertEqual(self.editor(in: f.host.view)?.text, "Keep this unposted reply through rotation.")
+            XCTAssertEqual(f.reader.discussions.selection, .thread("t-mobile"))
+        }
+        XCTAssertEqual(try Data(contentsOf: f.file), bytes)
+    }
+
+    func testFirstAddFromAnAnnotatedSelectionInTheDockedInspectorStartsItsComposer() async throws {
+        let f = try await fixture(withThread: true)
+        f.window.frame.size = CGSize(width: 1194, height: 834)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        f.reader.inspector = .discussions
+        let decorated = await pollAsync {
+            try await f.web.evaluateJavaScript("document.querySelectorAll('[data-margined-thread]').length>0") as? Bool == true
+        }
+        XCTAssertTrue(decorated)
+        _ = try await f.web.evaluateJavaScript("""
+        const p=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.includes('bold'));
+        const r=document.createRange();r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);true;
+        """)
+        f.reader.requestAddDiscussion()
+        let created = await poll { if case .new = f.reader.discussions.selection { return true }; return false }
+        XCTAssertTrue(created, "One invocation must start the native composer for the selected annotated passage")
+        XCTAssertNil(f.reader.discussionPassagePicker)
+        if let key = f.reader.discussions.selection {
+            XCTAssertEqual(f.reader.discussions.drafts[key]?.target?.exact, "Café bold passage.")
+        }
+        let mounted = await poll { self.editor(in: f.host.view) != nil }
+        XCTAssertTrue(mounted)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
     func testLargestTextLeavesConversationSpaceWhileKeepingAnUnpostedReply() async throws {
         let f = try await fixture(withThread: true)
         try await assertAccessibleConversationFits(f, expectedSource: f.original)
@@ -63,13 +143,10 @@ import XCTest
         guard ready else { return }
         let history = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
         let editor = try XCTUnwrap(self.editor(in: f.host.view))
-        var ancestor = history.superview
-        while ancestor != nil && !(ancestor is UIScrollView) { ancestor = ancestor?.superview }
-        let conversation = try XCTUnwrap(ancestor as? UIScrollView)
-        // UIKit insets describe the actual unobscured viewport, including a
-        // SwiftUI safe-area composer that can otherwise cover the whole screen.
-        let insets = conversation.adjustedContentInset
-        let available = max(0, conversation.bounds.height - insets.top - insets.bottom)
+        // The history now owns its scroll instead of sitting in another
+        // ScrollView. Measure its actual unclipped native viewport.
+        let frame = history.convert(history.bounds, to: f.host.view)
+        let available = frame.intersection(f.host.view.bounds).height
         XCTAssertGreaterThanOrEqual(available, 140,
             "At the largest text size, the conversation still needs room to read several lines")
         XCTAssertGreaterThanOrEqual(editor.font?.pointSize ?? 0, 35,
