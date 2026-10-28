@@ -13,9 +13,9 @@ struct MobileRootView: View {
     @AppStorage(ReaderPreferences.appearanceKey, store: ReaderPreferences.defaults) private var appearance = DocumentAppearance.system
     @Environment(\.scenePhase) private var scenePhase
 
-    init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders) {
+    init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders, reader: MobileReaderState? = nil) {
         self.imageFolders = imageFolders
-        _reader = State(initialValue: MobileReaderState(playback: playback))
+        _reader = State(initialValue: reader ?? MobileReaderState(playback: playback))
     }
 
     var body: some View {
@@ -24,7 +24,7 @@ struct MobileRootView: View {
                 MobileDocumentWorkspace(reader: reader, openFolder: { pickFolder() },
                     closeFile: { Task { await reader.close() } }).id(reader.id)
             } else {
-                NavigationStack { libraryView.navigationTitle("Margined").navigationBarTitleDisplayMode(.inline) }
+                libraryView
             }
         }
         .overlay { if reader.isOpening || imageFolders.isRestoring { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
@@ -107,47 +107,22 @@ struct MobileRootView: View {
     }
 
     private var libraryView: some View {
-        List {
-            Section {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.richtext").font(.system(size: 48)).foregroundStyle(.blue).accessibilityHidden(true)
-                    Text("Your Markdown, clearly.").font(.title2.bold())
-                    Text("Open a document from Files to read, follow changes, or listen.")
-                        .multilineTextAlignment(.center).foregroundStyle(.secondary)
-                    Button(action: { pickFile() }) { Label("Open Document…", systemImage: "folder") }
-                        .labelStyle(.titleAndIcon)
-                        .buttonStyle(.borderedProminent).controlSize(.large)
-                    Button("Open Sample Document") { Task { await openSample() } }
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 24)
-            }
-            if !library.recents.isEmpty {
-                Section("Recent Documents") {
-                    ForEach(library.recents) { item in
-                        Button {
-                            Task {
-                                do { await open(try await library.resolve(item.id)) }
-                                catch { reader.errorMessage = error.localizedDescription }
-                            }
-                        } label: { Label(item.title, systemImage: "doc.text").foregroundStyle(.primary) }
-                    }
-                    .onDelete { indices in
-                        let ids = indices.map { library.recents[$0].id }
-                        for id in ids { library.remove(id: id) }
-                    }
+        MobileDocumentBrowser(open: { await open($0) }, tour: { activeSheet = .guide }, settings: { activeSheet = .settings })
+            .safeAreaInset(edge: .bottom) {
+                if let error = reader.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red).padding().background(.bar)
                 }
             }
-            if let error = reader.errorMessage { Section { Text(error).foregroundStyle(.red).accessibilityLabel(error) } }
-        }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Settings", systemImage: "gearshape") { activeSheet = .settings } } }
     }
 
     private func pickFile() { pickingFolder = false; showPicker = true }
     private func pickFolder() { pickingFolder = true; showPicker = true }
-    private func open(_ url: URL) async {
+    @discardableResult private func open(_ url: URL) async -> Bool {
         await imageFolders.restore()
         await reader.open(url: url)
         if reader.fileURL == url { try? await library.remember(url) }
+        return reader.hasDocument
     }
     private func openSample() async {
         do {
