@@ -8,7 +8,7 @@ ordinary `.md` files that people and agents can use in their own tools.
 to try passage discussions alongside the established reading, Quick Look, live
 streaming and change-review features. Discussions remain experimental, with known
 scrolling and layout issues. iPhone/iPad TestFlight testing remains invitation-only.
-Public Mac TestFlight availability will be linked here after Apple's beta review.
+Join the [public Mac TestFlight beta](https://testflight.apple.com/join/CDxY24jy).
 
 ## Install and open
 
