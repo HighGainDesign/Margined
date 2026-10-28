@@ -17,9 +17,10 @@ drag Margined to **Applications**, then eject the installer. Quit the app before
 replacing it with an update. Requires macOS 14+; the iPhone/iPad app requires iOS 17+.
 
 On Mac, use **File → Open** or Finder’s **Open With → Margined**. On iPhone/iPad,
-use **Open Document…**, Files **Open With**, or **Share → Margined**. The reader’s
-**×** closes the document and returns to the library; Settings is in the library.
-The Getting Started guide explains folder access and Quick Look.
+browse Recents and Files, or use Files **Open With** or **Share → Margined**.
+The reader’s **×** returns to the browser, which also offers Settings and
+**Take a Tour**. The replayable tour covers Quick Look, live streaming on Mac,
+change review, discussions, checklists and image folders using disposable files.
 
 - Tables, task lists, links, footnotes, GitHub alerts, math and Mermaid.
 - Outline navigation, find, zoom, full/comfortable width and System/Light/Dark appearance.

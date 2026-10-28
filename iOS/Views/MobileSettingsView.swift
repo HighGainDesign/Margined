@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 struct MobileSettingsView: View {
     @Bindable var reader: MobileReaderState
     @Bindable var imageFolders: MobileImageFolders
+    let tutorial: TutorialSession
+    let openPractice: (TutorialLesson) -> Void
+    @State private var showTour = false
     @State private var showFolderPicker = false
     @State private var folderError: String?
     @AppStorage(ReaderPreferences.appearanceKey, store: ReaderPreferences.defaults) private var appearance = DocumentAppearance.system.rawValue
@@ -55,9 +58,7 @@ struct MobileSettingsView: View {
                     Button("Clear Reading History", role: .destructive) { reader.playback.clearHistory() }
                 }
                 Section {
-                    NavigationLink {
-                        MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() })
-                    } label: { Label("Getting Started", systemImage: "questionmark.circle") }
+                    Button { showTour = true } label: { Label("Take a Tour", systemImage: "questionmark.circle") }
                 }
                 Section { Text("Margined 2.0 · iOS development build").foregroundStyle(.secondary) }
             }
@@ -79,6 +80,11 @@ struct MobileSettingsView: View {
                 }
             case let .failure(error): folderError = error.localizedDescription
             }
+        }
+        .sheet(isPresented: $showTour) {
+            MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial,
+                openPractice: { lesson in showTour = false; openPractice(lesson) })
+                .preferredColorScheme(appearance == "system" ? nil : (appearance == "dark" ? .dark : .light))
         }
         .onChange(of: appearance) { _, value in reader.appearance = DocumentAppearance(rawValue: value) ?? .system }
     }

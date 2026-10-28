@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 struct MobileRootView: View {
     @State private var reader: MobileReaderState
     @State private var library = MobileDocumentLibrary()
+    @State private var tutorial: TutorialSession
+    @State private var pendingPractice: URL?
     let imageFolders: MobileImageFolders
     @State private var showPicker = false
     @State private var pickingFolder = false
@@ -13,16 +15,22 @@ struct MobileRootView: View {
     @AppStorage(ReaderPreferences.appearanceKey, store: ReaderPreferences.defaults) private var appearance = DocumentAppearance.system
     @Environment(\.scenePhase) private var scenePhase
 
-    init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders, reader: MobileReaderState? = nil) {
+    init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders, reader: MobileReaderState? = nil, tutorial: TutorialSession? = nil) {
         self.imageFolders = imageFolders
         _reader = State(initialValue: reader ?? MobileReaderState(playback: playback))
+        _tutorial = State(initialValue: tutorial ?? TutorialSession(platform: .mobile))
     }
 
     var body: some View {
         Group {
             if reader.hasDocument {
                 MobileDocumentWorkspace(reader: reader, openFolder: { pickFolder() },
-                    closeFile: { Task { await reader.close() } }).id(reader.id)
+                    closeFile: { Task { await reader.close() } })
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        if let practice = tutorial.practice(for: reader.fileURL) {
+                            TutorialPracticeBar(session: tutorial, practice: practice, tour: { activeSheet = .guide })
+                        }
+                    }.id(reader.id)
             } else {
                 libraryView
             }
@@ -54,12 +62,12 @@ struct MobileRootView: View {
         } message: {
             Text("Keep this document open to finish your comments and replies, or discard the unposted text.")
         }
-        .sheet(item: $activeSheet) { destination in
+        .sheet(item: $activeSheet, onDismiss: openPendingPractice) { destination in
             Group {
                 switch destination {
-                case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders)
+                case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders, tutorial: tutorial, openPractice: preparePractice)
                 case .guide:
-                    NavigationStack { MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }) }
+                    MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial, openPractice: preparePractice)
                 }
             }
             .preferredColorScheme(appearance == .system ? nil : (appearance == .dark ? .dark : .light))
@@ -116,7 +124,6 @@ struct MobileRootView: View {
             }
     }
 
-    private func pickFile() { pickingFolder = false; showPicker = true }
     private func pickFolder() { pickingFolder = true; showPicker = true }
     @discardableResult private func open(_ url: URL) async -> Bool {
         await imageFolders.restore()
@@ -124,20 +131,18 @@ struct MobileRootView: View {
         if reader.fileURL == url { try? await library.remember(url) }
         return reader.hasDocument
     }
-    private func openSample() async {
-        do {
-            let folder = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let sampleFolder = folder.appendingPathComponent("Margined Sample", isDirectory: true)
-            try FileManager.default.createDirectory(at: sampleFolder, withIntermediateDirectories: true)
-            let image = sampleFolder.appendingPathComponent("sample.svg")
-            if !FileManager.default.fileExists(atPath: image.path), let sample = Bundle.main.url(forResource: "sample", withExtension: "svg") {
-                try FileManager.default.copyItem(at: sample, to: image)
-            }
-            let url = sampleFolder.appendingPathComponent("Welcome.md")
-            if !FileManager.default.fileExists(atPath: url.path), let sample = Bundle.main.url(forResource: "Welcome", withExtension: "md") {
-                try FileManager.default.copyItem(at: sample, to: url)
-            }
-            await open(url)
-        } catch { reader.errorMessage = error.localizedDescription }
+    private func preparePractice(_ lesson: TutorialLesson) {
+        Task {
+            do {
+                pendingPractice = try await tutorial.makePractice(lesson)
+                activeSheet = nil
+            } catch is CancellationError { }
+            catch { tutorial.error = error.localizedDescription }
+        }
+    }
+    private func openPendingPractice() {
+        guard let url = pendingPractice else { return }
+        pendingPractice = nil
+        Task { await open(url) }
     }
 }

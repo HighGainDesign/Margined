@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
     private var welcome: NSWindowController?
+    let tutorial = TutorialSession()
     private var settings: NSWindowController?
     private var setup: SetupWindowController?
     private let applicationAppearance = ApplicationAppearance()
@@ -77,16 +78,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             documentDidOpen()
             return
         }
+        let view = WelcomeView(recentDocuments: NSDocumentController.shared.recentDocumentURLs,
+            open: { NSDocumentController.shared.openDocument(nil) },
+            liveStreaming: { [weak self] in self?.showLiveStreamingPreview() },
+            openRecent: { [weak self] url in self?.application(NSApp, open: [url]) },
+            tour: { [weak self] in self?.showStartupTips(force: true) })
         if welcome == nil {
-            let view = WelcomeView(open: { NSDocumentController.shared.openDocument(nil) },
-                                   liveStreaming: { [weak self] in self?.showLiveStreamingPreview() })
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = String(localized: "Margined")
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.contentMinSize = NSSize(width: 480, height: 380)
-            window.setContentSize(NSSize(width: 520, height: 440))
+            window.setContentSize(NSSize(width: 840, height: 560))
             window.center()
             welcome = NSWindowController(window: window)
+        } else {
+            (welcome?.window?.contentViewController as? NSHostingController<WelcomeView>)?.rootView = view
         }
         welcome?.showWindow(nil)
     }
@@ -146,13 +152,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         settings?.showWindow(nil)
     }
 
+    func openSettings() { showSettings(nil) }
+
+    func openTutorialPractice(_ lesson: TutorialLesson) {
+        Task {
+            do {
+                let url = try await tutorial.makePractice(lesson)
+                application(NSApp, open: [url])
+            } catch is CancellationError { }
+            catch { tutorial.error = error.localizedDescription }
+        }
+    }
+
     func showStartupTips(force: Bool = false) {
         if let setup, setup.window?.isVisible == true {
             setup.showWindow(nil)
             return
         }
         guard force || StartupTips.shouldShow() else { return }
-        let controller = SetupWindowController()
+        let controller = SetupWindowController(tutorial: tutorial)
         setup = controller
         controller.showWindow(nil)
     }

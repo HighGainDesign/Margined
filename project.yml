@@ -284,6 +284,7 @@ targets:
     sources:
       - iOSTests
       - Tests/ViewingBenchmarkMetricsTests.swift
+      - Tests/TutorialPracticeTests.swift
       - path: Benchmarks/Fixtures
         buildPhase: resources
       - Tests/PreviewDocumentTests.swift
