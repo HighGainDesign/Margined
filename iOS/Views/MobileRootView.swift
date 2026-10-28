@@ -55,11 +55,14 @@ struct MobileRootView: View {
             Text("Keep this document open to finish your comments and replies, or discard the unposted text.")
         }
         .sheet(item: $activeSheet) { destination in
-            switch destination {
-            case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders)
-            case .guide:
-                NavigationStack { MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }) }
+            Group {
+                switch destination {
+                case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders)
+                case .guide:
+                    NavigationStack { MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }) }
+                }
             }
+            .preferredColorScheme(appearance == .system ? nil : (appearance == .dark ? .dark : .light))
         }
         .onChange(of: activeSheet) { previous, current in
             // The guide's nested Files picker does not change this destination.

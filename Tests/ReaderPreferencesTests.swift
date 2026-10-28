@@ -4,6 +4,35 @@ import XCTest
 
 final class ReaderPreferencesTests: XCTestCase {
     @MainActor
+    func testAnOpenSourceWindowTracksDarkLightAndSystemAppearance() async throws {
+        try await activateNativeTestApplication()
+        let defaults = ReaderPreferences.defaults
+        let original = defaults.object(forKey: ReaderPreferences.appearanceKey)
+        let originalAppearance = NSApp.appearance
+        let reader = ReaderState()
+        let context = reader.currentDiscussionVersion.context
+        defaults.set("dark", forKey: ReaderPreferences.appearanceKey)
+        for _ in 0..<100 where NSApp.appearance?.name != .darkAqua { try await Task.sleep(for: .milliseconds(20)) }
+        ReaderDiscussionSourceWindow.show(source: "# Appearance fixture", title: "Appearance fixture",
+            context: context, zoom: 1, reader: reader)
+        let window = try XCTUnwrap(NSApp.windows.first { $0.windowController is ReaderDiscussionSourceWindow && $0.isVisible })
+        defer {
+            window.close(); reader.stop()
+            defaults.set(original, forKey: ReaderPreferences.appearanceKey); NSApp.appearance = originalAppearance
+        }
+        XCTAssertEqual(window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+        defaults.set("light", forKey: ReaderPreferences.appearanceKey)
+        for _ in 0..<100 where NSApp.appearance?.name != .aqua { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .aqua,
+                       "An existing source window must follow the whole-app setting")
+        defaults.set("system", forKey: ReaderPreferences.appearanceKey)
+        for _ in 0..<100 where NSApp.appearance != nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNil(window.appearance, "System must remove a source window's old explicit override")
+        XCTAssertEqual(window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]),
+                       NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]))
+    }
+
+    @MainActor
     func testAppearanceChangesTheApplicationAndRestoresSystemForEveryWindow() async throws {
         let defaults = ReaderPreferences.defaults
         let original = defaults.object(forKey: ReaderPreferences.appearanceKey)

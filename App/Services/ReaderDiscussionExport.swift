@@ -83,7 +83,7 @@ extension ReaderState {
     }
     func inspectDiscussionSource() {
         ReaderDiscussionSourceWindow.show(source: source, title: fileURL?.lastPathComponent ?? title,
-            context: currentDiscussionVersion.context, zoom: zoom, appearance: documentAppearance, reader: self)
+            context: currentDiscussionVersion.context, zoom: zoom, reader: self)
     }
     private func reportDiscussionExportError(_ error: Error) {
         discussionError = error.localizedDescription
