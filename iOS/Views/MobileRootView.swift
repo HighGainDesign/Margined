@@ -10,6 +10,7 @@ struct MobileRootView: View {
     private enum Sheet: String, Identifiable { case settings, guide; var id: String { rawValue } }
     @State private var activeSheet: Sheet?
     @AppStorage("mobileSetupGuideSeen", store: ReaderPreferences.defaults) private var setupGuideSeen = false
+    @AppStorage(ReaderPreferences.appearanceKey, store: ReaderPreferences.defaults) private var appearance = DocumentAppearance.system
     @Environment(\.scenePhase) private var scenePhase
 
     init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders) {
@@ -96,6 +97,10 @@ struct MobileRootView: View {
         .onChange(of: scenePhase) { _, phase in
             Task { await reader.setPresented(phase == .active) }
         }
+        .onChange(of: appearance, initial: true) { _, value in
+            if reader.appearance != value { reader.appearance = value }
+        }
+        .preferredColorScheme(appearance == .system ? nil : (appearance == .dark ? .dark : .light))
     }
 
     private var libraryView: some View {

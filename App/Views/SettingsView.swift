@@ -29,13 +29,13 @@ struct SettingsView: View {
     private var reading: some View {
         Form {
             Section {
-                Picker("Document appearance", selection: $documentAppearance) {
+                Picker("Appearance", selection: $documentAppearance) {
                     ForEach(DocumentAppearance.allCases, id: \.self) { appearance in Text(appearance.title).tag(appearance) }
                 }.pickerStyle(.segmented)
                 Toggle("Full width by default", isOn: $wideLayout)
             } header: { Text("Reading") }
             footer: {
-                Text("Appearance updates all open documents and new Finder Quick Look previews. Width is the default for every document you open; use the Reading width button to change an individual window.")
+                Text("Appearance applies to the entire app and new Quick Look previews. Width is the default for every document you open; use the Reading width button to change an individual window.")
             }
         }.formStyle(.grouped)
     }

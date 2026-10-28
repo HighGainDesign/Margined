@@ -13,7 +13,7 @@ struct MobileSettingsView: View {
         NavigationStack {
             Form {
                 Section("Appearance") {
-                    Picker("Document Appearance", selection: $appearance) {
+                    Picker("Appearance", selection: $appearance) {
                         ForEach(DocumentAppearance.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
                     }
                 }

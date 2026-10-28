@@ -149,6 +149,7 @@ struct MobileWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         static let contentWorld = WKContentWorld.world(name: "MarginedMobileDocument")
         static let discussionWorld = WKContentWorld.world(name: "MarginedMobileDiscussions")
+        private static let findWorld = WKContentWorld.world(name: "MarginedMobileFind")
         private var discussionConfiguration: String?
         private var discussionSelectionGeneration = 0
         private var discussionDecorationKey: String?
@@ -163,6 +164,7 @@ struct MobileWebView: UIViewRepresentable {
         private var imageGeneration = -1
         private var navigationGeneration = -1
         private var searchGeneration = -1
+        private var lastFindQuery: String?
         private var generation = 0
         private var activeNavigation: WKNavigation?
         private var contentReady = false
@@ -213,6 +215,7 @@ struct MobileWebView: UIViewRepresentable {
                 loadedFile = nil
                 readingPosition = nil
                 pendingNavigation = nil
+                lastFindQuery = nil
                 token = UUID().uuidString
                 resourceToken = UUID().uuidString
                 webView?.stopLoading()
@@ -615,18 +618,57 @@ struct MobileWebView: UIViewRepresentable {
 
         private func find() {
             guard let webView else { return }
-            guard !reader.searchText.isEmpty else { reader.searchMatch = nil; return }
+            let query = reader.searchText
+            if query.isEmpty { reader.searchMatch = nil }
             guard contentReady else { return }
-            let query = reader.searchText, expectedSearch = reader.searchGeneration, expectedGeneration = generation
+            guard !query.isEmpty || lastFindQuery != nil else { return }
+            let expectedSearch = reader.searchGeneration, expectedGeneration = generation
             let configuration = WKFindConfiguration()
             configuration.backwards = reader.searchBackwards
             configuration.caseSensitive = false
             configuration.wraps = true
             Task { [weak self] in
-                let result = try? await webView.find(query, configuration: configuration)
                 guard let self, valid(expectedGeneration), reader.searchGeneration == expectedSearch else { return }
+                if query.isEmpty {
+                    await clearFind(in: webView, previousQuery: lastFindQuery ?? "",
+                                    search: expectedSearch, document: expectedGeneration)
+                    return
+                }
+                lastFindQuery = query
+                let result = try? await webView.find(query, configuration: configuration)
+                guard valid(expectedGeneration), reader.searchGeneration == expectedSearch else { return }
                 reader.searchMatch = result?.matchFound == true
             }
+        }
+
+        private func clearFind(in webView: WKWebView, previousQuery: String, search: Int, document: Int) async {
+            lastFindQuery = nil
+            let restoreToken = UUID().uuidString
+            // An empty WKWebView.find is a no-op. As on Mac, an impossible
+            // query dismisses its Find overlay while retaining a different
+            // passage selection the user may be preparing to discuss.
+            _ = try? await webView.callAsyncJavaScript("""
+            const selection=getSelection();
+            const different=selection && !selection.isCollapsed && selection.rangeCount===1 &&
+                selection.toString().normalize('NFC').toLowerCase()!==query.normalize('NFC').toLowerCase();
+            window.__marginedFindRestore={token,range:different ? selection.getRangeAt(0).cloneRange() : null};
+            return true;
+            """, arguments: ["query": previousQuery, "token": restoreToken], in: nil, contentWorld: Self.findWorld)
+            if valid(document), reader.searchGeneration == search, contentReady {
+                _ = try? await webView.find("\u{0}", configuration: WKFindConfiguration())
+            }
+            let current = valid(document) && reader.searchGeneration == search && contentReady
+            _ = try? await webView.callAsyncJavaScript("""
+            const saved=window.__marginedFindRestore;
+            if(!saved || saved.token!==token) return false;
+            delete window.__marginedFindRestore;
+            const selection=getSelection(),range=saved.range;
+            if(restore && range?.startContainer.isConnected && range.endContainer.isConnected && selection?.isCollapsed) {
+                selection.removeAllRanges();selection.addRange(range);
+            }
+            return true;
+            """, arguments: ["token": restoreToken, "restore": current], in: nil, contentWorld: Self.findWorld)
+            if current { reader.searchMatch = nil }
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {

@@ -6,10 +6,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var welcome: NSWindowController?
     private var settings: NSWindowController?
     private var setup: SetupWindowController?
+    private let applicationAppearance = ApplicationAppearance()
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        applicationAppearance.start()
         buildMenus()
         _ = NSDocumentController.shared
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        applicationAppearance.stop()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

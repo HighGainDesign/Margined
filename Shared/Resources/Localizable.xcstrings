@@ -23737,6 +23737,47 @@
           }
         }
       }
+    },
+    "Appearance applies to the entire app and new Quick Look previews. Width is the default for every document you open; use the Reading width button to change an individual window.": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La apariencia se aplica a toda la app y a las nuevas vistas previas de Vista Rápida. El ancho es el predeterminado para cada documento que abras; usa el botón de ancho de lectura para cambiar una ventana individual."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外观适用于整个应用和新打开的快速查看预览。宽度设置是所有新打开文稿的默认值；使用阅读宽度按钮可单独调整当前窗口。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外觀適用於整個 App 和新開啟的快速查看預覽。寬度設定是所有新開啟文件的預設值；使用閱讀寬度按鈕可單獨調整目前視窗。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外観はアプリ全体と新しいクイックルックのプレビューに適用されます。幅は開くすべての書類のデフォルトです。「表示幅」ボタンで個々のウインドウを変更できます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’apparence s’applique à toute l’app et aux nouveaux aperçus Coup d’œil. La largeur est celle par défaut pour chaque document ouvert ; utilisez le bouton de largeur de lecture pour modifier une fenêtre particulière."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Erscheinungsbild gilt für die gesamte App und neue Schnellübersichten. Die Breite ist die Vorgabe für jedes geöffnete Dokument; mit der Taste für die Lesebreite lässt sich ein einzelnes Fenster anpassen."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
