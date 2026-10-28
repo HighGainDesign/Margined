@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2.0 (11)
+
+- Fix discussion history, scrolling and reply focus.
+- Apply appearance throughout both apps; clear iOS Find.
+- Restore Mac exports and direct Read Aloud; simplify Quick Look.
+
 ## 2.0-beta.1 — 2026-10-27
 
 - Add experimental passage discussions, replies and conversation Read Aloud.
