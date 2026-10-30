@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Discuss selected text from the native context menu.
+- Improve discussion layouts, long comments and Mac recents.
+
 ## 2.0-beta.2 — 2026-10-30
 
 - Add Files browsing, Mac recents and a replayable practice tour.
