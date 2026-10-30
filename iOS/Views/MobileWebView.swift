@@ -112,6 +112,8 @@ struct MobileWebView: UIViewRepresentable {
         configuration.userContentController.add(coordinator, contentWorld: Coordinator.contentWorld, name: "taskToggle")
         configuration.userContentController.add(coordinator, contentWorld: Coordinator.discussionWorld, name: "discussion")
         let webView = MobileDocumentWebView(frame: .zero, configuration: configuration)
+        webView.canDiscussSelection = { [weak coordinator] in coordinator?.canDiscussNativeSelection == true }
+        webView.onDiscussSelection = { [weak coordinator] in coordinator?.discussNativeSelection() }
         webView.geometryChanged = { [weak coordinator] in coordinator?.requestPassageVisibilityCheck() }
         webView.navigationDelegate = coordinator
         webView.allowsLinkPreview = false
@@ -138,6 +140,8 @@ struct MobileWebView: UIViewRepresentable {
     @MainActor
     static func disposeUIView(_ webView: WKWebView, coordinator: Coordinator) {
         (webView as? MobileDocumentWebView)?.geometryChanged = nil
+        (webView as? MobileDocumentWebView)?.canDiscussSelection = { false }
+        (webView as? MobileDocumentWebView)?.onDiscussSelection = nil
         coordinator.invalidate()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "taskToggle", contentWorld: Coordinator.contentWorld)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "discussion", contentWorld: Coordinator.discussionWorld)
@@ -150,6 +154,47 @@ struct MobileWebView: UIViewRepresentable {
         static let contentWorld = WKContentWorld.world(name: "MarginedMobileDocument")
         static let discussionWorld = WKContentWorld.world(name: "MarginedMobileDiscussions")
         private static let findWorld = WKContentWorld.world(name: "MarginedMobileFind")
+        // Menu eligibility is a hint; action-time DOM capture below remains authoritative.
+        private var nativeSelection: (selection: DiscussionSelection, version: MobileDiscussionVersion)?
+        private var nativeSelectionInFlight = false
+        var canDiscussNativeSelection: Bool {
+            guard !isInvalidated, documentGeneration == reader.documentGeneration, contentReady, !reader.isRendering, html == reader.rendered?.html,
+                  reader.canEditDiscussions, let cached = nativeSelection else { return false }
+            return cached.selection.renderID == String(generation) &&
+                cached.selection.sourceID == reader.rendered?.discussionText?.sourceID &&
+                reader.matchesDiscussionVersion(cached.version)
+        }
+
+        func discussNativeSelection() {
+            guard canDiscussNativeSelection, !nativeSelectionInFlight, let webView,
+                  let cached = nativeSelection, let projection = reader.rendered?.discussionText else { return }
+            nativeSelectionInFlight = true
+            nativeSelection = nil
+            let token = String(generation)
+            Task { [weak self] in
+                guard let self else { return }
+                defer { nativeSelectionInFlight = false }
+                // Capture before requestAddDiscussion can present/focus a composer.
+                let value = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script,
+                    arguments: ["operation": "selection", "token": token, "sourceID": projection.sourceID,
+                        "allowedThreadIDs": []], in: nil, contentWorld: Self.discussionWorld)
+                guard !isInvalidated, documentGeneration == reader.documentGeneration, contentReady, String(generation) == token,
+                      self.webView === webView, !reader.isRendering, html == reader.rendered?.html,
+                      reader.matchesDiscussionVersion(cached.version),
+                      reader.rendered?.discussionText?.sourceID == projection.sourceID else { return }
+                let context = DiscussionBridge.Context(token: token, sourceID: projection.sourceID,
+                    enabled: true, allowedThreadIDs: [])
+                guard let value, case let .selection(selection) = DiscussionBridge.request(value,
+                    isMainFrame: true, context: context, projection: projection) else { return }
+                let previousRequest = reader.discussionSelectionGeneration
+                reader.requestAddDiscussion()
+                guard reader.discussionSelectionGeneration != previousRequest else { return }
+                // Consume the existing request synchronously, so the toolbar route cannot repeat it.
+                discussionSelectionGeneration = reader.discussionSelectionGeneration
+                reader.acceptNewDiscussionSelection(selection)
+            }
+        }
+
         private var discussionConfiguration: String?
         private var discussionSelectionGeneration = 0
         private var discussionDecorationKey: String?
@@ -192,6 +237,7 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         func invalidate() {
+            nativeSelection = nil
             images.cancelPendingLoads()
             isInvalidated = true
             generation += 1
@@ -210,6 +256,7 @@ struct MobileWebView: UIViewRepresentable {
                 loadingTask?.cancel()
                 loadingTask = nil
                 activeNavigation = nil
+                nativeSelection = nil
                 contentReady = false
                 html = nil
                 loadedFile = nil
@@ -255,6 +302,7 @@ struct MobileWebView: UIViewRepresentable {
             let reconcile = contentReady && !forceNavigation
             generation += 1
             let expectedGeneration = generation
+            nativeSelection = nil
             contentReady = false
             let previousToken = token
             token = UUID().uuidString
@@ -547,8 +595,13 @@ struct MobileWebView: UIViewRepresentable {
                 let context = DiscussionBridge.Context(token: String(generation), sourceID: projection.sourceID,
                     enabled: true, allowedThreadIDs: Set(reader.rendered?.discussions?.threads.map(\.id) ?? []))
                 if let value = DiscussionMarginSnapshot.read(message.body, context: context) { reader.acceptDiscussionMargin(value) }
-                else if case let .openThread(id) = DiscussionBridge.request(message.body, isMainFrame: true,
-                    context: context, projection: projection) { reader.openDiscussion(id) }
+                else if let request = DiscussionBridge.request(message.body, isMainFrame: true, context: context, projection: projection) {
+                    switch request {
+                    case let .openThread(id): reader.openDiscussion(id)
+                    case let .selection(selection): nativeSelection = (selection, reader.currentDiscussionVersion)
+                    case .clearSelection: nativeSelection = nil
+                    }
+                }
                 return
             }
             guard message.name == "taskToggle",
@@ -824,7 +877,32 @@ private extension URL {
 }
 
 @MainActor
-private final class MobileDocumentWebView: WKWebView {
+final class MobileDocumentWebView: WKWebView {
+    var canDiscussSelection: () -> Bool = { false }
+    var onDiscussSelection: (() -> Void)?
+    private static let discussionMenuID = UIMenu.Identifier("MarginedDiscussSelection")
+
+    override func buildMenu(with builder: any UIMenuBuilder) {
+        super.buildMenu(with: builder)
+        guard builder.system === UIMenuSystem.context else { return }
+        builder.remove(menu: Self.discussionMenuID)
+        guard canDiscussSelection() else { return }
+        let command = UICommand(title: String(localized: "Discuss Selection"), image: UIImage(systemName: "bubble.left"),
+            action: #selector(discussSelection(_:)))
+        builder.insertChild(UIMenu(title: "", identifier: Self.discussionMenuID, options: .displayInline, children: [command]),
+            atStartOfMenu: .root)
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(discussSelection(_:)) { return canDiscussSelection() }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    @objc func discussSelection(_ sender: Any?) {
+        guard canDiscussSelection() else { return }
+        onDiscussSelection?()
+    }
+
     var geometryChanged: (() -> Void)?
     override func didMoveToWindow() {
         super.didMoveToWindow()

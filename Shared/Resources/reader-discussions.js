@@ -166,10 +166,11 @@ document.addEventListener('click',event=>{
     event.preventDefault();send({kind:'openThread',id,token,sourceID});
 },options);
 function selected(event) {
-    if(!event.isTrusted || getSelection()?.isCollapsed)return;
+    if(!event.isTrusted)return;
     if(state.pending!==null)cancelAnimationFrame(state.pending);
-    state.pending=requestAnimationFrame(()=>{state.pending=null;send(selectionPayload(project()));});
+    state.pending=requestAnimationFrame(()=>{state.pending=null;send(selectionPayload(project()) ?? {kind:'clearSelection',token,sourceID});});
 }
+document.addEventListener('selectionchange',selected,options);
 document.addEventListener('pointerup',selected,options);
 document.addEventListener('keyup',selected,options);
 return true;

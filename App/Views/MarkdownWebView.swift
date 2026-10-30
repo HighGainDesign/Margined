@@ -33,6 +33,10 @@ struct MarkdownWebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.setAccessibilityLabel(String(localized: "Markdown document"))
         webView.allowsLinkPreview = false
+        if let documentView = webView as? DiscussionDocumentWebView {
+            documentView.canDiscussSelection = { [weak coordinator = context.coordinator] in coordinator?.canDiscussNativeSelection == true }
+            documentView.onDiscussSelection = { [weak coordinator = context.coordinator] in coordinator?.discussNativeSelection() }
+        }
         context.coordinator.webView = webView
         #if MARGINED_BENCHMARK
         ViewingBenchmarkSession.current?.recordOpening("webview_created_ns", source: reader.source)
@@ -65,6 +69,9 @@ struct MarkdownWebView: NSViewRepresentable {
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "taskToggle", contentWorld: Coordinator.taskWorld)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "discussion", contentWorld: Coordinator.discussionWorld)
+        (webView as? DiscussionDocumentWebView)?.canDiscussSelection = { false }
+        (webView as? DiscussionDocumentWebView)?.onDiscussSelection = nil
+        coordinator.webView = nil
         webView.navigationDelegate = nil
     }
 
@@ -73,6 +80,49 @@ struct MarkdownWebView: NSViewRepresentable {
         private static let findWorld = WKContentWorld.world(name: "MarginedFind")
         static let taskWorld = WKContentWorld.world(name: "MarginedChecklist")
         static let discussionWorld = WKContentWorld.world(name: "MarginedDiscussions")
+        // Menu eligibility is a hint; action-time DOM capture below remains authoritative.
+        private var nativeSelection: (selection: DiscussionSelection, version: ReaderDiscussionVersion)?
+        private var nativeSelectionInFlight = false
+        var canDiscussNativeSelection: Bool {
+            guard contentReady, !reader.isRendering, html == reader.rendered?.html,
+                  !reader.fileSaving, !reader.showChecklistConfirmation, !reader.isStreamingPreview,
+                  reader.fileURL != nil, reader.currentDiscussionVersion.snapshot != nil,
+                  !reader.hasPendingFileUpdate, !reader.playbackHolding, let cached = nativeSelection else { return false }
+            return cached.selection.renderID == String(activeLoadGeneration) &&
+                cached.selection.sourceID == reader.rendered?.discussionText?.sourceID &&
+                reader.matchesDiscussionVersion(cached.version)
+        }
+
+        func discussNativeSelection() {
+            guard canDiscussNativeSelection, !nativeSelectionInFlight, let webView,
+                  let cached = nativeSelection, let projection = reader.rendered?.discussionText else { return }
+            nativeSelectionInFlight = true
+            nativeSelection = nil
+            let token = String(activeLoadGeneration)
+            Task { [weak self] in
+                guard let self else { return }
+                defer { nativeSelectionInFlight = false }
+                // Capture before requestAddDiscussion can present/focus a composer.
+                let value = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script,
+                    arguments: ["operation": "selection", "token": token, "sourceID": projection.sourceID,
+                        "allowedThreadIDs": []], in: nil, contentWorld: Self.discussionWorld)
+                guard contentReady, String(activeLoadGeneration) == token,
+                      self.webView === webView, !reader.isRendering, html == reader.rendered?.html,
+                      reader.matchesDiscussionVersion(cached.version),
+                      reader.rendered?.discussionText?.sourceID == projection.sourceID else { return }
+                let context = DiscussionBridge.Context(token: token, sourceID: projection.sourceID,
+                    enabled: true, allowedThreadIDs: [])
+                guard let value, case let .selection(selection) = DiscussionBridge.request(value,
+                    isMainFrame: true, context: context, projection: projection) else { return }
+                let previousRequest = reader.discussionSelectionGeneration
+                reader.requestAddDiscussion()
+                guard reader.discussionSelectionGeneration != previousRequest else { return }
+                // Consume the existing request synchronously, so the toolbar route cannot repeat it.
+                discussionSelectionGeneration = reader.discussionSelectionGeneration
+                reader.acceptNewDiscussionSelection(selection)
+            }
+        }
+
         private var discussionConfiguration: String?
         private var discussionSelectionGeneration = 0
         private var discussionDecorationKey: String?
@@ -123,6 +173,7 @@ struct MarkdownWebView: NSViewRepresentable {
             let canUpdateContent = contentReady && !forceNavigation
             speechHighlightKey = nil
             loadGeneration += 1
+            nativeSelection = nil
             contentReady = false
             taskConfiguration = nil
             let generation = loadGeneration
@@ -380,8 +431,13 @@ struct MarkdownWebView: NSViewRepresentable {
                     enabled: true, allowedThreadIDs: Set(reader.rendered?.discussions?.threads.map(\.id) ?? []))
                 guard message.frameInfo.isMainFrame else { return }
                 if let snapshot = DiscussionMarginSnapshot.read(message.body, context: context) { reader.acceptDiscussionMargin(snapshot) }
-                else if case let .openThread(id) = DiscussionBridge.request(message.body, isMainFrame: true,
-                    context: context, projection: projection) { reader.openDiscussion(id) }
+                else if let request = DiscussionBridge.request(message.body, isMainFrame: true, context: context, projection: projection) {
+                    switch request {
+                    case let .openThread(id): reader.openDiscussion(id)
+                    case let .selection(selection): nativeSelection = (selection, reader.currentDiscussionVersion)
+                    case .clearSelection: nativeSelection = nil
+                    }
+                }
                 return
             }
 

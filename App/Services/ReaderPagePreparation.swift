@@ -45,7 +45,7 @@ final class ReaderPagePreparation {
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.setURLSchemeHandler(images, forURLScheme: "margined-resource")
-        return Page(webView: WKWebView(frame: .zero, configuration: configuration), images: images)
+        return Page(webView: DiscussionDocumentWebView(frame: .zero, configuration: configuration), images: images)
     }
 
     private func discard() {

@@ -22,6 +22,7 @@ enum DiscussionBridge {
     enum Request: Equatable, Sendable {
         case openThread(String)
         case selection(DiscussionSelection)
+        case clearSelection
     }
     static func request(_ body: Any, isMainFrame: Bool, context: Context, projection: DiscussionTextProjection) -> Request? {
         guard isMainFrame, context.enabled, context.sourceID == projection.sourceID,
@@ -31,6 +32,7 @@ enum DiscussionBridge {
             guard let id = values["id"] as? String, context.allowedThreadIDs.contains(id) else { return nil }
             return .openThread(id)
         }
+        if values["kind"] as? String == "clearSelection" { return .clearSelection }
         guard values["kind"] as? String == "selection", let location = integer(values["location"]), let length = integer(values["length"]),
               let selection = projection.selection(NSRange(location: location, length: length), renderID: context.token),
               values["quote"] as? String == selection.target.exact,
