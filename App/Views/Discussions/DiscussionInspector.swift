@@ -93,7 +93,9 @@ struct DiscussionInspector: View {
                                 let priorBottom = previous.map { $0.top + Double(frames[$0.id]?.height ?? 100) } ?? 0
                                 Color.clear.frame(height: max(0, position.top - priorBottom)).accessibilityHidden(true)
                                 if let item = indexed[position.id] {
-                                    itemView(item).id(item.id)
+                                    itemView(item, revealComposer: { key in
+                                        scroll.scrollTo(DiscussionComposerAnchor(key: key), anchor: .bottom)
+                                    }).id(item.id)
                                         .background(GeometryReader { proxy in
                                             Color.clear.preference(key: DiscussionCardFrames.self, value: [item.id: proxy.frame(in: .named("discussion-margin"))])
                                         })
@@ -143,9 +145,10 @@ struct DiscussionInspector: View {
         .accessibilityAction(named: Text("Next Discussion")) { reader.selectNextDiscussion() }
         .accessibilityAction(named: Text("Previous Discussion")) { reader.selectNextDiscussion(backwards: true) }
     }
-    @ViewBuilder private func itemView(_ item: Item) -> some View {
+    @ViewBuilder private func itemView(_ item: Item, revealComposer: @escaping (DiscussionSession.DraftKey) -> Void) -> some View {
         switch item {
-        case .thread(let thread): DiscussionThreadCard(reader: reader, thread: thread)
+        case .thread(let thread): DiscussionThreadCard(reader: reader, thread: thread,
+            revealComposer: { revealComposer(.thread(thread.id)) })
         case .draft(let id):
             let key = DiscussionSession.DraftKey.new(id)
             if let draft = reader.discussions.drafts[key] {
@@ -158,7 +161,9 @@ struct DiscussionInspector: View {
                             if let target = draft.target { Text(verbatim: target.exact).lineLimit(3).foregroundStyle(.secondary) }
                         }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.plain)
-                    if reader.discussions.selection == key { DiscussionComposer(reader: reader, key: key, isReply: false) }
+                    if reader.discussions.selection == key {
+                        DiscussionComposer(reader: reader, key: key, isReply: false, reveal: { revealComposer(key) })
+                    }
                 }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
             }
         }

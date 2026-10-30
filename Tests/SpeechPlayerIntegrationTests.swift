@@ -6,6 +6,48 @@ import XCTest
 
 @MainActor
 final class SpeechPlayerIntegrationTests: XCTestCase {
+    func testReadAloudToolbarStartsAndPausesWithoutASecondPlayClick() async throws {
+        let fixture = try await makeFixture(); defer { fixture.close() }
+        fixture.window.setContentSize(NSSize(width: 1200, height: 780))
+        try await activateNativeTestApplication()
+        fixture.window.makeKeyAndOrderFront(nil)
+        fixture.host.view.layoutSubtreeIfNeeded()
+        var labels: [String] = []
+        func readButton(_ element: Any) -> AnyObject? {
+            var visited: Set<ObjectIdentifier> = []
+            func walk(_ element: Any) -> AnyObject? {
+                guard let object = element as? NSObject, visited.insert(ObjectIdentifier(object)).inserted else { return nil }
+                let accessible: AnyObject = object
+                if let label = accessible.accessibilityLabel?(), labels.count < 80 { labels.append(label) }
+                if accessible.accessibilityRole?() == .button,
+                   let label = accessible.accessibilityLabel?(),
+                   ["Read Aloud controls", "Read Aloud", "Pause Reading", "Resume Reading"].contains(label) { return accessible }
+                let children = accessible.accessibilityChildren?() ?? []
+                for child in children { if let result = walk(child) { return result } }
+                for child in (object as? NSView)?.subviews ?? [] {
+                    if let result = walk(child) { return result }
+                }
+                return nil
+            }
+            return walk(element)
+        }
+        for _ in 0..<100 {
+            if readButton(fixture.host.view) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let button = try XCTUnwrap(readButton(fixture.host.view), "Find the actual native toolbar action: \(labels)")
+        XCTAssertTrue(button.accessibilityPerformPress?() == true)
+        for _ in 0..<100 where fixture.driver.requests.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(fixture.driver.requests.count, 1, "Read Aloud must start playback on its first activation")
+        XCTAssertEqual(fixture.reader.speech.session.status, .playing)
+        XCTAssertTrue(fixture.reader.speech.showPlayer)
+        XCTAssertTrue(try XCTUnwrap(readButton(fixture.host.view)).accessibilityPerformPress?() == true)
+        for _ in 0..<100 where fixture.reader.speech.session.status != .paused { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(fixture.reader.speech.session.status, .paused)
+        XCTAssertEqual(fixture.driver.requests.count, 1)
+        XCTAssertEqual(try MarkdownSource.read(fixture.file), fixture.source)
+    }
+
     func testPlayerReservesSpaceWithoutCoveringDocumentAndClosesCleanly() async throws {
         let fixture = try await makeFixture(); defer { fixture.close() }
         let before = fixture.web.convert(fixture.web.bounds, to: fixture.host.view)

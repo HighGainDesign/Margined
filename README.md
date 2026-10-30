@@ -4,10 +4,10 @@ A native Markdown reader for Mac, iPhone and iPad, with live updates, change
 review, checklists, Read Aloud and portable passage discussions. Documents stay
 ordinary `.md` files that people and agents can use in their own tools.
 
-**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.1)
+**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.2)
 to try passage discussions alongside the established reading, Quick Look, live
-streaming and change-review features. Discussions remain experimental, with known
-scrolling and layout issues. iPhone/iPad TestFlight testing remains invitation-only.
+streaming and change-review features. Discussions remain experimental; compact layouts still need refinement.
+Build 12 is available for testing; hands-on acceptance testing is incomplete. iPhone/iPad TestFlight testing remains invitation-only.
 Join the [public Mac TestFlight beta](https://testflight.apple.com/join/CDxY24jy).
 
 ## Install and open
@@ -17,9 +17,10 @@ drag Margined to **Applications**, then eject the installer. Quit the app before
 replacing it with an update. Requires macOS 14+; the iPhone/iPad app requires iOS 17+.
 
 On Mac, use **File → Open** or Finder’s **Open With → Margined**. On iPhone/iPad,
-use **Open Document…**, Files **Open With**, or **Share → Margined**. The reader’s
-**×** closes the document and returns to the library; Settings is in the library.
-The Getting Started guide explains folder access and Quick Look.
+browse Recents and Files, or use Files **Open With** or **Share → Margined**.
+The reader’s **×** returns to the browser, which also offers Settings and
+**Take a Tour**. The replayable tour covers Quick Look, live streaming on Mac,
+change review, discussions, checklists and image folders using disposable files.
 
 - Tables, task lists, links, footnotes, GitHub alerts, math and Mermaid.
 - Outline navigation, find, zoom, full/comfortable width and System/Light/Dark appearance.
@@ -90,7 +91,8 @@ Quick Look, snapshots and live streams remain read-only.
 
 ## Read Aloud and print
 
-Open **Read Aloud** to play from the beginning, current section or selected text.
+On Mac, **Read Aloud** starts or resumes playback; click again to pause.
+The player also offers playback from the beginning, current section or selected text.
 Pause, stop, skip sections, choose a voice or adjust speed. **Follow Reading**
 scrolls without moving keyboard focus. **Read Conversation** includes saved
 messages; document language controls pronunciation, not interface language.
@@ -137,11 +139,13 @@ On iOS 27 and some earlier versions, Files currently shows standard Markdown as
 plain text instead of dispatching to Margined’s extension. Use **Open With** or
 **Share → Margined** for formatted reading. The app’s guide explains this limitation.
 Where Quick Look dispatches the extension, it uses the shared offline renderer
-and includes saved discussions as a read-only appendix.
+and previews the document. Open Margined for discussions; use **Print with
+Discussions** or **Export Conversations** to include them explicitly.
 
 ## Reading controls and accessibility
 
-Settings chooses appearance and the opening width default. The **↔** button changes
+Appearance applies to documents and app controls. Settings also chooses the
+opening width default. The **↔** button changes
 only the current document’s width. Tables fill that width and scroll horizontally
 when needed. Sidebars adapt to usable space and text size rather than device name
 or orientation. Interface language follows the operating system’s per-app setting.

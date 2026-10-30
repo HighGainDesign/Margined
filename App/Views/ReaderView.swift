@@ -10,6 +10,10 @@ struct ReaderView: View {
         VStack(spacing: 0) {
             ReaderToolbar(reader: reader)
             Divider()
+            if let app = NSApp.delegate as? AppDelegate, let practice = app.tutorial.practice(for: reader.fileURL) {
+                TutorialPracticeBar(session: app.tutorial, practice: practice, tour: { app.showStartupTips(force: true) })
+                Divider()
+            }
             if reader.showFind { findBar; Divider() }
             if reader.isStreamingPreview && !reader.streamPaused && (!reader.streamIsReceiving || reader.streamError != nil) {
                 HStack(alignment: .top, spacing: 10) {

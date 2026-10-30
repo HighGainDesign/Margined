@@ -35,6 +35,16 @@ final class LayoutPolishTests: XCTestCase {
             try assertScrollFits(setup.view)
             try capture(setup.view, at: directory.appendingPathComponent("setup-" + language + ".png"))
             window.close()
+            let welcome = NSHostingController(rootView: WelcomeView(recentDocuments: [
+                URL(fileURLWithPath: "/Users/demo/Documents/Product Brief.md"),
+                URL(fileURLWithPath: "/Users/demo/Documents/Launch Checklist.md")], open: {}, liveStreaming: {}, openRecent: { _ in }, tour: {})
+                .environment(\.locale, Locale(identifier: language)))
+            let welcomeWindow = NSWindow(contentViewController: welcome)
+            welcomeWindow.isReleasedWhenClosed = false; welcomeWindow.setContentSize(NSSize(width: 840, height: 560)); welcomeWindow.orderFront(nil)
+            for _ in 0..<10 { welcome.view.layoutSubtreeIfNeeded(); await Task.yield() }
+            try assertScrollFits(welcome.view)
+            try capture(welcome.view, at: directory.appendingPathComponent("welcome-" + language + ".png"))
+            welcomeWindow.close()
             let settings = NSHostingController(rootView: SettingsView().environment(\.locale, Locale(identifier: language)))
             let settingsWindow = NSWindow(contentViewController: settings)
             settingsWindow.isReleasedWhenClosed = false; settingsWindow.setContentSize(NSSize(width: 620, height: 680)); settingsWindow.orderFront(nil)

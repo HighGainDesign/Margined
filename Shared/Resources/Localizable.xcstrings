@@ -23737,6 +23737,1685 @@
           }
         }
       }
+    },
+    "Appearance applies to the entire app and new Quick Look previews. Width is the default for every document you open; use the Reading width button to change an individual window.": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La apariencia se aplica a toda la app y a las nuevas vistas previas de Vista Rápida. El ancho es el predeterminado para cada documento que abras; usa el botón de ancho de lectura para cambiar una ventana individual."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外观适用于整个应用和新打开的快速查看预览。宽度设置是所有新打开文稿的默认值；使用阅读宽度按钮可单独调整当前窗口。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外觀適用於整個 App 和新開啟的快速查看預覽。寬度設定是所有新開啟文件的預設值；使用閱讀寬度按鈕可單獨調整目前視窗。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外観はアプリ全体と新しいクイックルックのプレビューに適用されます。幅は開くすべての書類のデフォルトです。「表示幅」ボタンで個々のウインドウを変更できます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’apparence s’applique à toute l’app et aux nouveaux aperçus Coup d’œil. La largeur est celle par défaut pour chaque document ouvert ; utilisez le bouton de largeur de lecture pour modifier une fenêtre particulière."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Erscheinungsbild gilt für die gesamte App und neue Schnellübersichten. Die Breite ist die Vorgabe für jedes geöffnete Dokument; mit der Taste für die Lesebreite lässt sich ein einzelnes Fenster anpassen."
+          }
+        }
+      }
+    },
+    "Resume Reading": {
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reanudar lectura"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续朗读"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "繼續朗讀"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み上げを再開"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reprendre la lecture"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorlesen fortsetzen"
+          }
+        }
+      }
+    },
+    "Take a Tour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take a Tour"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visita guiada"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "功能导览"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "功能導覽"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使い方ガイド"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visite guidée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einführung"
+          }
+        }
+      }
+    },
+    "Back to Tour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to Tour"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volver a la visita"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回导览"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回導覽"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ガイドに戻る"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retour à la visite"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zurück zur Einführung"
+          }
+        }
+      }
+    },
+    "Open and Browse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open and Browse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir y explorar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开与浏览"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟與瀏覽"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開く・ブラウズ"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir et parcourir"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffnen und durchsuchen"
+          }
+        }
+      }
+    },
+    "Quick Look": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick Look"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vista rápida"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速查看"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速查看"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クイックルック"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coup d’œil"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersicht"
+          }
+        }
+      }
+    },
+    "Checklists": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checklists"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listas de tareas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "任务清单"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作清單"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェックリスト"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listes de tâches"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checklisten"
+          }
+        }
+      }
+    },
+    "Next": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Siguiente"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一步"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一步"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次へ"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suivant"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weiter"
+          }
+        }
+      }
+    },
+    "Previous": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anterior"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一步"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一步"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前へ"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Précédent"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zurück"
+          }
+        }
+      }
+    },
+    "Read, review, discuss.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read, review, discuss."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lee, revisa y comenta."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读、审阅、讨论。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "閱讀、審閱、討論。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読む、確認する、話し合う。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lire, relire, échanger."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lesen, prüfen, diskutieren."
+          }
+        }
+      }
+    },
+    "No Recent Documents": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Recent Documents"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No hay documentos recientes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无最近文档"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚無最近使用的文件"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近使った書類はありません"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun document récent"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine zuletzt verwendeten Dokumente"
+          }
+        }
+      }
+    },
+    "Open a Markdown document to get started.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open a Markdown document to get started."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre un documento Markdown para empezar."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开一个 Markdown 文档即可开始。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟 Markdown 文件即可開始。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markdown 書類を開いて始めましょう。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrez un document Markdown pour commencer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffne zunächst ein Markdown-Dokument."
+          }
+        }
+      }
+    },
+    "Open Practice Document": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Practice Document"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir documento de práctica"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开练习文档"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟練習文件"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "練習用の書類を開く"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir le document d’exercice"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übungsdokument öffnen"
+          }
+        }
+      }
+    },
+    "A fresh disposable copy opens in the reader.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A fresh disposable copy opens in the reader."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se abrirá una copia nueva de práctica en el lector."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将在阅读器中打开新的临时练习副本。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將在閱讀器中開啟新的暫用練習副本。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しい練習用コピーをリーダーで開きます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une nouvelle copie d’exercice s’ouvre dans le lecteur."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine neue Übungskopie wird im Lesefenster geöffnet."
+          }
+        }
+      }
+    },
+    "Choose a lesson. Practice copies are disposable; your own files stay unchanged.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a lesson. Practice copies are disposable; your own files stay unchanged."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elige una lección. Las copias de práctica son temporales; tus archivos no se modifican."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择一个章节。练习副本可随时丢弃，你自己的文件不会更改。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇一個章節。練習副本可隨時丟棄，你自己的檔案不會變更。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "項目を選んでください。練習用コピーを使うため、ご自分のファイルは変更されません。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez une leçon. Les copies d’exercice sont temporaires ; vos fichiers restent inchangés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle eine Lektion. Übungskopien sind nur zum Ausprobieren; deine eigenen Dateien bleiben unverändert."
+          }
+        }
+      }
+    },
+    "Save Example Change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Example Change"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardar cambio de ejemplo"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存示例更改"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存範例變更"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サンプルの変更を保存"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer la modification d’exemple"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beispieländerung speichern"
+          }
+        }
+      }
+    },
+    "Example change saved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Example change saved"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cambio de ejemplo guardado"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "示例更改已保存"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "範例變更已儲存"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サンプルの変更を保存しました"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modification d’exemple enregistrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beispieländerung gespeichert"
+          }
+        }
+      }
+    },
+    "This is a disposable practice document. Your own files are unchanged.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This is a disposable practice document. Your own files are unchanged."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este documento es solo de práctica. Tus archivos no se modifican."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这是临时练习文档。你自己的文件不会更改。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這是暫用練習文件。你自己的檔案不會變更。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これは練習用の書類です。ご自分のファイルは変更されません。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce document est réservé aux exercices. Vos fichiers restent inchangés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dies ist ein Übungsdokument. Deine eigenen Dateien bleiben unverändert."
+          }
+        }
+      }
+    },
+    "Try a checkmark, then Undo.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try a checkmark, then Undo."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marca una casilla y después usa Deshacer."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "勾选一个任务，然后撤销。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "勾選一個工作項目，然後還原。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェックを付けてから、取り消してみましょう。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cochez une case, puis annulez."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setze ein Häkchen und verwende dann Rückgängig."
+          }
+        }
+      }
+    },
+    "Close and reopen to check your saved progress.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close and reopen to check your saved progress."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cierra y vuelve a abrir para comprobar el progreso guardado."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭并重新打开，检查已保存的进度。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉後重新開啟，確認已儲存的進度。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "閉じてから開き直し、進捗が保存されたことを確認しましょう。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fermez et rouvrez pour vérifier la progression enregistrée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schließe das Dokument und öffne es erneut, um den gespeicherten Fortschritt zu prüfen."
+          }
+        }
+      }
+    },
+    "This passage has a conversation attached to it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This passage has a conversation attached to it."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este pasaje tiene una conversación adjunta."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这段文字附有一则讨论。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這段文字附有一則討論。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この文章には会話が添付されています。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une conversation est liée à ce passage."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An dieser Textstelle hängt eine Unterhaltung."
+          }
+        }
+      }
+    },
+    "Could we make this passage clearer?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could we make this passage clearer?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Podemos aclarar este pasaje?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可以把这段话写得更清楚吗？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可以把這段話寫得更清楚嗎？"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この文章をもう少し分かりやすくできますか？"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peut-on rendre ce passage plus clair ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Könnten wir diese Textstelle klarer formulieren?"
+          }
+        }
+      }
+    },
+    "Yes. Add your own reply, then try resolving this discussion.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes. Add your own reply, then try resolving this discussion."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sí. Añade tu respuesta e intenta resolver esta discusión."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可以。添加你的回复，然后尝试将讨论标为已解决。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可以。新增你的回覆，然後嘗試將討論標示為已解決。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "はい。返信を追加し、この議論を解決済みにしてみてください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oui. Ajoutez votre réponse, puis essayez de résoudre cette discussion."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja. Füge eine eigene Antwort hinzu und markiere die Diskussion dann als erledigt."
+          }
+        }
+      }
+    },
+    "The next release includes a document browser.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The next release includes a document browser."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La próxima versión incluye un explorador de documentos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一版本将包含文档浏览器。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一個版本將包含文件瀏覽器。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次のリリースには書類ブラウザが含まれます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La prochaine version comprend un navigateur de documents."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die nächste Version enthält einen Dokumentbrowser."
+          }
+        }
+      }
+    },
+    "The next release includes a document browser and a guided tour.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The next release includes a document browser and a guided tour."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La próxima versión incluye un explorador de documentos y una visita guiada."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一版本将包含文档浏览器和功能导览。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一個版本將包含文件瀏覽器與功能導覽。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次のリリースには書類ブラウザと使い方ガイドが含まれます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La prochaine version comprend un navigateur de documents et une visite guidée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die nächste Version enthält einen Dokumentbrowser und eine Einführung."
+          }
+        }
+      }
+    },
+    "Keep this document open. Choose Save Example Change in the practice bar, then open Review Changes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep this document open. Choose Save Example Change in the practice bar, then open Review Changes."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén abierto este documento. Pulsa Guardar cambio de ejemplo en la barra de práctica y luego abre Revisar cambios."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保持此文档打开。在练习栏中选择“保存示例更改”，然后打开“审阅更改”。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保持此文件開啟。在練習列中選擇「儲存範例變更」，然後開啟「審閱變更」。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この書類を開いたまま、練習バーで「サンプルの変更を保存」を選び、「変更を確認」を開いてください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gardez ce document ouvert. Choisissez Enregistrer la modification d’exemple dans la barre d’exercice, puis ouvrez Réviser les modifications."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lass dieses Dokument geöffnet. Wähle in der Übungsleiste Beispieländerung speichern und öffne dann Änderungen prüfen."
+          }
+        }
+      }
+    },
+    "Open a Markdown file from Files, Finder or another app. Close it to return to browsing. Your documents stay ordinary files.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open a Markdown file from Files, Finder or another app. Close it to return to browsing. Your documents stay ordinary files."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre un archivo Markdown desde Archivos, Finder u otra app. Ciérralo para volver a explorar. Tus documentos siguen siendo archivos normales."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从“文件”、访达或其他 App 打开 Markdown 文件。关闭文档即可返回浏览。文档始终是普通文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從「檔案」、Finder 或其他 App 開啟 Markdown 檔案。關閉文件即可返回瀏覽。文件始終是一般檔案。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「ファイル」、Finder、ほかのアプリから Markdown ファイルを開けます。閉じるとブラウズに戻ります。書類は通常のファイルのままです。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrez un fichier Markdown depuis Fichiers, le Finder ou une autre app. Fermez-le pour revenir à la navigation. Vos documents restent des fichiers ordinaires."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffne eine Markdown-Datei über Dateien, den Finder oder eine andere App. Schließe sie, um zum Browser zurückzukehren. Deine Dokumente bleiben gewöhnliche Dateien."
+          }
+        }
+      }
+    },
+    "On iOS 27, Files currently shows Markdown as plain text instead of using Margined’s Quick Look extension. Choose Open With → Margined or Share → Margined for the formatted document.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On iOS 27, Files currently shows Markdown as plain text instead of using Margined’s Quick Look extension. Choose Open With → Margined or Share → Margined for the formatted document."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En iOS 27, Archivos muestra actualmente Markdown como texto sin usar la extensión de Vista rápida de Margined. Elige Abrir con → Margined o Compartir → Margined para ver el formato."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 iOS 27 上，“文件”目前会将 Markdown 显示为纯文本，而不会使用 Margined 的快速查看扩展。选择“打开方式”→ Margined 或“共享”→ Margined 可查看排版后的文档。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 iOS 27 上，「檔案」目前會將 Markdown 顯示為純文字，而不會使用 Margined 的快速查看延伸功能。選擇「打開方式」→ Margined 或「分享」→ Margined，即可檢視排版後的文件。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS 27 の「ファイル」は現在、Margined のクイックルック機能を使わずに Markdown をプレーンテキストで表示します。「このアプリで開く」→ Margined、または「共有」→ Margined で書式付きの書類を開いてください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sous iOS 27, Fichiers affiche actuellement le Markdown en texte brut sans utiliser l’extension Coup d’œil de Margined. Choisissez Ouvrir avec → Margined ou Partager → Margined pour voir le document mis en forme."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unter iOS 27 zeigt Dateien Markdown derzeit als reinen Text, ohne Margineds Übersicht-Erweiterung zu verwenden. Wähle Öffnen mit → Margined oder Teilen → Margined für die formatierte Ansicht."
+          }
+        }
+      }
+    },
+    "Enable Margined in System Settings → Extensions → Quick Look. Select a Markdown file in Finder and press Space. Other enabled Markdown previewers may be chosen instead.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Margined in System Settings → Extensions → Quick Look. Select a Markdown file in Finder and press Space. Other enabled Markdown previewers may be chosen instead."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activa Margined en Ajustes del Sistema → Extensiones → Vista rápida. Selecciona un archivo Markdown en Finder y pulsa Espacio. El sistema puede elegir otro visor Markdown que esté activado."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在“系统设置”→“扩展”→“快速查看”中启用 Margined。在访达中选择 Markdown 文件并按空格键。系统也可能选择其他已启用的 Markdown 预览工具。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在「系統設定」→「延伸功能」→「快速查看」中啟用 Margined。在 Finder 中選取 Markdown 檔案並按空白鍵。系統也可能選用其他已啟用的 Markdown 預覽工具。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「システム設定」→「機能拡張」→「クイックルック」で Margined を有効にします。Finder で Markdown ファイルを選んでスペースキーを押してください。ほかのプレビュー機能が選ばれる場合もあります。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activez Margined dans Réglages Système → Extensions → Coup d’œil. Sélectionnez un fichier Markdown dans le Finder et appuyez sur Espace. Un autre outil Markdown activé peut être choisi à la place."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiviere Margined unter Systemeinstellungen → Erweiterungen → Übersicht. Wähle im Finder eine Markdown-Datei und drücke die Leertaste. Eine andere aktivierte Markdown-Vorschau kann stattdessen gewählt werden."
+          }
+        }
+      }
+    },
+    "Live Streaming follows the active text from supported writing apps. Start it from Margined’s welcome screen or File menu. Drafts is one example: enable its Marked streaming option, then edit a draft. Pause holds the current text; Resume catches up.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live Streaming follows the active text from supported writing apps. Start it from Margined’s welcome screen or File menu. Drafts is one example: enable its Marked streaming option, then edit a draft. Pause holds the current text; Resume catches up."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La transmisión en directo sigue el texto activo de las apps compatibles. Iníciala desde la bienvenida o el menú Archivo de Margined. En Drafts, activa la transmisión de Marked y edita un borrador. Pausa conserva el texto; Reanudar muestra lo más reciente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时流会跟随受支持写作 App 中的当前文本。从 Margined 欢迎界面或“文件”菜单启动。例如在 Drafts 中启用 Marked 流选项，然后编辑草稿。“暂停”保留当前文本；“继续”会跟上最新内容。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時串流會跟隨支援的寫作 App 中的目前文字。從 Margined 歡迎畫面或「檔案」選單啟動。例如在 Drafts 中啟用 Marked 串流選項，然後編輯草稿。「暫停」保留目前文字；「繼續」會追上最新內容。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ライブストリーミングは対応する執筆アプリのアクティブなテキストを表示します。Margined のようこそ画面か「ファイル」メニューから開始します。Drafts では Marked のストリーミングを有効にし、下書きを編集します。一時停止で表示を固定し、再開すると最新の内容になります。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le flux en direct suit le texte actif des apps d’écriture compatibles. Lancez-le depuis l’accueil ou le menu Fichier de Margined. Dans Drafts, activez le flux Marked, puis modifiez un brouillon. Pause fige le texte ; Reprendre affiche les dernières modifications."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live-Streaming folgt dem aktiven Text unterstützter Schreib-Apps. Starte es über Margineds Willkommen-Fenster oder das Menü Ablage. Aktiviere etwa in Drafts die Marked-Streaming-Option und bearbeite einen Entwurf. Pause hält den Text fest; Fortsetzen holt Änderungen nach."
+          }
+        }
+      }
+    },
+    "Keep a saved document open while another app or agent changes it. Margined refreshes without losing your place. Review Changes shows what changed; marking a change reviewed acknowledges it without editing the document.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep a saved document open while another app or agent changes it. Margined refreshes without losing your place. Review Changes shows what changed; marking a change reviewed acknowledges it without editing the document."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén abierto un documento guardado mientras otra app o agente lo modifica. Margined se actualiza sin perder tu posición. Revisar cambios muestra las diferencias; marcarlas como revisadas no modifica el documento."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保持已保存的文档打开，让其他 App 或智能体修改它。Margined 会刷新，同时保留阅读位置。“审阅更改”会显示变化；标为已审阅只表示确认，不会编辑文档。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保持已儲存的文件開啟，讓其他 App 或代理程式修改它。Margined 會重新整理並保留閱讀位置。「審閱變更」會顯示差異；標示已審閱只表示確認，不會編輯文件。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存した書類を開いたまま、ほかのアプリやエージェントで変更します。Margined は読んでいる位置を保って更新します。「変更を確認」で差分を確認できます。確認済みにしても書類は編集されません。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gardez un document enregistré ouvert pendant qu’une autre app ou un agent le modifie. Margined l’actualise sans vous faire perdre votre place. Réviser les modifications montre les différences ; les marquer comme relues ne modifie pas le document."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lass ein gespeichertes Dokument geöffnet, während eine andere App oder ein Agent es ändert. Margined aktualisiert es, ohne deine Leseposition zu verlieren. Änderungen prüfen zeigt die Unterschiede; als geprüft markieren bestätigt sie, ohne das Dokument zu bearbeiten."
+          }
+        }
+      }
+    },
+    "Select a passage and add a discussion. Replies, author names and resolution are saved inside the Markdown file. Open the practice conversation, reply, then resolve and reopen it. Unposted replies stay protected when you close or switch documents.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a passage and add a discussion. Replies, author names and resolution are saved inside the Markdown file. Open the practice conversation, reply, then resolve and reopen it. Unposted replies stay protected when you close or switch documents."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecciona un pasaje y añade una discusión. Las respuestas, los autores y el estado se guardan en el archivo Markdown. Abre la conversación de práctica, responde, resuélvela y vuelve a abrirla. Las respuestas sin publicar se protegen al cerrar o cambiar de documento."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择一段文字并添加讨论。回复、作者姓名和解决状态都保存在 Markdown 文件中。打开练习讨论并回复，然后标为已解决并重新打开。关闭或切换文档时，尚未发布的回复会受到保护。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選取一段文字並新增討論。回覆、作者姓名與解決狀態都儲存在 Markdown 檔案中。開啟練習討論並回覆，然後標示為已解決並重新開啟。關閉或切換文件時，尚未發佈的回覆會受到保護。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文章を選んで議論を追加します。返信、著者名、解決状態は Markdown ファイル内に保存されます。練習用の会話に返信し、解決済みにしてから再開してみましょう。未投稿の返信は、書類を閉じたり切り替えたりするときも保護されます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sélectionnez un passage et ajoutez une discussion. Les réponses, les noms et la résolution sont enregistrés dans le fichier Markdown. Répondez à la conversation d’exercice, résolvez-la, puis rouvrez-la. Les réponses non publiées sont protégées lors de la fermeture ou du changement de document."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle eine Textstelle und füge eine Diskussion hinzu. Antworten, Namen und Erledigungsstatus werden in der Markdown-Datei gespeichert. Antworte in der Übung, erledige die Diskussion und öffne sie erneut. Ungesendete Antworten bleiben beim Schließen oder Wechseln geschützt."
+          }
+        }
+      }
+    },
+    "Click a task box to save progress to Markdown. The first click explains the write before you agree. Each tick saves automatically and supports Undo. Other apps and agents can read the saved checkmarks.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click a task box to save progress to Markdown. The first click explains the write before you agree. Each tick saves automatically and supports Undo. Other apps and agents can read the saved checkmarks."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pulsa una casilla para guardar tu progreso en Markdown. El primer toque explica la escritura antes de pedir tu aprobación. Cada marca se guarda automáticamente y permite Deshacer. Otras apps y agentes pueden leerla."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点按任务框可将进度保存到 Markdown。首次点按会在征得同意前说明写入行为。每次勾选都会自动保存，并支持撤销。其他 App 和智能体可以读取已保存的勾选状态。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點按工作方框可將進度儲存至 Markdown。首次點按會在徵得同意前說明寫入行為。每次勾選都會自動儲存，並支援還原。其他 App 和代理程式可以讀取已儲存的勾選狀態。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タスクのチェックを押すと進捗を Markdown に保存できます。初回は保存の説明を読んでから同意します。チェックは自動保存され、取り消しも可能です。ほかのアプリやエージェントも進捗を読めます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cochez une tâche pour enregistrer la progression en Markdown. Au premier clic, l’écriture est expliquée avant votre accord. Chaque coche est enregistrée automatiquement et peut être annulée. Les autres apps et agents peuvent lire ces coches."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klicke ein Aufgabenfeld an, um Fortschritt in Markdown zu speichern. Beim ersten Klick wird das Speichern vor deiner Zustimmung erklärt. Jedes Häkchen wird automatisch gespeichert und lässt sich rückgängig machen. Andere Apps und Agenten können es lesen."
+          }
+        }
+      }
+    },
+    "Opening a file doesn’t grant access to nearby images. Choose a folder containing the document and its images; subfolders are included. You can choose all of Dropbox or iCloud Drive when Files permits it, or remember several smaller folders. Manage grants in Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening a file doesn’t grant access to nearby images. Choose a folder containing the document and its images; subfolders are included. You can choose all of Dropbox or iCloud Drive when Files permits it, or remember several smaller folders. Manage grants in Settings."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir un archivo no da acceso a las imágenes cercanas. Elige una carpeta con el documento y sus imágenes; se incluyen las subcarpetas. Puedes elegir todo Dropbox o iCloud Drive cuando Archivos lo permita, o varias carpetas más pequeñas. Gestiona los permisos en Ajustes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开文件不会授予访问附近图片的权限。请选择包含文档及其图片的文件夹；其中的子文件夹也会包含在内。如果“文件”允许，可以选择整个 Dropbox 或 iCloud 云盘，也可以记住多个较小的文件夹。在“设置”中管理授权。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟檔案不會授予存取附近圖片的權限。請選擇包含文件及其圖片的檔案夾；其中的子檔案夾也會包含在內。如果「檔案」允許，可以選取整個 Dropbox 或 iCloud 雲碟，也可以記住多個較小的檔案夾。在「設定」中管理授權。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイルを開いても、その周辺の画像へのアクセス権は得られません。書類と画像を含むフォルダを選んでください。サブフォルダも含まれます。「ファイル」が許可する場合は Dropbox や iCloud Drive 全体、または複数の小さなフォルダを登録できます。権限は設定で管理します。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir un fichier ne donne pas accès aux images voisines. Choisissez un dossier contenant le document et ses images ; ses sous-dossiers sont inclus. Si Fichiers le permet, choisissez tout Dropbox ou iCloud Drive, ou mémorisez plusieurs petits dossiers. Gérez les autorisations dans Réglages."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Öffnen einer Datei erlaubt keinen Zugriff auf benachbarte Bilder. Wähle einen Ordner mit Dokument und Bildern; Unterordner sind eingeschlossen. Wenn Dateien es erlaubt, kannst du ganz Dropbox oder iCloud Drive oder mehrere kleinere Ordner freigeben. Verwalte die Freigaben in den Einstellungen."
+          }
+        }
+      }
+    },
+    "The GitHub Mac app loads nearby images using ordinary macOS file access. Protected folders may still require system permission. Remote images stay off until you enable them for a document.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The GitHub Mac app loads nearby images using ordinary macOS file access. Protected folders may still require system permission. Remote images stay off until you enable them for a document."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La app para Mac de GitHub carga las imágenes cercanas con el acceso normal de macOS. Las carpetas protegidas pueden pedir permiso del sistema. Las imágenes remotas no se cargan hasta que las actives para un documento."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub 提供的 Mac App 使用普通 macOS 文件访问权限加载附近图片。受保护的文件夹仍可能需要系统授权。远程图片默认关闭，只有在为文档启用后才会加载。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub 提供的 Mac App 使用一般 macOS 檔案存取權限載入附近圖片。受保護的檔案夾仍可能需要系統授權。遠端圖片預設關閉，只有為文件啟用後才會載入。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub 版の Mac アプリは、通常の macOS のファイルアクセスで周辺の画像を読み込みます。保護されたフォルダにはシステムの許可が必要な場合があります。リモート画像は、書類ごとに有効にするまで読み込みません。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’app Mac de GitHub charge les images voisines avec l’accès habituel de macOS. Les dossiers protégés peuvent nécessiter une autorisation système. Les images distantes restent désactivées tant que vous ne les autorisez pas pour un document."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Mac-App von GitHub lädt benachbarte Bilder mit dem normalen macOS-Dateizugriff. Geschützte Ordner können eine Systemfreigabe erfordern. Entfernte Bilder bleiben aus, bis du sie für ein Dokument aktivierst."
+          }
+        }
+      }
+    },
+    "Continue Practice": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue Practice"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continuar la práctica"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续练习"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "繼續練習"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "練習を続ける"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continuer l’exercice"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übung fortsetzen"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

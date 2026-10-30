@@ -69,6 +69,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     private var token = UUID().uuidString
     private var ready = false
     private var invalidated = false
+    private var suspended = false
     private var navigation: WKNavigation?
     private var loading: Task<Void, Never>?
     private var position: [String: Any]?
@@ -108,7 +109,18 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     }
 
     func update(html: String, fontSize: Double, imageGeneration: Int, speech: DiscussionSpeechHighlight = .inactive) {
-        guard !invalidated, scope.isCurrent() else { invalidate(); return }
+        guard !invalidated else { return }
+        guard scope.isCurrent() else {
+            // Navigation and docking can temporarily hide a retained view.
+            // Cancel its work without retiring the coordinator's lifetime.
+            if !suspended {
+                suspended = true; generation += 1; ready = false
+                loading?.cancel(); loading = nil
+                self.html = nil; images.renew()
+            }
+            return
+        }
+        suspended = false
         self.speech = speech
         let fontChanged = self.fontSize != fontSize
         self.fontSize = fontSize

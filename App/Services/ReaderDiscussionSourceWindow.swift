@@ -10,7 +10,7 @@ final class ReaderDiscussionSourceWindow: NSWindowController, NSWindowDelegate, 
     private var zoom: Double
     private weak var reader: ReaderState?
 
-    static func show(source: String, title: String, context: UUID, zoom: Double, appearance: DocumentAppearance, reader: ReaderState) {
+    static func show(source: String, title: String, context: UUID, zoom: Double, reader: ReaderState) {
         let controller = windows[context] ?? ReaderDiscussionSourceWindow(context: context)
         windows[context] = controller
         controller.reader = reader
@@ -18,11 +18,6 @@ final class ReaderDiscussionSourceWindow: NSWindowController, NSWindowDelegate, 
         controller.zoom = zoom
         controller.applyFont()
         controller.window?.title = String(localized: "Source — \(title)")
-        switch appearance {
-        case .system: controller.window?.appearance = nil
-        case .light: controller.window?.appearance = NSAppearance(named: .aqua)
-        case .dark: controller.window?.appearance = NSAppearance(named: .darkAqua)
-        }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         controller.window?.makeFirstResponder(controller.textView)

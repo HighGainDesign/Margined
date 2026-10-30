@@ -8,6 +8,24 @@ import XCTest
 #endif
 
 final class PreviewDocumentTests: XCTestCase {
+    func testDefaultFilePreviewShowsTheDocumentWithoutAppendingDiscussionsOrWritingTheSource() async throws {
+        let file = try folder().appendingPathComponent("Document.md")
+        let thread = DiscussionThread(id: "t-default", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "Review this passage.", prefix: "Review", suffix: "", section: "Review"),
+            messages: [.init(id: "m-default", author: "Reviewer", created: "2026-10-27T10:00:00Z",
+                body: "A private discussion stays in the source.", inReplyTo: nil)],
+            resolvedBy: nil, resolved: nil, attachmentHistory: [])
+        let bytes = try previewSource([thread]); try bytes.write(to: file)
+        let preview = try await PreviewDocument.load(file)
+        let document = try SwiftSoup.parse(preview.html)
+        XCTAssertTrue(try document.select("main").text().contains("Review this passage."))
+        XCTAssertEqual(try document.select("section.discussion-appendix").size(), 0,
+            "Quick Look should default to the document; opening the app still exposes its discussions")
+        XCTAssertFalse(try document.text().contains("A private discussion stays in the source."))
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        XCTAssertEqual(try DiscussionCodec.parse(MarkdownSource.read(file)).threads.first?.messages.count, 1)
+    }
+
     private let pixel = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5iQAAAAASUVORK5CYII=")!
 
     private func folder() throws -> URL {
@@ -115,7 +133,7 @@ final class PreviewDocumentTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(images.last).hasAttr("src"))
     }
 
-    func testSystemPreviewIncludesFormattedReadOnlyDiscussionHistoryAndLocalAttachments() async throws {
+    func testExplicitDiscussionAppendixPackagesFormattingAndLocalAttachments() async throws {
         let root = try folder(), file = root.appendingPathComponent("Discussion.md")
         try pixel.write(to: root.appendingPathComponent("figure.png"))
         let author = "Alex **literal** <img src=x>"
@@ -127,10 +145,10 @@ final class PreviewDocumentTests: XCTestCase {
                 .init(id: "m-reply", author: "Sam", created: "2026-10-24T11:00:00Z", body: "A reply.", inReplyTo: "m-question")],
             resolvedBy: nil, resolved: nil, attachmentHistory: [])
         let bytes = try previewSource([thread]); try bytes.write(to: file)
-        let preview = try await PreviewDocument.load(file, appearance: .light)
+        let preview = try await packageWithDiscussions(file, appearance: .light)
         let doc = try SwiftSoup.parse(preview.html)
         let appendix = try doc.select("section.discussion-appendix")
-        XCTAssertEqual(appendix.size(), 1, "Quick Look must expose saved conversations as a read-only appendix")
+        XCTAssertEqual(appendix.size(), 1, "Explicitly included discussions must remain formatted and read-only")
         guard let history = appendix.first() else { return }
         XCTAssertEqual(try history.select("article").size(), 2)
         XCTAssertEqual(try history.select("blockquote").text(), "Review this passage.")
@@ -164,7 +182,7 @@ final class PreviewDocumentTests: XCTestCase {
         let source = try MarkdownSource.decode(bytes)
         let encoded = Data([0xff, 0xfe]) + (try XCTUnwrap(source.data(using: .utf16LittleEndian)))
         try encoded.write(to: file)
-        let preview = try await PreviewDocument.load(file)
+        let preview = try await packageWithDiscussions(file)
         let doc = try SwiftSoup.parse(preview.html)
         let appendix = try doc.select("section.discussion-appendix")
         XCTAssertEqual(appendix.size(), 1, "Unavailable anchors must not hide their saved conversations")
@@ -175,6 +193,12 @@ final class PreviewDocumentTests: XCTestCase {
         XCTAssertEqual(try history.select(".discussion-state").array().map { try $0.text() }, ["Open", "Resolved"])
         XCTAssertEqual(try history.select("button,textarea,input").size(), 0)
         XCTAssertEqual(try Data(contentsOf: file), encoded, "Quick Look never repairs or rewrites the source")
+    }
+
+    private func packageWithDiscussions(_ file: URL, appearance: DocumentAppearance = .system) async throws -> PreviewDocument {
+        let rendered = try await MarkdownRenderer.shared.render(MarkdownSource.read(file),
+            wide: true, appearance: appearance, includeDiscussionAppendix: true)
+        return try await PreviewDocument.package(html: rendered.html, documentURL: file)
     }
 
     private func previewSource(_ threads: [DiscussionThread], prose: String = "# Review\n\nReview this passage.\n") throws -> Data {

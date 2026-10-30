@@ -4,12 +4,19 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
     private var welcome: NSWindowController?
+    let tutorial = TutorialSession()
     private var settings: NSWindowController?
     private var setup: SetupWindowController?
+    private let applicationAppearance = ApplicationAppearance()
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        applicationAppearance.start()
         buildMenus()
         _ = NSDocumentController.shared
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        applicationAppearance.stop()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -71,16 +78,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             documentDidOpen()
             return
         }
+        let view = WelcomeView(recentDocuments: NSDocumentController.shared.recentDocumentURLs,
+            open: { NSDocumentController.shared.openDocument(nil) },
+            liveStreaming: { [weak self] in self?.showLiveStreamingPreview() },
+            openRecent: { [weak self] url in self?.application(NSApp, open: [url]) },
+            tour: { [weak self] in self?.showStartupTips(force: true) })
         if welcome == nil {
-            let view = WelcomeView(open: { NSDocumentController.shared.openDocument(nil) },
-                                   liveStreaming: { [weak self] in self?.showLiveStreamingPreview() })
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = String(localized: "Margined")
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.contentMinSize = NSSize(width: 480, height: 380)
-            window.setContentSize(NSSize(width: 520, height: 440))
+            window.setContentSize(NSSize(width: 840, height: 560))
             window.center()
             welcome = NSWindowController(window: window)
+        } else {
+            (welcome?.window?.contentViewController as? NSHostingController<WelcomeView>)?.rootView = view
         }
         welcome?.showWindow(nil)
     }
@@ -140,13 +152,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         settings?.showWindow(nil)
     }
 
+    func openSettings() { showSettings(nil) }
+
+    func openTutorialPractice(_ lesson: TutorialLesson) {
+        Task {
+            do {
+                let url = try await tutorial.makePractice(lesson)
+                application(NSApp, open: [url])
+            } catch is CancellationError { }
+            catch { tutorial.error = error.localizedDescription }
+        }
+    }
+
+    func openTutorialPractice(at url: URL) {
+        guard tutorial.practice(for: url) != nil else { return }
+        application(NSApp, open: [url])
+    }
+
     func showStartupTips(force: Bool = false) {
         if let setup, setup.window?.isVisible == true {
             setup.showWindow(nil)
             return
         }
         guard force || StartupTips.shouldShow() else { return }
-        let controller = SetupWindowController()
+        let controller = SetupWindowController(tutorial: tutorial)
         setup = controller
         controller.showWindow(nil)
     }
@@ -180,6 +209,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     @objc private func focusDocument(_ sender: Any?) { reader?.focusDocument() }
     @objc private func returnToNavigation(_ sender: Any?) { reader?.returnToNavigation() }
     @objc private func addDiscussion(_ sender: Any?) { reader?.requestAddDiscussion() }
+    @objc private func saveMarkdownCopy(_ sender: Any?) { reader?.saveDiscussionCopy() }
+    @objc private func exportCleanCopy(_ sender: Any?) { reader?.exportDiscussions(.clean) }
+    @objc private func exportConversations(_ sender: Any?) { reader?.exportDiscussions(.conversation) }
     @objc private func toggleDiscussions(_ sender: Any?) {
         guard let reader else { return }
         reader.showDiscussions.toggle()
@@ -203,6 +235,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     @objc private func undoCheckbox(_ sender: Any?) { undoActions.undo() }
     @objc private func redoCheckbox(_ sender: Any?) { undoActions.redo() }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if let action = menuItem.action,
+           [#selector(saveMarkdownCopy(_:)), #selector(exportCleanCopy(_:)), #selector(exportConversations(_:))].contains(action) {
+            return reader?.rendered != nil && reader?.fileSaving == false && reader?.isRendering == false
+        }
         if menuItem.action == #selector(toggleSpeech(_:)) {
             menuItem.title = reader?.existingSpeech?.session.status == .playing ? String(localized: "Pause Reading") : String(localized: "Read Aloud")
         }
@@ -317,6 +353,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         file.addItem(recentItem)
         file.addItem(.separator())
         add(String(localized: "Close Window"), to: file, action: #selector(NSWindow.performClose(_:)), key: "w")
+        file.addItem(.separator())
+        add(String(localized: "Save Markdown Copy…"), to: file, action: #selector(saveMarkdownCopy(_:)), target: self)
+        add(String(localized: "Export Clean Copy…"), to: file, action: #selector(exportCleanCopy(_:)), target: self)
+        add(String(localized: "Export Conversations…"), to: file, action: #selector(exportConversations(_:)), target: self)
         file.addItem(.separator())
         add(String(localized: "Print…"), to: file, action: #selector(NSDocument.printDocument(_:)), key: "p")
         add(String(localized: "Print with Discussions…"), to: file, action: #selector(MarkdownDocument.printWithDiscussions(_:)))

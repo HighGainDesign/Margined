@@ -15,6 +15,7 @@ struct DiscussionHistoryView: View {
     let imageFailed: @MainActor (String) -> Void
     let openFile: @MainActor (URL) -> Void
     var playback: DiscussionHistoryPlayback? = nil
+    var fillsAvailableSpace = false
     @Environment(\.sizeCategory) private var sizeCategory
 
     private struct Identity: Hashable { let document: UUID; let thread: String }
@@ -31,7 +32,8 @@ struct DiscussionHistoryView: View {
             loadRemoteImages: loadRemoteImages, documentLanguage: documentLanguage,
             fontSize: fontSize, imageGeneration: imageGeneration,
             scope: DiscussionHistoryScope(fileURL: fileURL, isCurrent: isCurrent,
-                imageFailed: imageFailed, openFile: openFile), playback: playback)
+                imageFailed: imageFailed, openFile: openFile), playback: playback,
+            fillsAvailableSpace: fillsAvailableSpace)
             .id(Identity(document: documentID, thread: thread.id))
     }
 }
@@ -69,6 +71,7 @@ private struct DiscussionHistoryContent: View {
     let imageGeneration: Int
     let scope: DiscussionHistoryScope
     let playback: DiscussionHistoryPlayback?
+    let fillsAvailableSpace: Bool
     @State private var prepared: Prepared?
     @State private var error: String?
     @Environment(\.locale) private var locale
@@ -86,6 +89,10 @@ private struct DiscussionHistoryContent: View {
     private struct Prepared {
         let key: RenderKey
         let output: RenderedMarkdown
+    }
+    private struct PreparationRequest: Equatable {
+        let key: RenderKey
+        let current: Bool
     }
     private var renderKey: RenderKey {
         .init(thread: thread, appearance: appearance, remote: loadRemoteImages,
@@ -117,9 +124,10 @@ private struct DiscussionHistoryContent: View {
                     DiscussionHistoryWebView(html: prepared.output.html, fontSize: fontSize,
                         imageGeneration: imageGeneration, scope: scope, speech: highlight)
                 } else { ProgressView("Reading discussions…").frame(maxWidth: .infinity, maxHeight: .infinity) }
-            }.frame(height: 240)
+            }.frame(height: fillsAvailableSpace ? nil : 240)
         }
-        .task(id: renderKey) {
+        .task(id: PreparationRequest(key: renderKey, current: scope.isCurrent())) {
+            guard scope.isCurrent() else { return }
             let key = renderKey
             do {
                 let output = try await MarkdownRenderer.shared.renderDiscussion(thread,

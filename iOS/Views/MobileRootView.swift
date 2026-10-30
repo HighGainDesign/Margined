@@ -4,26 +4,35 @@ import UniformTypeIdentifiers
 struct MobileRootView: View {
     @State private var reader: MobileReaderState
     @State private var library = MobileDocumentLibrary()
+    @State private var tutorial: TutorialSession
+    @State private var pendingPractice: URL?
     let imageFolders: MobileImageFolders
     @State private var showPicker = false
     @State private var pickingFolder = false
     private enum Sheet: String, Identifiable { case settings, guide; var id: String { rawValue } }
     @State private var activeSheet: Sheet?
     @AppStorage("mobileSetupGuideSeen", store: ReaderPreferences.defaults) private var setupGuideSeen = false
+    @AppStorage(ReaderPreferences.appearanceKey, store: ReaderPreferences.defaults) private var appearance = DocumentAppearance.system
     @Environment(\.scenePhase) private var scenePhase
 
-    init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders) {
+    init(playback: MobilePlaybackOwner, imageFolders: MobileImageFolders, reader: MobileReaderState? = nil, tutorial: TutorialSession? = nil) {
         self.imageFolders = imageFolders
-        _reader = State(initialValue: MobileReaderState(playback: playback))
+        _reader = State(initialValue: reader ?? MobileReaderState(playback: playback))
+        _tutorial = State(initialValue: tutorial ?? TutorialSession(platform: .mobile))
     }
 
     var body: some View {
         Group {
             if reader.hasDocument {
                 MobileDocumentWorkspace(reader: reader, openFolder: { pickFolder() },
-                    closeFile: { Task { await reader.close() } }).id(reader.id)
+                    closeFile: { Task { await reader.close() } })
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        if let practice = tutorial.practice(for: reader.fileURL) {
+                            TutorialPracticeBar(session: tutorial, practice: practice, tour: { activeSheet = .guide })
+                        }
+                    }.id(reader.id)
             } else {
-                NavigationStack { libraryView.navigationTitle("Margined").navigationBarTitleDisplayMode(.inline) }
+                libraryView
             }
         }
         .overlay { if reader.isOpening || imageFolders.isRestoring { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
@@ -53,12 +62,15 @@ struct MobileRootView: View {
         } message: {
             Text("Keep this document open to finish your comments and replies, or discard the unposted text.")
         }
-        .sheet(item: $activeSheet) { destination in
-            switch destination {
-            case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders)
-            case .guide:
-                NavigationStack { MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }) }
+        .sheet(item: $activeSheet, onDismiss: openPendingPractice) { destination in
+            Group {
+                switch destination {
+                case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders, tutorial: tutorial, openPractice: preparePractice, resumePractice: resumePractice)
+                case .guide:
+                    MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial, openPractice: preparePractice, resumePractice: resumePractice)
+                }
             }
+            .preferredColorScheme(appearance == .system ? nil : (appearance == .dark ? .dark : .light))
         }
         .onChange(of: activeSheet) { previous, current in
             // The guide's nested Files picker does not change this destination.
@@ -96,65 +108,47 @@ struct MobileRootView: View {
         .onChange(of: scenePhase) { _, phase in
             Task { await reader.setPresented(phase == .active) }
         }
+        .onChange(of: appearance, initial: true) { _, value in
+            if reader.appearance != value { reader.appearance = value }
+        }
+        .preferredColorScheme(appearance == .system ? nil : (appearance == .dark ? .dark : .light))
     }
 
     private var libraryView: some View {
-        List {
-            Section {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.richtext").font(.system(size: 48)).foregroundStyle(.blue).accessibilityHidden(true)
-                    Text("Your Markdown, clearly.").font(.title2.bold())
-                    Text("Open a document from Files to read, follow changes, or listen.")
-                        .multilineTextAlignment(.center).foregroundStyle(.secondary)
-                    Button(action: { pickFile() }) { Label("Open Document…", systemImage: "folder") }
-                        .labelStyle(.titleAndIcon)
-                        .buttonStyle(.borderedProminent).controlSize(.large)
-                    Button("Open Sample Document") { Task { await openSample() } }
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 24)
-            }
-            if !library.recents.isEmpty {
-                Section("Recent Documents") {
-                    ForEach(library.recents) { item in
-                        Button {
-                            Task {
-                                do { await open(try await library.resolve(item.id)) }
-                                catch { reader.errorMessage = error.localizedDescription }
-                            }
-                        } label: { Label(item.title, systemImage: "doc.text").foregroundStyle(.primary) }
-                    }
-                    .onDelete { indices in
-                        let ids = indices.map { library.recents[$0].id }
-                        for id in ids { library.remove(id: id) }
-                    }
+        MobileDocumentBrowser(open: { await open($0) }, tour: { activeSheet = .guide }, settings: { activeSheet = .settings })
+            .safeAreaInset(edge: .bottom) {
+                if let error = reader.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red).padding().background(.bar)
                 }
             }
-            if let error = reader.errorMessage { Section { Text(error).foregroundStyle(.red).accessibilityLabel(error) } }
-        }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Settings", systemImage: "gearshape") { activeSheet = .settings } } }
     }
 
-    private func pickFile() { pickingFolder = false; showPicker = true }
     private func pickFolder() { pickingFolder = true; showPicker = true }
-    private func open(_ url: URL) async {
+    @discardableResult private func open(_ url: URL) async -> Bool {
         await imageFolders.restore()
         await reader.open(url: url)
         if reader.fileURL == url { try? await library.remember(url) }
+        return reader.hasDocument
     }
-    private func openSample() async {
-        do {
-            let folder = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let sampleFolder = folder.appendingPathComponent("Margined Sample", isDirectory: true)
-            try FileManager.default.createDirectory(at: sampleFolder, withIntermediateDirectories: true)
-            let image = sampleFolder.appendingPathComponent("sample.svg")
-            if !FileManager.default.fileExists(atPath: image.path), let sample = Bundle.main.url(forResource: "sample", withExtension: "svg") {
-                try FileManager.default.copyItem(at: sample, to: image)
-            }
-            let url = sampleFolder.appendingPathComponent("Welcome.md")
-            if !FileManager.default.fileExists(atPath: url.path), let sample = Bundle.main.url(forResource: "Welcome", withExtension: "md") {
-                try FileManager.default.copyItem(at: sample, to: url)
-            }
-            await open(url)
-        } catch { reader.errorMessage = error.localizedDescription }
+    private func preparePractice(_ lesson: TutorialLesson) {
+        Task {
+            do {
+                pendingPractice = try await tutorial.makePractice(lesson)
+                activeSheet = nil
+            } catch is CancellationError { }
+            catch { tutorial.error = error.localizedDescription }
+        }
+    }
+    private func resumePractice(_ url: URL) {
+        guard tutorial.practice(for: url) != nil else { return }
+        pendingPractice = url
+        activeSheet = nil
+    }
+
+    private func openPendingPractice() {
+        guard let url = pendingPractice else { return }
+        pendingPractice = nil
+        Task { await open(url) }
     }
 }

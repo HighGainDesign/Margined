@@ -6,6 +6,56 @@ import XCTest
 
 @MainActor
 final class MobileWebViewTests: XCTestCase {
+    func testClearingFindRemovesNativeHighlightsAndPreservesAnotherSelection() async throws {
+        let reader = MobileReaderState()
+        var parts = URLComponents(string: "margined://preview")!
+        parts.queryItems = [.init(name: "text", value: "# Find\n\nFindneedle Findneedle Findneedle.\n\nA different passage to discuss.")]
+        await reader.openPreview(url: parts.url!); await reader.waitForRendering()
+        reader.appearance = .light; reader.render(); await reader.waitForRendering()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: HostedWebReader(reader: reader))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 650)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let mounted = try await eventually { self.findWebView(host.view) != nil }
+        XCTAssertTrue(mounted)
+        let web = try XCTUnwrap(findWebView(host.view))
+        try await waitForToken(web)
+        reader.searchText = "Findneedle"; reader.find()
+        let found = try await eventually { reader.searchMatch == true }
+        XCTAssertTrue(found)
+        let highlighted = try await eventually { try await self.yellowPixels(in: web) > 80 }
+        XCTAssertTrue(highlighted, "Establish visible native Find highlights before clearing")
+        guard highlighted else { return }
+        _ = try await web.evaluateJavaScript("""
+        const p=document.querySelector('main p:last-of-type'), r=document.createRange();
+        r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);true;
+        """)
+        reader.searchText = ""; reader.find()
+        let cleared = try await eventually { try await self.yellowPixels(in: web) < 20 }
+        XCTAssertTrue(cleared, "An empty query must clear WebKit's actual Find overlay")
+        let selection = try await web.evaluateJavaScript("getSelection().toString()") as? String
+        XCTAssertEqual(selection, "A different passage to discuss.")
+        XCTAssertNil(reader.searchMatch)
+        await reader.close()
+    }
+
+    private func yellowPixels(in web: WKWebView) async throws -> Int {
+        let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+        let image = try await web.takeSnapshot(configuration: configuration)
+        let cg = try XCTUnwrap(image.cgImage)
+        let width = cg.width, height = cg.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return stride(from: 0, to: bytes.count, by: 4).reduce(0) { count, i in
+            count + (bytes[i] > 170 && bytes[i + 1] > 130 && bytes[i + 2] < 120 ? 1 : 0)
+        }
+    }
+
     func testCaptionedTablesUseReadingWidthAndConfineHorizontalScrolling() async throws {
         let source = """
         # Plain

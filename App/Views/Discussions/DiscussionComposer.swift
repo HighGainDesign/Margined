@@ -1,9 +1,14 @@
 import SwiftUI
 
+struct DiscussionComposerAnchor: Hashable {
+    let key: DiscussionSession.DraftKey
+}
+
 struct DiscussionComposer: View {
     let reader: ReaderState
     let key: DiscussionSession.DraftKey
     let isReply: Bool
+    var reveal: () -> Void = {}
     @FocusState private var focused: Bool
 
     private var bodyText: Binding<String> {
@@ -37,6 +42,12 @@ struct DiscussionComposer: View {
         .task(id: reader.discussionComposerFocusGeneration) {
             guard reader.discussionComposerFocusGeneration > 0, reader.discussions.selection == key else { return }
             focused = true
+        }
+        .id(DiscussionComposerAnchor(key: key))
+        .onChange(of: focused) { _, value in if value { reveal() } }
+        .onChange(of: bodyText.wrappedValue) { _, _ in if focused { reveal() } }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
+            if focused { reveal() }
         }
     }
 }

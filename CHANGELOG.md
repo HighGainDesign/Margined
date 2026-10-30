@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0-beta.2 — 2026-10-30
+
+- Add Files browsing, Mac recents and a replayable practice tour.
+- Improve discussion history, scrolling and reply focus.
+- Apply appearance throughout the app; clear Find highlights.
+- Restore Mac exports and direct Read Aloud; simplify Quick Look.
+
 ## 2.0-beta.1 — 2026-10-27
 
 - Add experimental passage discussions, replies and conversation Read Aloud.
