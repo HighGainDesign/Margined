@@ -4,10 +4,10 @@ A native Markdown reader for Mac, iPhone and iPad, with live updates, change
 review, checklists, Read Aloud and portable passage discussions. Documents stay
 ordinary `.md` files that people and agents can use in their own tools.
 
-**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.1)
+**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.2)
 to try passage discussions alongside the established reading, Quick Look, live
-streaming and change-review features. Discussions remain experimental, with known
-scrolling and layout issues. iPhone/iPad TestFlight testing remains invitation-only.
+streaming and change-review features. Discussions remain experimental; compact layouts still need refinement.
+Build 12 is available for testing; hands-on acceptance testing is incomplete. iPhone/iPad TestFlight testing remains invitation-only.
 Join the [public Mac TestFlight beta](https://testflight.apple.com/join/CDxY24jy).
 
 ## Install and open

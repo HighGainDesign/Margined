@@ -34,10 +34,16 @@ established cold-launch target or a measured Margined result.
 
 ### Delivery
 
-Mac and iPhone/iPad builds are in internal TestFlight. Quick Look dispatch and
-local-image gaps, collaboration acceptance and performance acceptance remain open.
-Verify real File Providers, background audio, accessibility and file handoff
-before release.
+The Mac beta is available on GitHub and public TestFlight; iPhone/iPad testing
+remains invitation-only. Native Files browsing and the replayable practice tour
+are implemented. Manual acceptance testing continues, including File Providers,
+background audio, accessibility and file handoff. iOS 27 Quick Look dispatch
+remains limited; use Open With or Share.
+
+Next, address testing regressions and refine compact discussions after design
+review. Folder-picker convenience and clearer selection/navigation actions remain
+polish work; editing posted comments and other new features are separate backlog
+items.
 
 ## Future enhancements
 
