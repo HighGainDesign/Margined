@@ -820,6 +820,11 @@ import XCTest
     func testWindowResizingPreservesTheReadersVisiblePassage() async throws {
         let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to wrap onto several lines in a narrower document window while keeping the same semantic reading passage." }.joined(separator: "\n\n")
         let f = try await fixture(tail: "\n\n" + paragraphs)
+        let observing = await pollAsync {
+            try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool == true
+        }
+        XCTAssertTrue(observing, "Install the actual app observer before seeding its reading position")
         _ = try await f.web.callAsyncJavaScript("""
         await document.fonts.ready;
         window.mobileResizePage = document;
@@ -829,6 +834,7 @@ import XCTest
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        try await settleMobileResizeObserver(f.web)
         let initial = try await resizeReadingMetrics(f.web)
         XCTAssertGreaterThan(try XCTUnwrap(initial["scroll"] as? Double), 0,
                              "The fixture must actually be partway through its rendered document")
@@ -836,11 +842,19 @@ import XCTest
         for size in [CGSize(width: 890, height: 626), CGSize(width: 626, height: 890), CGSize(width: 466, height: 678)] {
             f.window.frame.size = size
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let nativeSettled = await settledNavigation(f)
+            XCTAssertTrue(nativeSettled, "Settle the native navigation width policy before checking its reader viewport")
             let widthCommitted = await pollAsync {
                 let width = try await f.web.evaluateJavaScript("innerWidth") as? Double
                 return width.map { abs($0 - f.web.bounds.width) < 1 } == true
             }
             XCTAssertTrue(widthCommitted, "WebKit must commit the resized native viewport before assessing reading position")
+            // A committed viewport can precede the observer's asynchronous
+            // restoration. Wait for its actual result, not just the width.
+            try await settleMobileResizeObserver(f.web)
+            _ = await pollAsync {
+                try await self.resizeReadingMetrics(f.web)["visible"] as? Bool == true
+            }
             let metrics = try await resizeReadingMetrics(f.web)
             XCTAssertEqual(metrics["samePage"] as? Bool, true)
             XCTAssertEqual(metrics["visible"] as? Bool, true,
@@ -1032,6 +1046,13 @@ import XCTest
             "webBounds": String(describing: fixture.web.bounds), "navigationStack": stack]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
            let text = String(data: data, encoding: .utf8) { print("MARGINED-NAV-FAIL " + text) }
+    }
+
+    private func settleMobileResizeObserver(_ web: WKWebView) async throws {
+        // Wait for the app observer's own frame barrier in addition to the
+        // page's committed layout and width-policy checks.
+        _ = try await web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;",
+            arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
     }
 
     private func resizeReadingMetrics(_ web: WKWebView) async throws -> [String: Any] {
@@ -1848,10 +1869,14 @@ import XCTest
             return try await history.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.documentElement.scrollHeight>innerHeight && document.body.style.fontSize!==''") as? Bool == true
         }
         XCTAssertTrue(ready)
+        let keyboard = MobileKeyboardFrameObservation(window: f.window)
         XCTAssertTrue(editor.becomeFirstResponder())
+        let typingSettled = await poll { keyboard.frame.height > 100 && editor.isFirstResponder }
+        XCTAssertTrue(typingSettled, "Seed the history after the actual keyboard has completed its frame transition")
+        guard typingSettled else { return }
         _ = try await history.callAsyncJavaScript("""
         await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
-        window.scrollTo(0,160);
+        window.scrollTo({top:160,behavior:'instant'});
         await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)

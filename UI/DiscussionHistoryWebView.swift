@@ -103,7 +103,11 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     private var generation = 0
     private var token = UUID().uuidString
     private var ready = false
-    private var restoringPresentation = false
+    private struct PresentationRestore {
+        let generation: Int
+        let id = UUID()
+    }
+    private var presentationRestore: PresentationRestore?
     private var presentationCaptureTask: Task<Void, Never>?
     private var invalidated = false
     private var suspended = false
@@ -142,7 +146,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
 
     func invalidate() {
         capturePresentationPosition()
-        invalidated = true; generation += 1
+        invalidated = true; generation += 1; presentationRestore = nil
         loading?.cancel(); loading = nil
         images.invalidate()
         webView?.navigationDelegate = nil
@@ -156,7 +160,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
             // Cancel its work without retiring the coordinator's lifetime.
             if !suspended {
                 capturePresentationPosition()
-                suspended = true; generation += 1; ready = false
+                suspended = true; generation += 1; ready = false; presentationRestore = nil
                 loading?.cancel(); loading = nil
                 self.html = nil; images.renew()
             }
@@ -211,6 +215,9 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         guard let webView else { return }
         let reconcile = ready
         generation += 1
+        // A successor load owns restoration, even when it reconciles in place
+        // and therefore receives no replacement native didFinish callback.
+        presentationRestore = nil
         let expected = generation, previousToken = token
         token = UUID().uuidString
         let nextToken = token
@@ -241,25 +248,32 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
 
     func webView(_ view: WKWebView, didFinish navigation: WKNavigation!) {
         guard !invalidated, scope.isCurrent(), navigation === self.navigation else { return }
-        ready = true; restoringPresentation = true
-        let expected = generation, position = position
+        ready = true
+        let restore = PresentationRestore(generation: generation)
+        presentationRestore = restore
+        let expected = restore.generation, position = position
         self.position = nil
         Task { [weak self] in
-            guard let self, valid(expected) else { return }
+            guard let self else { return }
+            // An obsolete task cannot retire a newer restoration's lease.
+            defer {
+                if presentationRestore?.id == restore.id,
+                   presentationRestore?.generation == expected { presentationRestore = nil }
+            }
+            guard valid(expected) else { return }
             let restored = await scope.presentationState?.restorePosition()
             guard valid(expected) else { return }
             _ = try? await view.callAsyncJavaScript(Self.finishScript,
                 arguments: ["documentToken": token, "fontSize": fontSize, "position": (position ?? restored) as Any? ?? NSNull()],
                 in: nil, contentWorld: Self.world)
             guard valid(expected) else { return }
-            restoringPresentation = false
             speechKey = nil; synchronizeSpeech()
         }
     }
 
     private func capturePresentationPosition() {
         presentationCaptureTask?.cancel(); presentationCaptureTask = nil
-        guard ready, !restoringPresentation, !invalidated, let webView, let state = scope.presentationState else { return }
+        guard ready, presentationRestore == nil, !invalidated, let webView, let state = scope.presentationState else { return }
         let token = token
         state.capture(owner: presentationOwner) {
             try? await webView.callAsyncJavaScript(Self.captureScript,
@@ -304,7 +318,8 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     """
     private static let reconcileScript = """
     if (document.documentElement.getAttribute('data-margined-history-token') !== expectedToken) return false;
-    function documentOperation(operation, position, restoreFocus) {
+    function documentOperation(operation, position, restoreFocus, documentToken) {
+    const documentTokenAttribute = 'data-margined-history-token';
     \(documentScript)
     }
     const saved = documentOperation('capture', null, false);
@@ -313,11 +328,13 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     document.body.style.fontSize = `${fontSize}px`;
     document.body.style.webkitTextSizeAdjust = '100%';
     documentOperation('restore', saved, restoreFocus);
+    documentOperation('observeResize', null, false, nextToken);
     return true;
     """
     private static let finishScript = """
     if (document.documentElement.getAttribute('data-margined-history-token') !== documentToken) return false;
-    function documentOperation(operation, position, restoreFocus) {
+    function documentOperation(operation, position, restoreFocus, documentToken) {
+    const documentTokenAttribute = 'data-margined-history-token';
     \(documentScript)
     }
     await document.fonts.ready;
@@ -327,7 +344,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     document.body.style.fontSize = `${fontSize}px`;
     document.body.style.webkitTextSizeAdjust = '100%';
     documentOperation('restore', saved, false);
-    documentOperation('observeResize', null, false);
+    documentOperation('observeResize', null, false, documentToken);
     return true;
     """
 }
@@ -335,7 +352,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
 #if os(iOS)
 extension DiscussionHistoryCoordinator: UIScrollViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard ready, !restoringPresentation, !invalidated, scope.presentationState != nil else { return }
+        guard ready, presentationRestore == nil, !invalidated, scope.presentationState != nil else { return }
         presentationCaptureTask?.cancel()
         presentationCaptureTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
