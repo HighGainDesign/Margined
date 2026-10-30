@@ -511,7 +511,8 @@ struct MobileWebView: UIViewRepresentable {
             let passage = reader.discussionPassageRequest
             let wantsPassage = passage.map {
                 reader.matchesDiscussionVersion($0.version) && $0.sourceID == projection.sourceID &&
-                projection.anchorResults[$0.threadID]?.status == .attached
+                ($0.selectionRange.map { projection.selection($0, renderID: token) != nil } ??
+                    (projection.anchorResults[$0.threadID]?.status == .attached))
             } ?? false
             if let passage, !wantsPassage {
                 Task { [weak self] in
@@ -567,7 +568,17 @@ struct MobileWebView: UIViewRepresentable {
                     defer { if passageInFlight == passage.id { passageInFlight = nil } }
                     arguments.merge(["operation": "goTo", "threadID": passage.threadID, "focus": true],
                         uniquingKeysWith: { _, value in value })
-                    let moved = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script,
+                    if let range = passage.selectionRange, let selection = projection.selection(range, renderID: token) {
+                        arguments["operation"] = "goToSelection"
+                        arguments["expectedText"] = projection.text
+                        arguments["selectionAnchor"] = ["location": selection.range.location, "length": selection.range.length,
+                            "startUnit": selection.domRange.start.unit, "startOffset": selection.domRange.start.offset,
+                            "endUnit": selection.domRange.end.unit, "endOffset": selection.domRange.end.offset]
+                    }
+                    // Let the native reserved reader viewport and WebKit layout
+                    // commit before calculating the passage's visible position.
+                    let revealScript = "await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));\n" + DiscussionWebScripts.script
+                    let moved = try? await webView.callAsyncJavaScript(revealScript,
                         arguments: arguments, in: nil, contentWorld: Self.discussionWorld) as? Bool
                     guard contentReady, String(generation) == token,
                           reader.matchesDiscussionVersion(passage.version),

@@ -12,6 +12,41 @@ struct DiscussionSpeechHighlight: Equatable, Sendable {
     static let inactive = DiscussionSpeechHighlight(elementID: nil, follow: false)
 }
 
+/// Retained by the owning document/thread; never written to a file or global cache.
+/// A successor coordinator awaits the outgoing page's semantic capture before
+/// restoring, so fast hide/show cannot race an old callback into its new page.
+@MainActor
+final class DiscussionHistoryPresentationState {
+    private var position: Data?
+    private var pending: Task<Data?, Never>?
+    private var revision = UUID()
+    private var owner: UUID?
+    func activate(_ owner: UUID) { self.owner = owner }
+    func capture(owner: UUID, _ operation: @escaping @MainActor () async -> [String: Any]?) {
+        guard self.owner == owner else { return }
+        let revision = UUID()
+        self.revision = revision
+        let pending = Task {
+            guard let result = await operation() else { return nil as Data? }
+            return try? JSONSerialization.data(withJSONObject: result)
+        }
+        self.pending = pending
+        Task { [weak self] in
+            let result = await pending.value
+            guard let self, self.revision == revision else { return }
+            if let result { self.position = result }
+            self.pending = nil
+        }
+    }
+    func restorePosition() async -> [String: Any]? {
+        let data: Data?
+        if let pending, let captured = await pending.value { data = captured }
+        else { data = position }
+        guard let data else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+}
+
 #if os(iOS)
 struct DiscussionHistoryWebView: UIViewRepresentable {
     let html: String
@@ -68,16 +103,20 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     private var generation = 0
     private var token = UUID().uuidString
     private var ready = false
+    private var restoringPresentation = false
+    private var presentationCaptureTask: Task<Void, Never>?
     private var invalidated = false
     private var suspended = false
     private var navigation: WKNavigation?
     private var loading: Task<Void, Never>?
     private var position: [String: Any]?
+    private let presentationOwner = UUID()
 
     init(scope: DiscussionHistoryScope) {
         self.scope = scope
         images = DiscussionHistoryImages(scope: scope)
         super.init()
+        scope.presentationState?.activate(presentationOwner)
     }
 
     func makeWebView() -> WKWebView {
@@ -92,6 +131,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         view.isOpaque = false
         view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear
+        view.scrollView.delegate = self
         view.accessibilityLabel = String(localized: "Discussion history")
         #else
         view.setAccessibilityLabel(String(localized: "Discussion history"))
@@ -101,6 +141,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     }
 
     func invalidate() {
+        capturePresentationPosition()
         invalidated = true; generation += 1
         loading?.cancel(); loading = nil
         images.invalidate()
@@ -114,6 +155,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
             // Navigation and docking can temporarily hide a retained view.
             // Cancel its work without retiring the coordinator's lifetime.
             if !suspended {
+                capturePresentationPosition()
                 suspended = true; generation += 1; ready = false
                 loading?.cancel(); loading = nil
                 self.html = nil; images.renew()
@@ -199,16 +241,29 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
 
     func webView(_ view: WKWebView, didFinish navigation: WKNavigation!) {
         guard !invalidated, scope.isCurrent(), navigation === self.navigation else { return }
-        ready = true
+        ready = true; restoringPresentation = true
         let expected = generation, position = position
         self.position = nil
         Task { [weak self] in
             guard let self, valid(expected) else { return }
+            let restored = await scope.presentationState?.restorePosition()
+            guard valid(expected) else { return }
             _ = try? await view.callAsyncJavaScript(Self.finishScript,
-                arguments: ["documentToken": token, "fontSize": fontSize, "position": position as Any? ?? NSNull()],
+                arguments: ["documentToken": token, "fontSize": fontSize, "position": (position ?? restored) as Any? ?? NSNull()],
                 in: nil, contentWorld: Self.world)
             guard valid(expected) else { return }
+            restoringPresentation = false
             speechKey = nil; synchronizeSpeech()
+        }
+    }
+
+    private func capturePresentationPosition() {
+        presentationCaptureTask?.cancel(); presentationCaptureTask = nil
+        guard ready, !restoringPresentation, !invalidated, let webView, let state = scope.presentationState else { return }
+        let token = token
+        state.capture(owner: presentationOwner) {
+            try? await webView.callAsyncJavaScript(Self.captureScript,
+                arguments: ["documentToken": token], in: nil, contentWorld: Self.world) as? [String: Any]
         }
     }
 
@@ -265,12 +320,30 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     function documentOperation(operation, position, restoreFocus) {
     \(documentScript)
     }
+    await document.fonts.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    if (document.documentElement.getAttribute('data-margined-history-token') !== documentToken) return false;
     const saved = position || documentOperation('capture', null, false);
     document.body.style.fontSize = `${fontSize}px`;
     document.body.style.webkitTextSizeAdjust = '100%';
-    return documentOperation('restore', saved, false);
+    documentOperation('restore', saved, false);
+    documentOperation('observeResize', null, false);
+    return true;
     """
 }
+
+#if os(iOS)
+extension DiscussionHistoryCoordinator: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard ready, !restoringPresentation, !invalidated, scope.presentationState != nil else { return }
+        presentationCaptureTask?.cancel()
+        presentationCaptureTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
+            self?.capturePresentationPosition()
+        }
+    }
+}
+#endif
 
 /// Immutable file scope plus a per-page resource namespace prevents an old
 /// history from reading or reporting failures in the next document.

@@ -28,6 +28,11 @@ struct MobileDiscussionDecision: Identifiable {
         switch kind { case let .resolve(_, revision): revision; case let .reopenReply(_, revision): revision; case .reattach: nil }
     }
 }
+struct MobileDiscussionFocus: Equatable {
+    enum Input { case name, body }
+    let id: UUID
+    let input: Input
+}
 enum MobileDiscussionRoute: Hashable { case list, thread(DiscussionSession.DraftKey) }
 
 struct MobileDiscussionPassageRequest {
@@ -35,6 +40,7 @@ struct MobileDiscussionPassageRequest {
     let version: MobileDiscussionVersion
     let sourceID: String
     let threadID: String
+    var selectionRange: NSRange? = nil
 }
 
 extension MobileReaderState {
@@ -181,6 +187,11 @@ extension MobileReaderState {
             do {
                 let key = try discussions.beginDraft(selection, in: projection)
                 inspector = .discussions; discussionRoute = key; discussionError = nil
+                discussionSheetExpanded = false
+                if !discussionUsesMargin {
+                    discussionPassageRequest = .init(version: request.version, sourceID: projection.sourceID,
+                        threadID: "", selectionRange: selection.range)
+                }
             } catch { discussionError = error.localizedDescription }
         }
     }
@@ -195,11 +206,20 @@ extension MobileReaderState {
               projection.anchorResults[threadID]?.status == .attached else { return }
         discussions.selection = .thread(threadID)
         discussionPassageRequest = .init(version: version, sourceID: projection.sourceID, threadID: threadID)
-        // Compact navigation must reveal the retained document before scrolling.
-        if !discussionUsesMargin { inspector = nil; discussionRoute = nil }
+        // The compact reading detent gives WebKit a real unobscured viewport.
+        endDiscussionEditing(); discussionSheetExpanded = false
     }
-    func backToDiscussionList() { discussionRoute = nil; inspector = .discussions }
-    func hideDiscussions() { inspector = nil; discussionRoute = nil }
+    func goToDiscussionDraft(_ key: DiscussionSession.DraftKey, version: MobileDiscussionVersion) {
+        guard !isRendering, !fileSaving, !hasPendingFileUpdate, matchesDiscussionVersion(version),
+              let projection = rendered?.discussionText,
+              let anchor = discussions.draftAnchor(for: key), anchor.status == .attached,
+              let range = anchor.range, projection.selection(range, renderID: "") != nil else { return }
+        endDiscussionEditing(); discussionSheetExpanded = false
+        discussionPassageRequest = .init(version: version, sourceID: projection.sourceID,
+            threadID: "", selectionRange: range)
+    }
+    func backToDiscussionList() { endDiscussionEditing(); discussionRoute = nil; inspector = .discussions }
+    func hideDiscussions() { endDiscussionEditing(); inspector = nil; discussionRoute = nil; discussionSheetExpanded = false }
     func acceptDiscussionMargin(_ value: DiscussionMarginSnapshot) {
         guard value.sourceID == rendered?.discussionText?.sourceID else { return }
         discussionMargin = value

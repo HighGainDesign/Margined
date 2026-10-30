@@ -55,7 +55,9 @@ struct MobileReaderView: View {
                     }.padding(12).background(.bar)
                 }
                 MobileWebView(reader: reader, retainedPage: readingPage)
-                statusBar
+                // Compact typing uses the quote for context. Avoid forcing the
+                // reader's status chrome into a zero-height space above the sheet.
+                if reader.discussionUsesMargin || reader.discussionFocus == nil { statusBar }
                 if showPlayer || reader.playback.ownerID == reader.id || reader.speechPreparing { MobileSpeechPlayer(reader: reader) }
             }
             if reader.inspector == .discussions, reader.discussionUsesMargin {
@@ -72,7 +74,7 @@ struct MobileReaderView: View {
         }
         // Measure inside navigation chrome: Duo may place its toolbar beside
         // the content, reducing the width available for a document and inspector.
-        .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: reader.discussionUsesMargin || reader.discussionNavigationPath.isEmpty) { width in
+        .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: true) { width in
             contentWidth = width; contentWidthChanged(width)
         })
         .toolbar {

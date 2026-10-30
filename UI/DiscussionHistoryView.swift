@@ -16,6 +16,7 @@ struct DiscussionHistoryView: View {
     let openFile: @MainActor (URL) -> Void
     var playback: DiscussionHistoryPlayback? = nil
     var fillsAvailableSpace = false
+    var presentationState: DiscussionHistoryPresentationState? = nil
     @Environment(\.sizeCategory) private var sizeCategory
 
     private struct Identity: Hashable { let document: UUID; let thread: String }
@@ -32,7 +33,7 @@ struct DiscussionHistoryView: View {
             loadRemoteImages: loadRemoteImages, documentLanguage: documentLanguage,
             fontSize: fontSize, imageGeneration: imageGeneration,
             scope: DiscussionHistoryScope(fileURL: fileURL, isCurrent: isCurrent,
-                imageFailed: imageFailed, openFile: openFile), playback: playback,
+                imageFailed: imageFailed, openFile: openFile, presentationState: presentationState), playback: playback,
             fillsAvailableSpace: fillsAvailableSpace)
             .id(Identity(document: documentID, thread: thread.id))
     }
@@ -60,6 +61,7 @@ struct DiscussionHistoryScope {
     let isCurrent: @MainActor () -> Bool
     let imageFailed: @MainActor (String) -> Void
     let openFile: @MainActor (URL) -> Void
+    var presentationState: DiscussionHistoryPresentationState? = nil
 }
 
 private struct DiscussionHistoryContent: View {

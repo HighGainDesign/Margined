@@ -7,6 +7,123 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    func testCompactDiscussionSheetKeepsTheSelectedPassageInItsActualReaderViewport() async throws {
+        let f = try await fixture(withThread: true, tail: String(repeating: "Later paragraph.\n\n", count: 90))
+        _ = try await f.web.evaluateJavaScript("window.sheetReadingPage=document;true")
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("An unposted sheet reply.", for: .thread("t-mobile"))
+        let mounted = await poll { self.editor(in: f.host.view)?.text == "An unposted sheet reply." }
+        XCTAssertTrue(mounted); guard mounted else { return }
+        XCTAssertTrue(f.web.window === f.window, "Compact discussion must leave the actual retained reader mounted")
+        let readerFrame = f.web.convert(f.web.bounds, to: f.window)
+        let editor = try XCTUnwrap(self.editor(in: f.host.view))
+        let composerFrame = editor.convert(editor.bounds, to: f.window)
+        XCTAssertGreaterThan(f.web.bounds.height, 120, "Reading detent reserves an actual unobscured reader viewport")
+        XCTAssertLessThanOrEqual(readerFrame.maxY, composerFrame.minY,
+            "A sheet cannot claim passage visibility while covering the reader viewport")
+        f.reader.goToDiscussion("t-mobile", version: f.reader.currentDiscussionVersion)
+        let revealed = await pollAsync {
+            guard f.reader.discussionPassageRequest == nil, f.web.window === f.window else { return false }
+            return try await f.web.evaluateJavaScript("window.sheetReadingPage===document && document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<=innerHeight") as? Bool == true
+        }
+        XCTAssertTrue(revealed)
+        XCTAssertEqual(f.reader.inspector, .discussions, "Go to Passage collapses the sheet while preserving its thread")
+        XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"))
+        XCTAssertEqual(self.editor(in: f.host.view)?.text, "An unposted sheet reply.")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        recordSheetEvidence(f, name: "Sheet-reading-passage")
+    }
+
+    func testCompactTypingExpandsAboveTheActualKeyboardAndGoToPassageRetainsCaret() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.discussions.displayName = "Reader"
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep this reply and its caret.", for: .thread("t-mobile"))
+        let mounted = await poll { self.editor(in: f.host.view)?.text == "Keep this reply and its caret." }
+        XCTAssertTrue(mounted); guard mounted else { return }
+        let editor = try XCTUnwrap(self.editor(in: f.host.view))
+        let readingHeight = f.web.bounds.height
+        let keyboardObservation = MobileKeyboardFrameObservation(window: f.window)
+        editor.selectedRange = NSRange(location: 5, length: 4)
+        XCTAssertTrue(editor.becomeFirstResponder())
+        let typing = await poll {
+            let keyboard = keyboardObservation.frame
+            return keyboard.height > 100 && editor.isFirstResponder && f.reader.discussionSheetExpanded &&
+                editor.convert(editor.bounds, to: f.window).maxY <= keyboard.minY + 1 &&
+                (self.history(in: f.host.view, excluding: f.web)?.bounds.height ?? 0) > 20
+        }
+        if !typing {
+            print("SHEET-KEYBOARD window=\(f.window.bounds) host=\(f.host.view.bounds) readingBefore=\(readingHeight) reader=\(f.web.bounds) editor=\(editor.convert(editor.bounds, to: f.window)) keyboard=\(keyboardObservation.frame) expanded=\(f.reader.discussionSheetExpanded) focused=\(editor.isFirstResponder)")
+        }
+        XCTAssertTrue(typing, "The real focused editor must expand the discussion above the real keyboard")
+        recordSheetEvidence(f, name: "Sheet-typing-keyboard", keyboard: keyboardObservation.frame)
+        let replyBounds = try XCTUnwrap(recognizedBounds("Reply", in: f.window), "The actual Reply button stays visible while typing")
+        XCTAssertLessThanOrEqual(replyBounds.maxY, keyboardObservation.frame.minY + 1)
+        f.reader.goToDiscussion("t-mobile", version: f.reader.currentDiscussionVersion)
+        let collapsed = await poll { !editor.isFirstResponder && f.web.bounds.height >= readingHeight - 1 }
+        XCTAssertTrue(collapsed, "Passage navigation dismisses typing and restores the reading viewport")
+        XCTAssertEqual(f.reader.inspector, .discussions)
+        f.reader.backToDiscussionList(); f.reader.openDiscussion("t-mobile")
+        let restored = await poll { self.editor(in: f.host.view)?.text == "Keep this reply and its caret." }
+        XCTAssertTrue(restored)
+        XCTAssertEqual(self.editor(in: f.host.view)?.selectedRange, NSRange(location: 5, length: 4))
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testDiscussionHistoryRetainsItsSemanticPositionAcrossHideAndWidthChanges() async throws {
+        let f = try await fixture(withThread: true)
+        let paragraphs = (0..<45).map { "History paragraph \($0) stays readable." }.joined(separator: "\n\n")
+        _ = try appendHistoryReply(paragraphs, id: "m-sheet-history", file: f.file, threadID: "t-mobile")
+        await f.reader.refresh(); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
+        let ready = await pollAsync {
+            guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
+            return try await history.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.body.style.fontSize!==''") as? Bool == true
+        }
+        XCTAssertTrue(ready); guard ready else { return }
+        let initial = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
+        _ = try await initial.evaluateJavaScript("Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 ')).scrollIntoView({block:'start',behavior:'instant'});true")
+        let initialPosition = await pollAsync {
+            try await initial.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return scrollY>300 && Math.abs(p.getBoundingClientRect().top)<2;})()") as? Bool == true
+        }
+        XCTAssertTrue(initialPosition)
+        for width in [CGFloat(390), CGFloat(1120), CGFloat(390)] {
+            f.reader.hideDiscussions()
+            let hidden = await poll { self.history(in: f.host.view, excluding: f.web) == nil }
+            XCTAssertTrue(hidden)
+            f.window.frame.size.width = width
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            f.reader.openDiscussion("t-mobile")
+            let restored = await pollAsync {
+                guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
+                return try await history.evaluateJavaScript("(()=>{const r=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '))?.getBoundingClientRect();return !!r && r.top>=-2 && r.top<90;})()") as? Bool == true
+            }
+            if !restored, let history = self.history(in: f.host.view, excluding: f.web) {
+                let values = try await history.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return {y:scrollY,height:innerHeight,top:p?.getBoundingClientRect().top,font:document.body.style.fontSize};})()")
+                let saved = await f.reader.discussionHistoryPosition(for: "t-mobile").restorePosition()
+                print("SHEET-HISTORY width=\(width) metrics=\(String(describing: values)) saved=\(String(describing: saved))")
+            }
+            XCTAssertTrue(restored, "Reopening at width \(width) must restore the paragraph being read")
+        }
+    }
+
+    func testNewSelectionSheetRevealsItsActualPassageAfterReservingReaderSpace() async throws {
+        let paragraphs = (0..<80).map { "Selection paragraph \($0) has enough text to wrap across several lines in the phone reader." }.joined(separator: "\n\n")
+        let f = try await fixture(tail: "\n\n" + paragraphs)
+        _ = try await f.web.evaluateJavaScript("""
+        (()=>{const p=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Selection paragraph 40 '));
+        p.id='selected-sheet-passage';p.scrollIntoView({block:'center',behavior:'instant'});
+        const r=document.createRange();r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);return true;})()
+        """)
+        f.reader.requestAddDiscussion()
+        let ready = await poll { self.editor(in: f.host.view) != nil && f.reader.discussions.selection != nil }
+        XCTAssertTrue(ready); guard ready else { return }
+        let revealed = await pollAsync {
+            try await f.web.evaluateJavaScript("(()=>{const r=document.getElementById('selected-sheet-passage').getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight;})()") as? Bool == true
+        }
+        XCTAssertTrue(revealed, "The new draft must reveal the actual selected text in the reduced reader viewport")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
     func testCompactConversationUsesAvailableHeightAndKeepsEveryReplyAcrossRotation() async throws {
         let f = try await fixture(withThread: true)
         let paragraphs = (0..<35).map { "Saved history paragraph \($0)." }.joined(separator: "\n\n")
@@ -17,6 +134,7 @@ import XCTest
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         let settled = await settledNavigation(f); XCTAssertTrue(settled)
         f.reader.openDiscussion("t-mobile")
+        f.reader.discussionSheetExpanded = true
         f.reader.discussions.setDraft("Keep this unposted reply through rotation.", for: .thread("t-mobile"))
         let ready = await pollAsync {
             guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
@@ -87,6 +205,66 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
+    func testLargestTextTypingKeepsCaretReplyAndACompleteMessageLineAboveTheKeyboard() async throws {
+        let f = try await fixture(withThread: true)
+        f.window.frame.size = CGSize(width: 402, height: 874)
+        f.host.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        f.reader.discussions.displayName = "Reader"
+        f.reader.openDiscussion("t-mobile")
+        let reply = "Keep this accessible reply and its caret."
+        f.reader.discussions.setDraft(reply, for: .thread("t-mobile"))
+        let mounted = await poll { self.editor(in: f.host.view)?.text == reply }
+        XCTAssertTrue(mounted); guard mounted else { return }
+        let editor = try XCTUnwrap(self.editor(in: f.host.view))
+        let keyboard = MobileKeyboardFrameObservation(window: f.window)
+        editor.selectedRange = NSRange(location: 5, length: 4)
+        XCTAssertTrue(editor.becomeFirstResponder())
+        let typing = await poll { keyboard.frame.height > 100 && editor.isFirstResponder && editor.convert(editor.bounds, to: f.window).maxY <= keyboard.frame.minY + 1 }
+        XCTAssertTrue(typing)
+        let history = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
+        let loaded = await pollAsync {
+            try await history.evaluateJavaScript("document.querySelector('article .discussion-message-body p')?.textContent.includes('A portable note.')===true && parseFloat(document.body.style.fontSize)>=30") as? Bool == true
+        }
+        XCTAssertTrue(loaded); guard loaded else { return }
+        _ = try await history.evaluateJavaScript("(()=>{const p=document.querySelector('article .discussion-message-body p'),r=document.createRange();r.selectNodeContents(p);const first=r.getClientRects()[0];scrollTo({top:Math.floor(scrollY+first.top),behavior:'instant'});return true;})()")
+        let lineVisible = await pollAsync {
+            try await history.evaluateJavaScript("(()=>{const p=document.querySelector('article .discussion-message-body p'),r=document.createRange();r.selectNodeContents(p);return Array.from(r.getClientRects()).some(b=>b.top>=0 && b.bottom<=innerHeight);})()") as? Bool == true
+        }
+        if !lineVisible {
+            let metrics = try await history.evaluateJavaScript("(()=>{const p=document.querySelector('article .discussion-message-body p'),r=document.createRange();r.selectNodeContents(p);return {height:innerHeight,font:document.body.style.fontSize,lines:Array.from(r.getClientRects()).map(b=>({top:b.top,bottom:b.bottom,height:b.height}))};})()")
+            print("COMBINED-LINE \(String(describing: metrics)) native=\(history.convert(history.bounds, to: f.window)) editor=\(editor.convert(editor.bounds, to: f.window)) keyboard=\(keyboard.frame)")
+        }
+        XCTAssertTrue(lineVisible, "Largest text and the real keyboard must still allow one complete saved-message line")
+        let historyFrame = history.convert(history.bounds, to: f.window)
+        XCTAssertGreaterThanOrEqual(historyFrame.minY, f.window.bounds.minY)
+        XCTAssertLessThanOrEqual(historyFrame.maxY, keyboard.frame.minY + 1)
+        let replyBounds = try XCTUnwrap(recognizedBounds("Reply", in: f.window), "The actual Reply button remains visible at largest text while typing")
+        XCTAssertLessThanOrEqual(replyBounds.maxY, keyboard.frame.minY + 1)
+        XCTAssertGreaterThanOrEqual(editor.font?.pointSize ?? 0, 35)
+        XCTAssertEqual(editor.selectedRange, NSRange(location: 5, length: 4))
+        let caret = editor.convert(editor.caretRect(for: try XCTUnwrap(editor.selectedTextRange).start), to: f.window)
+        XCTAssertGreaterThanOrEqual(caret.minY, historyFrame.maxY)
+        XCTAssertLessThanOrEqual(caret.maxY, keyboard.frame.minY + 1)
+        XCTAssertEqual(editor.text, reply)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        recordSheetEvidence(f, name: "Sheet-largest-text-keyboard", keyboard: keyboard.frame)
+        editor.resignFirstResponder()
+    }
+
+    func testNativeAccessibilityTextCategoryKeepsRoomyWindowsInTheCompactSheet() async throws {
+        let f = try await fixture(withThread: true)
+        f.window.frame.size = CGSize(width: 1120, height: 874)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let wide = await settledNavigation(f); XCTAssertTrue(wide && f.reader.discussionUsesMargin)
+        f.host.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        f.host.view.setNeedsLayout(); f.host.view.layoutIfNeeded()
+        f.reader.openDiscussion("t-mobile")
+        let compact = await poll { !f.reader.discussionUsesMargin && self.editor(in: f.host.view) != nil }
+        XCTAssertTrue(compact, "Actual native text category must govern docking, including a roomy window")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
     func testLargestTextLeavesConversationSpaceWhileKeepingAnUnpostedReply() async throws {
         let f = try await fixture(withThread: true)
         try await assertAccessibleConversationFits(f, expectedSource: f.original)
@@ -137,7 +315,7 @@ import XCTest
         let ready = await pollAsync {
             guard let history = self.history(in: f.host.view, excluding: f.web),
                   self.editor(in: f.host.view)?.text == reply else { return false }
-            return try await history.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+            return try await history.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true && parseFloat(document.body.style.fontSize)>=30") as? Bool == true
         }
         XCTAssertTrue(ready, "Measure the mounted conversation and real native composer, not an empty placeholder")
         guard ready else { return }
@@ -175,7 +353,8 @@ import XCTest
         let version = f.reader.currentDiscussionVersion
         f.reader.goToDiscussion("t-mobile", version: version)
         let returned = await settledNavigation(f); XCTAssertTrue(returned)
-        XCTAssertTrue(f.reader.discussionNavigationPath.isEmpty)
+        XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"))
+        XCTAssertEqual(f.reader.inspector, .discussions)
         let passage = await pollAsync {
             guard f.reader.discussionPassageRequest == nil else { return false }
             return try await f.web.evaluateJavaScript("window.passageDocument===document && document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<innerHeight") as? Bool == true
@@ -288,6 +467,29 @@ import XCTest
         let text = try recognizedText(in: f.window)
         XCTAssertTrue(text.contains("Go to Passage"), "A visible discussion needs a route to its actual passage: \(text)")
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    private func recordSheetEvidence(_ fixture: Fixture, name: String, keyboard: CGRect? = nil) {
+        let image = UIGraphicsImageRenderer(bounds: fixture.window.bounds).image { _ in
+            fixture.window.drawHierarchy(in: fixture.window.bounds, afterScreenUpdates: true)
+        }
+        let capture = XCTAttachment(image: image); capture.name = name; capture.lifetime = .keepAlways; add(capture)
+        let editorFrame = editor(in: fixture.host.view).map { $0.convert($0.bounds, to: fixture.window) }
+        let historyFrame = history(in: fixture.host.view, excluding: fixture.web).map { $0.convert($0.bounds, to: fixture.window) }
+        let metrics = XCTAttachment(string: "reader=\(fixture.web.convert(fixture.web.bounds, to: fixture.window)) editor=\(String(describing: editorFrame)) history=\(String(describing: historyFrame)) keyboard=\(String(describing: keyboard)) expanded=\(fixture.reader.discussionSheetExpanded)")
+        metrics.name = name + "-geometry"; metrics.lifetime = .keepAlways; add(metrics)
+    }
+
+    private func recognizedBounds(_ text: String, in window: UIWindow) throws -> CGRect? {
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let request = VNRecognizeTextRequest(); request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage)).perform([request])
+        guard let found = request.results?.first(where: { $0.topCandidates(1).first?.string == text }) else { return nil }
+        let box = found.boundingBox
+        return CGRect(x: box.minX * window.bounds.width, y: (1 - box.maxY) * window.bounds.height,
+            width: box.width * window.bounds.width, height: box.height * window.bounds.height)
     }
 
     private func recognizedText(in window: UIWindow) throws -> String {
@@ -584,7 +786,7 @@ import XCTest
         }
     }
 
-    func testNativeBackStillWorksAfterAMarginRoundTrip() async throws {
+    func testSheetBackStillWorksAfterAMarginRoundTrip() async throws {
         let f = try await fixture(withThread: true)
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("Keep this reply after going back.", for: .thread("t-mobile"))
@@ -606,8 +808,9 @@ import XCTest
             return controller.children.lazy.compactMap { navigation(in: $0) }.first
         }
         let controller = try XCTUnwrap(navigation(in: f.host))
-        XCTAssertGreaterThan(controller.viewControllers.count, 2)
-        controller.popViewController(animated: false)
+        XCTAssertEqual(controller.viewControllers.count, 1, "The retained document remains the navigation root")
+        let workspace = MobileDocumentWorkspace(reader: f.reader, openFolder: {}, closeFile: {})
+        workspace.navigationBinding().wrappedValue = [.list]
         let back = await poll { f.reader.discussionRoute == nil && f.reader.inspector == .discussions }
         XCTAssertTrue(back, "Current native Back must still return to the conversation list")
         XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep this reply after going back.")
@@ -780,8 +983,7 @@ import XCTest
             let canDock = !top.traitCollection.preferredContentSizeCategory.isAccessibilityCategory &&
                 top.safeAreaLayoutGuide.layoutFrame.width >= minimum + 341
             guard fixture.reader.discussionUsesMargin == canDock else { return false }
-            let showsReading = fixture.reader.discussionUsesMargin || fixture.reader.discussionNavigationPath.isEmpty
-            return fixture.web.isDescendant(of: top) == showsReading
+            return fixture.web.isDescendant(of: top)
         }
         if !result { recordFailedNavigation(fixture) }
         return result
@@ -799,7 +1001,7 @@ import XCTest
             bodyFont: fixture.reader.discussionMargin?.bodyFont ?? 16 * fixture.reader.zoom,
             horizontalInsets: max(88, fixture.reader.discussionMargin?.horizontalInsets ?? 88), outlineWidth: 0)
         let modelMargin = fixture.reader.discussionUsesMargin
-        let showsReading = modelMargin || fixture.reader.discussionNavigationPath.isEmpty
+        let showsReading = true
         let nativeCanDock = top.map { !$0.traitCollection.preferredContentSizeCategory.isAccessibilityCategory &&
             $0.safeAreaLayoutGuide.layoutFrame.width >= minimum + 341 }
         let stack: [[String: Any]] = (nav?.viewControllers ?? []).map { controller in
@@ -1061,6 +1263,24 @@ import XCTest
             XCTAssertEqual(f.reader.discussions.drafts[key]?.target?.exact, "An unrelated new passage.")
         }
         f.reader.discussions.discardDrafts(); await f.reader.close()
+    }
+
+    func testAnOutgoingComposerCannotOverwriteTheSameDraftAfterAWidthChange() async throws {
+        let f = try await fixture(withThread: true)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Original reply before resizing.", for: .thread("t-mobile"))
+        let mounted = await poll { self.editor(in: f.host.view)?.text == "Original reply before resizing." }
+        XCTAssertTrue(mounted); guard mounted else { return }
+        let oldEditor = try XCTUnwrap(self.editor(in: f.host.view)), delegate = try XCTUnwrap(oldEditor.delegate)
+        f.window.frame.size = CGSize(width: 1120, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let moved = await poll { f.reader.discussionUsesMargin && self.editor(in: f.host.view).map { $0 !== oldEditor } == true }
+        XCTAssertTrue(moved); guard moved else { return }
+        f.reader.discussions.setDraft("Newer typing in the inspector.", for: .thread("t-mobile"))
+        oldEditor.text = "Queued old editor text."
+        delegate.textViewDidChange?(oldEditor)
+        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Newer typing in the inspector.")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
     func testDiscardedComposersLateEditCannotChangeAnotherDocumentsReply() async throws {
@@ -1835,4 +2055,21 @@ private final class MobileHistoryImageRequest: NSObject, WKURLSchemeTask {
     func didReceive(_ data: Data) { self.data.append(data) }
     func didFinish() {}
     func didFailWithError(_ error: any Error) { failure = error }
+}
+
+@MainActor
+private final class MobileKeyboardFrameObservation: NSObject {
+    let window: UIWindow
+    private(set) var frame = CGRect.zero
+    init(window: UIWindow) {
+        self.window = window
+        super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(changed(_:)),
+            name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
+    }
+    @objc private func changed(_ notification: Notification) {
+        guard let screen = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        frame = window.convert(screen, from: window.screen.coordinateSpace).intersection(window.bounds)
+    }
+    deinit { NotificationCenter.default.removeObserver(self) }
 }

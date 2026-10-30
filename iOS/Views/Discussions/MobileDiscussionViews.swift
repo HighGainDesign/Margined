@@ -3,10 +3,9 @@ import UIKit
 
 struct MobileDiscussionList: View {
     @Bindable var reader: MobileReaderState
-    var viewport = CGSize.zero
-    var contentWidthChanged: (Double) -> Void = { _ in }
     var body: some View {
         List {
+            Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
             MobileDiscussionDiagnostics(reader: reader)
             if reader.discussionImportLoading { ProgressView("Reading discussions…") }
             if let error = reader.discussionError { Label(error, systemImage: "exclamationmark.triangle").textSelection(.enabled) }
@@ -36,11 +35,6 @@ struct MobileDiscussionList: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: !reader.discussionUsesMargin && reader.discussionNavigationPath.last == .list, report: contentWidthChanged))
-        .navigationTitle("Discussions").navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) {
-            Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
-        } }
     }
     private var newDrafts: [DiscussionSession.DraftKey] {
         reader.discussions.drafts.keys.filter { if case .new = $0 { return true }; return false }
@@ -48,71 +42,192 @@ struct MobileDiscussionList: View {
     }
 }
 
+/// An in-document sheet reserves real reader space rather than obscuring WebKit.
+/// Keeping one subtree across detents preserves its editor and history ownership.
+struct MobileCompactDiscussionSheet: View {
+    @Bindable var reader: MobileReaderState
+    let availableHeight: CGFloat
+    let navigation: Binding<[MobileDiscussionRoute]>
+    private let document: UUID
+    private let layout: UUID
+    private let intent: UUID
+    @MainActor init(reader: MobileReaderState, availableHeight: CGFloat, navigation: Binding<[MobileDiscussionRoute]>) {
+        self.reader = reader; self.availableHeight = availableHeight; self.navigation = navigation
+        document = reader.documentGeneration; layout = reader.discussionLayoutGeneration
+        intent = reader.discussionPresentationGeneration
+    }
+    private var isCurrent: Bool {
+        document == reader.documentGeneration && layout == reader.discussionLayoutGeneration &&
+            intent == reader.discussionPresentationGeneration && reader.inspector == .discussions && !reader.discussionUsesMargin
+    }
+    @Environment(\.dynamicTypeSize) private var textSize
+    private var expanded: Bool { reader.discussionSheetExpanded }
+    private var shortTyping: Bool { reader.discussionFocus != nil }
+    private var height: CGFloat {
+        let usable = max(0, availableHeight - 48)
+        return expanded ? usable : min(480, max(0, usable - 160))
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                guard isCurrent else { return }
+                reader.endDiscussionEditing()
+                reader.discussionSheetExpanded.toggle()
+            } label: {
+                Image(systemName: expanded ? "chevron.compact.down" : "chevron.compact.up")
+                    .font(.system(size: 16, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 28)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(expanded ? String(localized: "Collapse discussion") : String(localized: "Expand discussion"))
+            .accessibilityValue(expanded ? String(localized: "Expanded") : String(localized: "Collapsed"))
+            .gesture(DragGesture(minimumDistance: 15).onEnded { value in
+                guard isCurrent else { return }
+                reader.endDiscussionEditing()
+                reader.discussionSheetExpanded = value.translation.height < 0
+            })
+            HStack(spacing: 12) {
+                if reader.discussionRoute != nil {
+                    Button { navigation.wrappedValue = [.list] } label: {
+                        if textSize.isAccessibilitySize, shortTyping { Image(systemName: "chevron.left") }
+                        else if textSize.isAccessibilitySize { Label("Discussions", systemImage: "chevron.left") }
+                        else { Label("Back to Discussions", systemImage: "chevron.left") }
+                    }.accessibilityLabel("Back to Discussions").font(.subheadline)
+                } else {
+                    Text("Discussions").font(.headline)
+                }
+                Spacer(minLength: 0)
+                if textSize.isAccessibilitySize, shortTyping { Text("Discussion").font(.caption) }
+                Spacer(minLength: 0)
+                Button { navigation.wrappedValue = [] } label: {
+                    if textSize.isAccessibilitySize { Image(systemName: "xmark") }
+                    else { Label("Hide", systemImage: "xmark") }
+                }.accessibilityLabel("Hide").frame(minWidth: 44, minHeight: 44)
+            }.padding(.horizontal, 16).frame(minHeight: 44)
+            Divider()
+            if let key = reader.discussionRoute {
+                MobileDiscussionThread(reader: reader, key: key, compactSheet: true)
+            } else {
+                MobileDiscussionList(reader: reader)
+            }
+        }
+        .frame(height: height)
+        .background(.regularMaterial, in: UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18))
+        .overlay(alignment: .top) {
+            UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18).stroke(.separator).allowsHitTesting(false)
+        }
+        .accessibilityIdentifier("compact-discussion-sheet")
+        .onAppear { if isCurrent, textSize.isAccessibilitySize { reader.discussionSheetExpanded = true } }
+        .onChange(of: textSize) { _, value in if value.isAccessibilitySize { reader.discussionSheetExpanded = true } }
+    }
+}
+
 struct MobileDiscussionThread: View {
     @Bindable var reader: MobileReaderState
     @Environment(\.dynamicTypeSize) private var textSize
     let key: DiscussionSession.DraftKey
-    var viewport = CGSize.zero
-    var contentWidthChanged: (Double) -> Void = { _ in }
+    var compactSheet = false
+    private let version: MobileDiscussionVersion
+    @MainActor init(reader: MobileReaderState, key: DiscussionSession.DraftKey, compactSheet: Bool = false) {
+        self.reader = reader; self.key = key; self.compactSheet = compactSheet
+        version = reader.currentDiscussionVersion
+    }
     private var thread: DiscussionThread? {
         if case let .thread(id) = key { return reader.rendered?.discussions?.threads.first { $0.id == id } }
         return nil
     }
     private var quote: String { thread?.target.exact ?? reader.discussions.drafts[key]?.target?.exact ?? "" }
+    private var shortTyping: Bool { compactSheet && reader.discussionFocus != nil }
     var body: some View {
         GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 0) {
-                MobileDiscussionScrollSection(maxHeight: min(120, geometry.size.height * 0.15)) {
-                    Text(verbatim: quote)
-                        .font(.body).textSelection(.enabled).padding(16)
+            VStack(alignment: .leading, spacing: shortTyping ? 4 : 8) {
+                HStack(alignment: .top) {
+                    Text(verbatim: quote).font(shortTyping && textSize.isAccessibilitySize ? .caption : .callout).lineLimit(textSize.isAccessibilitySize ? 1 : 2).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityLabel(String(localized: "Quoted passage") + ", " + quote)
-                }.background(.quaternary)
-                VStack(alignment: .leading, spacing: 12) {
-                    MobileDiscussionScrollSection(maxHeight: min(140, geometry.size.height * 0.18)) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            if let thread { MobileDiscussionControls(reader: reader, thread: thread) }
-                            MobileDiscussionDecisionView(reader: reader, key: key)
-                            if let error = reader.discussionError {
-                                Label(error, systemImage: "exclamationmark.triangle")
-                                    .foregroundStyle(.red).textSelection(.enabled)
-                            }
-                        }
-                    }
                     if let thread {
-                        // The history owns the conversation scroll; an outer
-                        // ScrollView must not clip or compete with WebKit.
-                        MobileDiscussionMessages(reader: reader, thread: thread, fillsAvailableSpace: true)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else { Spacer(minLength: 0) }
-                }.padding(16).layoutPriority(1)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                MobileDiscussionScrollSection(maxHeight: max(110, geometry.size.height * (textSize.isAccessibilitySize ? 0.30 : 0.45))) {
-                    MobileDiscussionComposer(reader: reader, key: key).padding(16)
-                }.background(.bar)
+                        Button {
+                            reader.goToDiscussion(thread.id, version: version)
+                        } label: {
+                            if textSize.isAccessibilitySize { Image(systemName: "arrow.up.forward") }
+                            else { Label("Go to Passage", systemImage: "arrow.up.forward") }
+                        }.accessibilityLabel("Go to Passage").font(.caption).frame(minWidth: 44, minHeight: 44)
+                            .disabled(reader.isRendering || reader.fileSaving || reader.rendered?.discussionText?.anchorResults[thread.id]?.status != .attached)
+                        Menu("Discussion Actions", systemImage: "ellipsis.circle") {
+                            MobileDiscussionControls(reader: reader, thread: thread)
+                        }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                    } else {
+                        Button("Go to Passage", systemImage: "arrow.up.forward") {
+                            reader.goToDiscussionDraft(key, version: version)
+                        }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                            .disabled(reader.isRendering || reader.fileSaving || reader.discussions.draftAnchor(for: key)?.status != .attached)
+                    }
+                }.padding(.horizontal, 16).padding(.top, shortTyping ? 2 : 6)
+                if reader.discussionDecision?.key == key || reader.discussionError != nil {
+                    MobileDiscussionScrollSection(maxHeight: max(44, geometry.size.height * 0.24)) {
+                        MobileDiscussionDecisionView(reader: reader, key: key)
+                        if let error = reader.discussionError {
+                            Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
+                        }
+                    }.padding(.horizontal, 16)
+                }
+                if let thread {
+                    MobileDiscussionMessages(reader: reader, thread: thread, fillsAvailableSpace: true)
+                        .labelStyle(MobileDiscussionHistoryLabelStyle(compact: shortTyping))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 16)
+                } else { Spacer(minLength: 0) }
+                Divider()
+                MobileDiscussionScrollSection(maxHeight: shortTyping ? max(154, geometry.size.height * 0.40) : max(100, geometry.size.height * (textSize.isAccessibilitySize ? 0.44 : 0.58)),
+                    revealBottom: shortTyping && reader.discussionFocus?.input == .body,
+                    revealTop: shortTyping && reader.discussionFocus?.input == .name) {
+                    MobileDiscussionComposer(reader: reader, key: key, compact: compactSheet, shortTyping: shortTyping).padding(.horizontal, 16).padding(.bottom, shortTyping && textSize.isAccessibilitySize ? 8 : 20)
+                }
             }
         }
-        .modifier(MobileWorkspaceWidthReporter(viewport: viewport, active: !reader.discussionUsesMargin && reader.discussionNavigationPath.last == .thread(key), report: contentWidthChanged))
-        .navigationTitle("Discussion").navigationBarTitleDisplayMode(.inline)
     }
 }
 
-/// Keep the conversation readable without reducing Dynamic Type or dropping
-/// form fields. One stable subtree retains the native editor across size changes.
+private struct MobileDiscussionHistoryLabelStyle: LabelStyle {
+    let compact: Bool
+    @ViewBuilder func makeBody(configuration: Configuration) -> some View {
+        if compact { Label(configuration).labelStyle(.iconOnly) }
+        else { Label(configuration).labelStyle(.titleAndIcon) }
+    }
+}
+
+/// A bounded form scroll keeps every field reachable at large text. History has
+/// its own sole scroller, and the composer stays mounted while its budget changes.
 private struct MobileDiscussionScrollSection<Content: View>: View {
     let maxHeight: CGFloat
+    var revealBottom = false
+    var revealTop = false
     @ViewBuilder var content: Content
     @State private var contentHeight: CGFloat?
-
+    private let bottomID = "discussion-form-bottom"
+    private let topID = "discussion-form-top"
     var body: some View {
-        ScrollView {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        ScrollViewReader { scroller in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id(topID)
+                    content
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                    Color.clear.frame(height: 0).id(bottomID)
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .onChange(of: revealBottom, initial: true) { _, value in
+                if value { scroller.scrollTo(bottomID, anchor: .bottom) }
+            }
+            .onChange(of: revealTop, initial: true) { _, value in
+                if value { scroller.scrollTo(topID, anchor: .top) }
+            }
+            .onChange(of: contentHeight) { _, _ in
+                if revealBottom { scroller.scrollTo(bottomID, anchor: .bottom) }
+                else if revealTop { scroller.scrollTo(topID, anchor: .top) }
+            }
         }
-        .scrollBounceBehavior(.basedOnSize)
         .frame(height: min(maxHeight, contentHeight ?? maxHeight))
     }
 }
@@ -172,13 +287,16 @@ private struct MobileDiscussionMessages: View {
                 }, resumeDocument: {
                     guard playback.ownerID == reader.id, playback.conversationID == thread.id else { return }
                     reader.resumeSpeechPosition()
-                }, showLatest: { reader.showLatest() }), fillsAvailableSpace: fillsAvailableSpace)
+                }, showLatest: { reader.showLatest() }), fillsAvailableSpace: fillsAvailableSpace,
+            presentationState: reader.discussionHistoryPosition(for: thread.id))
     }
 }
 
 struct MobileDiscussionComposer: View {
     @Bindable var reader: MobileReaderState
     let key: DiscussionSession.DraftKey
+    var compact = false
+    var shortTyping = false
     private struct Identity: Hashable {
         let document: UUID
         let draft: DiscussionSession.DraftKey
@@ -186,7 +304,7 @@ struct MobileDiscussionComposer: View {
     var body: some View {
         // Keep native binding storage separate when navigation reuses this view
         // for another document or thread, including files with identical IDs.
-        MobileDiscussionComposerFields(reader: reader, key: key)
+        MobileDiscussionComposerFields(reader: reader, key: key, compact: compact, shortTyping: shortTyping)
             .id(Identity(document: reader.documentGeneration, draft: key))
     }
 }
@@ -194,9 +312,13 @@ struct MobileDiscussionComposer: View {
 private struct MobileDiscussionComposerFields: View {
     @Bindable var reader: MobileReaderState
     let key: DiscussionSession.DraftKey
+    let compact: Bool
+    let shortTyping: Bool
+    @State private var nameFocusID = UUID()
+    @FocusState private var nameFocused: Bool
     private let documentContext: UUID
-    @MainActor init(reader: MobileReaderState, key: DiscussionSession.DraftKey) {
-        self.reader = reader; self.key = key; documentContext = reader.documentGeneration
+    @MainActor init(reader: MobileReaderState, key: DiscussionSession.DraftKey, compact: Bool, shortTyping: Bool) {
+        self.reader = reader; self.key = key; self.compact = compact; self.shortTyping = shortTyping; documentContext = reader.documentGeneration
     }
     private var isCurrent: Bool { documentContext == reader.documentGeneration }
     private var isReply: Bool { if case .thread = key { return true }; return false }
@@ -206,25 +328,45 @@ private struct MobileDiscussionComposerFields: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("This name is saved in the Markdown file. It is not a verified identity.")
-                .font(.caption).foregroundStyle(.secondary)
+            if !compact {
+                Text("This name is saved in the Markdown file. It is not a verified identity.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             TextField("Your name", text: Binding(get: { reader.discussions.displayName },
                 set: { if isCurrent { reader.discussions.displayName = $0 } }))
                 .textFieldStyle(.roundedBorder).textInputAutocapitalization(.words)
-            TextEditor(text: bodyBinding).frame(minHeight: 90, maxHeight: 150)
+                .accessibilityHint("This name is saved in the Markdown file. It is not a verified identity.")
+                .focused($nameFocused)
+                .onChange(of: nameFocused) { _, focused in
+                    guard isCurrent else { return }
+                    if focused {
+                        reader.discussionFocus = .init(id: nameFocusID, input: .name)
+                        if !reader.discussionUsesMargin { reader.discussionSheetExpanded = true }
+                    } else if reader.discussionFocus?.id == nameFocusID { reader.discussionFocus = nil }
+                }
+                .onChange(of: reader.discussionEditingDismissal) { _, _ in nameFocused = false }
+            MobileDiscussionDraftEditor(reader: reader, key: key, text: bodyBinding, document: documentContext)
+                .frame(minHeight: compact ? 66 : 90, maxHeight: compact ? 100 : 150)
                 .padding(5).background(.background, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
                 .accessibilityLabel(isReply ? "Reply" : "Discussion")
                 .accessibilityHint("Command-Return posts. Return starts a new line.")
             HStack {
-                Text("Replies are saved in this Markdown file.").font(.caption).foregroundStyle(.secondary)
+                if shortTyping {
+                    Button { nameFocused = true } label: {
+                        if reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("Your name") }
+                        else { Text("Reply as \(reader.discussions.displayName)") }
+                    }.font(.caption).lineLimit(1)
+                        .accessibilityHint("This name is saved in the Markdown file. It is not a verified identity.")
+                } else { Text("Replies are saved in this Markdown file.").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
                 Button(isReply ? "Reply" : "Post") {
                     guard isCurrent, reader.discussionDecision?.key != key else { return }
                     reader.discussions.selection = key; reader.postDiscussion()
                 }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
-                    .disabled(!isCurrent || reader.discussionDecision?.key == key || reader.fileSaving || reader.isRendering || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityHint("Replies are saved in this Markdown file.")
+                    .disabled(!isCurrent || reader.discussionDecision?.key == key || reader.fileSaving || reader.isRendering || reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -235,7 +377,7 @@ struct MobileDiscussionMargin: View {
     @Bindable var reader: MobileReaderState
     var includesInspectorPicker = false
     @State private var frames: [String: CGRect] = [:]
-    private struct ComposerAnchor: Hashable { let key: DiscussionSession.DraftKey }
+    @State private var showsList = false
     var body: some View {
         VStack(spacing: 12) {
             if includesInspectorPicker {
@@ -247,23 +389,32 @@ struct MobileDiscussionMargin: View {
                     Button("Hide discussions", systemImage: "xmark") { reader.hideDiscussions() }.labelStyle(.iconOnly)
                 }
             }
-            Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
-            MobileDiscussionDiagnostics(reader: reader)
-            if reader.discussionImportLoading { ProgressView("Reading discussions…") }
-            if let error = reader.discussionError { Label(error, systemImage: "exclamationmark.triangle").font(.footnote) }
-            Picker("Show discussions", selection: Binding(get: { reader.discussions.filter }, set: { reader.discussions.filter = $0 })) {
-                Text("Open").tag(DiscussionSession.Filter.open)
-                Text("All").tag(DiscussionSession.Filter.all)
-                Text("Resolved").tag(DiscussionSession.Filter.resolved)
-                Text("Unattached").tag(DiscussionSession.Filter.unattached)
-            }
-            GeometryReader { area in
-                let threads = reader.inspectorDiscussionThreads
-                let indexed = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
-                let anchors = Dictionary(uniqueKeysWithValues: (reader.discussionMargin?.anchors ?? []).map { ($0.id, $0.top) })
-                let positions = DiscussionMarginLayout.cards(ids: threads.map(\.id), anchorTops: anchors,
-                    heights: frames.mapValues { Double($0.height) }, topInset: area.frame(in: .named("mobile-discussion-margin")).minY)
-                ScrollViewReader { scroller in
+            if let key = reader.discussions.selection, !showsList {
+                HStack {
+                    Button("Back to Discussions", systemImage: "chevron.left") {
+                        reader.backToDiscussionList(); showsList = true
+                    }.font(.subheadline)
+                    Spacer(minLength: 0)
+                    Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
+                }
+                MobileDiscussionThread(reader: reader, key: key)
+            } else {
+                Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
+                MobileDiscussionDiagnostics(reader: reader)
+                if reader.discussionImportLoading { ProgressView("Reading discussions…") }
+                if let error = reader.discussionError { Label(error, systemImage: "exclamationmark.triangle").font(.footnote) }
+                Picker("Show discussions", selection: Binding(get: { reader.discussions.filter }, set: { reader.discussions.filter = $0 })) {
+                    Text("Open").tag(DiscussionSession.Filter.open)
+                    Text("All").tag(DiscussionSession.Filter.all)
+                    Text("Resolved").tag(DiscussionSession.Filter.resolved)
+                    Text("Unattached").tag(DiscussionSession.Filter.unattached)
+                }
+                GeometryReader { area in
+                    let threads = reader.inspectorDiscussionThreads
+                    let indexed = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
+                    let anchors = Dictionary(uniqueKeysWithValues: (reader.discussionMargin?.anchors ?? []).map { ($0.id, $0.top) })
+                    let positions = DiscussionMarginLayout.cards(ids: threads.map(\.id), anchorTops: anchors,
+                        heights: frames.mapValues { Double($0.height) }, topInset: area.frame(in: .named("mobile-discussion-margin")).minY)
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(positions.enumerated()), id: \.element.id) { index, position in
@@ -271,46 +422,31 @@ struct MobileDiscussionMargin: View {
                                 let bottom = previous.map { $0.top + Double(frames[$0.id]?.height ?? 100) } ?? 0
                                 Color.clear.frame(height: max(0, position.top - bottom)).accessibilityHidden(true)
                                 if let thread = indexed[position.id] {
-                                    VStack(alignment: .leading, spacing: 14) {
-                                        Button { reader.openDiscussion(thread.id) } label: { MobileDiscussionSummary(reader: reader, thread: thread) }
-                                        if reader.discussions.selection == .thread(thread.id) {
-                                            MobileDiscussionControls(reader: reader, thread: thread)
-                                            MobileDiscussionDecisionView(reader: reader, key: .thread(thread.id))
-                                            MobileDiscussionMessages(reader: reader, thread: thread)
-                                            MobileDiscussionComposer(reader: reader, key: .thread(thread.id))
-                                                .id(ComposerAnchor(key: .thread(thread.id)))
-                                        }
+                                    Button { reader.openDiscussion(thread.id); showsList = false } label: {
+                                        MobileDiscussionSummary(reader: reader, thread: thread)
                                     }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
                                         .background(GeometryReader { proxy in Color.clear.preference(key: MobileDiscussionFrames.self,
                                             value: [thread.id: proxy.frame(in: .named("mobile-discussion-margin"))]) })
                                 }
                             }
                             ForEach(newDrafts, id: \.self) { key in
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Text("Unposted discussion").font(.headline)
-                                    Text(reader.discussions.drafts[key]?.target?.exact ?? "")
-                                    MobileDiscussionDecisionView(reader: reader, key: key)
-                                    MobileDiscussionComposer(reader: reader, key: key)
-                                        .id(ComposerAnchor(key: key))
+                                Button {
+                                    reader.discussions.selection = key; reader.discussionRoute = key; showsList = false
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text("Unposted discussion").font(.headline)
+                                        Text(reader.discussions.drafts[key]?.target?.exact ?? "").lineLimit(3)
+                                    }.frame(maxWidth: .infinity, alignment: .leading)
                                 }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
                             }
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .onChange(of: area.size, initial: true) { _, _ in revealComposer(using: scroller) }
-                    .onChange(of: reader.discussions.selection) { _, _ in revealComposer(using: scroller) }
-                    .onChange(of: frames.mapValues(\.height)) { _, _ in revealComposer(using: scroller) }
                 }
             }
         }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onChange(of: reader.discussionRoute) { _, route in if route != nil { showsList = false } }
             .coordinateSpace(name: "mobile-discussion-margin")
             .onPreferenceChange(MobileDiscussionFrames.self) { frames = $0 }
-    }
-    private func revealComposer(using scroller: ScrollViewProxy) {
-        guard let key = reader.discussions.selection else { return }
-        if case .thread = key, reader.discussions.drafts[key]?.body.isEmpty != false { return }
-        // The margin scrolls independently; keep the active reply reachable
-        // without moving the document or taking focus from another control.
-        scroller.scrollTo(ComposerAnchor(key: key), anchor: .bottom)
     }
     private var newDrafts: [DiscussionSession.DraftKey] {
         reader.discussions.drafts.keys.filter { if case .new = $0 { return true }; return false }

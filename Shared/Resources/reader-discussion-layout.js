@@ -3,13 +3,11 @@
 function marginedDiscussionLayout() {
     const state=window.__marginedDiscussions;
     if (!state || state.token!==token || state.sourceID!==sourceID) return false;
-    if (operation==='goTo') {
-        const id=typeof threadID==='string' ? threadID : '';
-        const item=state.layout?.ranges.find(item=>item.id===id);
-        if (!state.allowed.has(id) || !item || !item.range.startContainer.isConnected) return false;
-        const element=item.range.startContainer.nodeType===Node.ELEMENT_NODE ? item.range.startContainer : item.range.startContainer.parentElement;
+    function revealRange(range) {
+        if (!range?.startContainer.isConnected) return false;
+        const element=range.startContainer.nodeType===Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
         for(let parent=element;parent;parent=parent.parentElement) if(parent.localName==='details')parent.open=true;
-        const rect=item.range.getClientRects()[0] ?? item.range.getBoundingClientRect();
+        const rect=range.getClientRects()[0] ?? range.getBoundingClientRect();
         if (!rect.height) return false;
         const target=element.closest('p,li,pre,th,td,h1,h2,h3,h4,h5,h6,summary,figcaption') ?? element;
         if (typeof focus!=='undefined' && focus) {
@@ -17,8 +15,13 @@ function marginedDiscussionLayout() {
             target.focus({preventScroll:true});
         }
         window.scrollTo({top:Math.max(0,scrollY+rect.top-Math.min(80,innerHeight/4)),behavior:'instant'});
-        state.layout.refresh();
+        state.layout?.refresh();
         return true;
+    }
+    if (operation==='goTo') {
+        const id=typeof threadID==='string' ? threadID : '';
+        const item=state.layout?.ranges.find(item=>item.id===id);
+        return state.allowed.has(id) && !!item && revealRange(item.range);
     }
     const projection=state.projection ?? project();
     if (typeof expectedText!=='string' || projection.text!==expectedText) return false;
@@ -32,8 +35,8 @@ function marginedDiscussionLayout() {
         const parent=part.node.parentNode,index=Array.prototype.indexOf.call(parent.childNodes,part.node);
         return {node:parent,offset:index+(end ? 1 : 0)};
     }
-    function rangeFor(anchor) {
-        if (!anchor || !state.allowed.has(anchor.id) || ![anchor.location,anchor.length,anchor.startUnit,anchor.startOffset,anchor.endUnit,anchor.endOffset].every(Number.isInteger)) return null;
+    function rangeFor(anchor, requiresAllowed=true) {
+        if (!anchor || (requiresAllowed && !state.allowed.has(anchor.id)) || ![anchor.location,anchor.length,anchor.startUnit,anchor.startOffset,anchor.endUnit,anchor.endOffset].every(Number.isInteger)) return null;
         const first=projection.units[anchor.startUnit],last=projection.units[anchor.endUnit];
         if(!first || !last || anchor.length<=0 || anchor.location<0)return null;
         const begin=canonicalOffset(first,anchor.startOffset),finish=canonicalOffset(last,anchor.endOffset);
@@ -43,6 +46,10 @@ function marginedDiscussionLayout() {
         const range=document.createRange();
         try{range.setStart(start.node,start.offset);range.setEnd(end.node,end.offset);}catch{return null;}
         return range.collapsed ? null : range;
+    }
+    if (operation==='goToSelection') {
+        const range=rangeFor(typeof selectionAnchor==='undefined' ? null : selectionAnchor,false);
+        return !!range && revealRange(range);
     }
     state.layout?.dispose();
     const seen=new Set(),ranges=[];

@@ -11,8 +11,32 @@ final class MobileReaderState {
     let access: MobileDocumentAccess
     let discussions = DiscussionSession()
     enum Inspector: Hashable { case changes, discussions }
-    var inspector: Inspector?
-    var discussionRoute: DiscussionSession.DraftKey?
+    var inspector: Inspector? {
+        didSet {
+            if inspector != oldValue {
+                discussionPresentationGeneration = UUID()
+                if inspector != .discussions { endDiscussionEditing() }
+            }
+        }
+    }
+    var discussionRoute: DiscussionSession.DraftKey? {
+        didSet { if discussionRoute != oldValue { discussionPresentationGeneration = UUID() } }
+    }
+    @ObservationIgnored private(set) var discussionPresentationGeneration = UUID()
+    var discussionSheetExpanded = false
+    var discussionFocus: MobileDiscussionFocus?
+    var discussionEditingDismissal = 0
+    @ObservationIgnored var discussionComposerSelections: [DiscussionSession.DraftKey: NSRange] = [:]
+    @ObservationIgnored var discussionEndEditing: (() -> Void)?
+    @ObservationIgnored var discussionHistoryPositions: [String: DiscussionHistoryPresentationState] = [:]
+
+    func endDiscussionEditing() { discussionEditingDismissal += 1; discussionEndEditing?(); discussionEndEditing = nil; discussionFocus = nil }
+    func discussionHistoryPosition(for thread: String) -> DiscussionHistoryPresentationState {
+        if let value = discussionHistoryPositions[thread] { return value }
+        let value = DiscussionHistoryPresentationState()
+        discussionHistoryPositions[thread] = value
+        return value
+    }
     var discussionPassageRequest: MobileDiscussionPassageRequest?
     var discussionDecision: MobileDiscussionDecision?
     var discussionCopyRequest: MobileDiscussionCopyRequest?
@@ -345,6 +369,8 @@ final class MobileReaderState {
         if let export = discussionExport { cancelDiscussionExport(export.id) }
         if let share = discussionShare { finishDiscussionShare(share.id) }
         inspector = nil; discussionRoute = nil; discussionSelectionRequest = nil; discussionMargin = nil
+        discussionSheetExpanded = false; discussionFocus = nil; discussionEndEditing = nil
+        discussionComposerSelections.removeAll(); discussionHistoryPositions.removeAll()
         discussionPassagePicker = nil; discussionDecision = nil
         discussionCopyRequest = nil
         discussions.resetDocument(); discussionSaving = false; discussionError = nil; discussionCopyOffered = false
