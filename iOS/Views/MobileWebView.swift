@@ -575,6 +575,10 @@ struct MobileWebView: UIViewRepresentable {
                             "startUnit": selection.domRange.start.unit, "startOffset": selection.domRange.start.offset,
                             "endUnit": selection.domRange.end.unit, "endOffset": selection.domRange.end.offset]
                     }
+                    // An explicit passage jump supersedes native scroll motion.
+                    // WebKit's instant DOM jump alone does not cancel an older
+                    // UIScrollView animation, which can otherwise resume afterward.
+                    webView.scrollView.setContentOffset(webView.scrollView.contentOffset, animated: false)
                     // Let the native reserved reader viewport and WebKit layout
                     // commit before calculating the passage's visible position.
                     let revealScript = "await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));\n" + DiscussionWebScripts.script

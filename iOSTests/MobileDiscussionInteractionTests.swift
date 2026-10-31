@@ -400,7 +400,28 @@ import XCTest
     func testGoToPassageReturnsToTheRetainedDocumentAndRejectsStaleActions() async throws {
         let tail = (0..<120).map { "Long paragraph \($0) keeps the quoted passage above the current reading position.\n\n" }.joined()
         let f = try await fixture(withThread: true, tail: tail)
-        _ = try await f.web.evaluateJavaScript("window.passageDocument=document;scrollTo(0,document.body.scrollHeight);true")
+        let keyboard = MobileKeyboardFrameObservation(window: f.window)
+        let knownPage = try await f.web.evaluateJavaScript("""
+        window.passageDocument=document;
+        window.duoPassageTrace=[];
+        window.duoPassageScrollEndSupported='onscrollend' in document || 'onscrollend' in window;
+        const quote=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.normalize('NFC').includes('Café bold passage.'));
+        const rect=n=>{const r=n?.getBoundingClientRect();return r?{top:r.top,bottom:r.bottom,height:r.height}:null;};
+        function observePassage(event) {
+            const active=document.activeElement;
+            const row={event,time:performance.now(),samePage:window.passageDocument===document,innerWidth,innerHeight,y:scrollY,
+                clientWidth:document.documentElement.clientWidth,visualHeight:visualViewport?.height,
+                active:active?.tagName,activeQuote:active?.textContent.normalize('NFC').includes('Café bold passage.')===true,
+                activeRect:rect(active),quoteRect:rect(quote),token:document.documentElement.getAttribute('data-margined-mobile-token'),
+                hit:document.elementFromPoint(innerWidth/2,Math.min(80,innerHeight/4))?.closest('p')?.textContent.slice(0,100)};
+            window.duoPassageTrace.push(row);if(window.duoPassageTrace.length>50)window.duoPassageTrace.shift();
+        }
+        for(const event of ['scroll','resize','focusin','focusout','scrollend'])window.addEventListener(event,()=>observePassage(event),{passive:true});
+        document.addEventListener('scrollend',()=>observePassage('scrollend'),{passive:true});
+        observePassage('beforeInitialScroll');scrollTo(0,document.body.scrollHeight);observePassage('requestedInitialScroll');
+        window.passageDocument===document;
+        """) as? Bool
+        XCTAssertEqual(knownPage, true, "Establish the known document in the same world used by later identity checks")
         let scrolled = await pollAsync { try await f.web.evaluateJavaScript("scrollY>500") as? Bool == true }
         XCTAssertTrue(scrolled)
         f.reader.openDiscussion("t-mobile")
@@ -416,7 +437,56 @@ import XCTest
             guard f.reader.discussionPassageRequest == nil else { return false }
             return try await f.web.evaluateJavaScript("window.passageDocument===document && document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<innerHeight") as? Bool == true
         }
+        // The original predicate can catch a transient successful jump while
+        // older motion continues. Observe actual completion without delaying the app.
+        let supportsScrollEnd = try await f.web.evaluateJavaScript("window.duoPassageScrollEndSupported") as? Bool == true
+        let observedEnd: Bool
+        if supportsScrollEnd {
+            observedEnd = await pollAsync {
+                try await f.web.evaluateJavaScript("""
+                (()=>{
+                    const trace=window.duoPassageTrace??[];
+                    const visible=e=>e.active==='P' && e.activeQuote && e.quoteRect?.top>=0 && e.quoteRect.bottom<e.innerHeight;
+                    const focus=trace.find(e=>e.event==='focusin' && e.active==='P' && e.activeQuote);
+                    if(!focus)return false;
+                    const success=trace.find(e=>e.time>=focus.time && e.event==='scroll' && visible(e));
+                    const end=trace.find(e=>e.time>=focus.time && e.event==='scrollend');
+                    const r=document.activeElement.getBoundingClientRect();
+                    return !!success && !!end && r.top>=0 && r.bottom<innerHeight &&
+                        trace.filter(e=>e.time>=success.time && ['scroll','resize','scrollend'].includes(e.event)).every(visible);
+                })()
+                """) as? Bool == true
+            }
+        } else {
+            // Older engines use the same continuous geometry observation below.
+            observedEnd = true
+        }
+        // Also inspect every frame after completion, so a transient jump's end
+        // cannot hide the observed older motion resuming a few frames later.
+        let remainedVisible = try await f.web.callAsyncJavaScript("""
+        for(let frame=0;frame<12;frame++) {
+            await new Promise(resolve=>requestAnimationFrame(resolve));
+            const a=document.activeElement,r=a.getBoundingClientRect();
+            if(window.passageDocument!==document || a.tagName!=='P' || !a.textContent.normalize('NFC').includes('Café bold passage.') || r.top<0 || r.bottom>=innerHeight)return false;
+        }
+        return true;
+        """,arguments:[:],in:nil,contentWorld:.page) as? Bool == true
+        let motionFinished = observedEnd && remainedVisible
+        // The original predicate is frozen before failure-only evidence.
+        if !passage || !motionFinished {
+            try await recordDuoGeometry(f, keyboard: keyboard, phase: "goTo-compact-\(passage)")
+            let trace = try await f.web.evaluateJavaScript("if(typeof observePassage==='function')observePassage('afterOriginalPredicate');({knownPage:!!window.passageDocument,samePage:window.passageDocument===document,scrollEndSupported:window.duoPassageScrollEndSupported,trace:window.duoPassageTrace??null})")
+            let state = try await f.web.callAsyncJavaScript("""
+            const s=window.__marginedDiscussions;
+            return {token:s?.token,sourceID:s?.sourceID,selected:s?.layout?.selected,
+                ranges:s?.layout?.ranges.map(i=>({id:i.id,rects:Array.from(i.range.getClientRects()).map(r=>({top:r.top,bottom:r.bottom,height:r.height}))}))};
+            """, arguments:[:],in:nil,contentWorld:MobileWebView.Coordinator.discussionWorld)
+            let data = try JSONSerialization.data(withJSONObject:["passage":passage,"motionFinished":motionFinished,"page":trace ?? NSNull(),"discussion":state ?? NSNull(),"request":String(describing:f.reader.discussionPassageRequest)],options:[.sortedKeys])
+            print("GOTO-TRACE " + String(decoding:data,as:UTF8.self))
+            recordSheetEvidence(f, name:"GoTo-compact-failure")
+        }
         XCTAssertTrue(passage, "Go to Passage must focus and reveal the actual quote after compact navigation")
+        XCTAssertTrue(motionFinished, "The explicit passage jump must stay visible after older scroll motion finishes")
         XCTAssertNil(f.reader.discussionPassageRequest)
         XCTAssertTrue(self.webView(in: f.host.view) === f.web)
         XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my reply when showing its passage.")
