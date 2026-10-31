@@ -275,6 +275,108 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         XCTAssertEqual((cached?["disclosure"] as? [String: Bool])?["older"], true, "Immediate reconciled hide must capture expansion; \(lease); cached=\(String(describing: cached))")
     }
 
+    func testRealSingleParagraphDisclosureShowsCompleteLinesAndAnUnobstructedEnding() async throws {
+        let body = (0..<16).map { "Saved line \($0) has **formatted** text." }.joined(separator: "  \n") +
+            "  \n[Final saved link " + String(repeating: "with a readable ending ", count: 15) + "](https://example.invalid/ending)"
+        try await verifyRealMarkdownDisclosure(body, paragraphs: 1)
+    }
+
+    func testRealMultipleParagraphDisclosureShowsCompleteLinesAndAnUnobstructedEnding() async throws {
+        let body = (0..<10).map { "Paragraph \($0) has **formatted** text.  \nIts second line has *inline emphasis*." }.joined(separator: "\n\n") +
+            "\n\n[Final saved link " + String(repeating: "with a readable ending ", count: 15) + "](https://example.invalid/ending)"
+        try await verifyRealMarkdownDisclosure(body, paragraphs: 11)
+    }
+
+    private func verifyRealMarkdownDisclosure(_ body: String, paragraphs: Int) async throws {
+        let thread = DiscussionThread(id: "t-real-preview", state: .open,
+            target: .init(type: "TextQuoteSelector", exact: "A saved passage.", prefix: "", suffix: "", section: nil),
+            messages: [.init(id: "m-real-older", author: "Earlier author", created: "2026-10-30T10:00:00Z", body: body, inReplyTo: nil),
+                       .init(id: "m-real-latest", author: "Latest author", created: "2026-10-30T11:00:00Z", body: "Latest saved reply.", inReplyTo: "m-real-older")],
+            resolvedBy: nil, resolved: nil, attachmentHistory: [])
+        let rendered = try await MarkdownRenderer.shared.renderDiscussion(thread, prepareSpeech: true, includeContext: false)
+        XCTAssertTrue(rendered.speech?.segments.map(\.text).joined(separator: " ").contains("Final saved link") == true)
+        let scope = DiscussionHistoryScope(fileURL: nil, isCurrent: { true }, imageFailed: { _ in }, openFile: { _ in })
+        let coordinator = DiscussionHistoryCoordinator(scope: scope), web = coordinator.makeWebView()
+        defer { coordinator.invalidate() }
+        try mount(web)
+        coordinator.update(html: rendered.html, fontSize: 16, imageGeneration: 0)
+        let ready = await poll {
+            try await web.evaluateJavaScript("document.querySelector('[data-message-id=m-real-older] button')?.getAttribute('aria-expanded')==='false'") as? Bool == true
+        }
+        XCTAssertTrue(ready); guard ready else { return }
+        for lines in [4, 3] {
+            if lines == 3 {
+                let previous = try await web.evaluateJavaScript("document.querySelector('[data-message-id=m-real-older] .discussion-message-body').style.maxHeight") as? String
+                coordinator.update(html: rendered.html, fontSize: 16, imageGeneration: 0, previewLines: lines)
+                let changed = await poll {
+                    try await web.evaluateJavaScript("document.querySelector('[data-message-id=m-real-older] .discussion-message-body').style.maxHeight") as? String != previous
+                }
+                XCTAssertTrue(changed, "Commit the actual short-typing configuration before measuring it")
+            }
+            let metrics = try await realMarkdownGeometry(in: web)
+            XCTAssertEqual(metrics["paragraphCount"] as? Int, paragraphs, "Measure the actual intended single-/multi-paragraph renderer output")
+            XCTAssertGreaterThan(metrics["paragraphMargin"] as? Double ?? 0, 0, "Use the production reader.css paragraph margins")
+            XCTAssertGreaterThan(metrics["totalLines"] as? Int ?? 0, 8, "The real rendered saved comment must require disclosure")
+            XCTAssertEqual(metrics["completeLines"] as? Int, lines, "Preview must show \(lines) complete rendered text lines: \(metrics)")
+            XCTAssertEqual(metrics["partialLines"] as? Int, 0, "No next text line may be partially clipped: \(metrics)")
+            XCTAssertEqual(metrics["controlOverlapsBody"] as? Bool, false, "The compact control reserves its own layout space: \(metrics)")
+            XCTAssertEqual(metrics["controlObstructsVisibleText"] as? Bool, false)
+            #if os(iOS)
+            XCTAssertGreaterThanOrEqual(metrics["controlWidth"] as? Double ?? 0, 44)
+            XCTAssertGreaterThanOrEqual(metrics["controlHeight"] as? Double ?? 0, 44)
+            #else
+            XCTAssertGreaterThanOrEqual(metrics["controlWidth"] as? Double ?? 0, 24)
+            XCTAssertGreaterThanOrEqual(metrics["controlHeight"] as? Double ?? 0, 24)
+            #endif
+        }
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=m-real-older] button').click()")
+        let expanded = try await realMarkdownGeometry(in: web)
+        XCTAssertEqual(expanded["expanded"] as? String, "true")
+        XCTAssertEqual(expanded["controlOverlapsBody"] as? Bool, false, "Show less must not cover the fully expanded ending: \(expanded)")
+        XCTAssertEqual(expanded["controlObstructsVisibleText"] as? Bool, false)
+        XCTAssertEqual(expanded["completeLines"] as? Int, expanded["totalLines"] as? Int)
+        _ = try await web.callAsyncJavaScript("""
+        document.querySelector('[data-message-id=m-real-older] .discussion-message-body a').scrollIntoView({block:'end',behavior:'instant'});
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
+        let ending = try await realMarkdownGeometry(in: web)
+        XCTAssertGreaterThan(ending["visibleEndingRects"] as? Int ?? 0, 0, "The actual trailing link must be visible for native hit testing")
+        XCTAssertEqual(ending["endingHitsLink"] as? Bool, true, "The visible ending must hit its link rather than the disclosure: \(ending)")
+        XCTAssertEqual(thread.messages.first?.body, body)
+    }
+
+    private func realMarkdownGeometry(in web: WKWebView) async throws -> [String: Any] {
+        let value = try await web.callAsyncJavaScript("""
+        const article=document.querySelector('[data-message-id=m-real-older]'),body=article.querySelector('.discussion-message-body'),button=article.querySelector('button[data-history-disclosure]');
+        const clip=body.getBoundingClientRect(),control=button.getBoundingClientRect();
+        const rects=[],walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);
+        while(walker.nextNode()){
+            const node=walker.currentNode;if(!node.textContent.trim())continue;
+            const range=document.createRange();range.selectNodeContents(node);
+            rects.push(...Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0));
+        }
+        const bands=[];
+        for(const rect of rects.slice().sort((a,b)=>a.top-b.top||a.bottom-b.bottom)){
+            const last=bands.at(-1);
+            if(last&&rect.top<last.bottom-1){last.top=Math.min(last.top,rect.top);last.bottom=Math.max(last.bottom,rect.bottom)}
+            else bands.push({top:rect.top,bottom:rect.bottom});
+        }
+        const intersects=(a,b)=>a.right>b.left&&a.left<b.right&&a.bottom>b.top&&a.top<b.bottom;
+        const visible=bands.filter(r=>r.bottom>clip.top+0.5&&r.top<clip.bottom-0.5);
+        const complete=visible.filter(r=>r.top>=clip.top-0.5&&r.bottom<=clip.bottom+0.5);
+        const ending=body.querySelector('a'),endingRects=[];
+        const endingRange=document.createRange();endingRange.selectNodeContents(ending);
+        for(const rect of endingRange.getClientRects())if(rect.width>0&&rect.height>0&&rect.top>=0&&rect.bottom<=innerHeight)endingRects.push(rect);
+        return {paragraphCount:body.querySelectorAll('p').length,paragraphMargin:parseFloat(getComputedStyle(body.querySelector('p')).marginTop),totalLines:bands.length,
+            completeLines:complete.length,partialLines:visible.length-complete.length,controlOverlapsBody:intersects(control,clip),
+            controlObstructsVisibleText:rects.some(r=>intersects(r,clip)&&intersects(r,control)),
+            controlWidth:control.width,controlHeight:control.height,expanded:button.getAttribute('aria-expanded'),
+            visibleEndingRects:endingRects.length,endingHitsLink:endingRects.every(r=>document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2)?.closest('a')===ending)};
+        """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
+        return try XCTUnwrap(value as? [String: Any])
+    }
+
     private func disclosureHTML() -> String {
         let long = (0..<16).map { "Saved line \($0).<br>" }.joined() + "Tail preserved <a id='hidden-link' href='#latest'>Offscreen saved link</a>"
         return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>html{overflow-anchor:none}body{margin:0;font-size:16px;line-height:24px}main{padding:16px}article{margin-bottom:24px}.discussion-message-body{line-height:24px}</style></head><body><main id='document'><article id='older' data-message-id='older'><header>Earlier author</header><div class='discussion-message-body' data-margined-speech='saved-body'>" + long + "</div></article><article id='boundary' data-message-id='boundary'><div class='discussion-message-body'>One<br>Two<br>Three<br>Four<br>Five<br>Six<br>Seven<br>Eight</div></article><article id='latest' data-message-id='latest'><header>Latest author</header><div class='discussion-message-body'><a href='#older'>Earlier comment</a><p>Latest text</p>" + long + "</div></article>" + (0..<30).map { "<p id='tail-\($0)'>Following paragraph \($0).</p>" }.joined() + "<p id='tail-anchor'>Retained reading anchor.</p><div style='height:800px'></div></main></body></html>"

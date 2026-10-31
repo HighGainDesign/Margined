@@ -346,6 +346,42 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     disclosure.target = targetedMessageID;
     disclosure.controls ??= new WeakMap();
     const authorized = () => document.documentElement.getAttribute('data-margined-history-token') === disclosure.token;
+    // Text ranges retain paragraph spacing and mixed inline metrics. Choose a
+    // gap after a complete line rather than spending the cap on top margins.
+    const previewHeight = (body, count, line) => {
+        const box = body.getBoundingClientRect(), rects = [];
+        const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+            const node = walker.currentNode;
+            if (!node.textContent.trim()) continue;
+            const range = document.createRange(); range.selectNodeContents(node);
+            rects.push(...Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0));
+        }
+        const lines = [];
+        for (const rect of rects.sort((a,b) => a.top-b.top || a.bottom-b.bottom)) {
+            const last = lines.at(-1);
+            if (last && rect.top < last.bottom-1) {
+                last.top = Math.min(last.top,rect.top); last.bottom = Math.max(last.bottom,rect.bottom);
+            } else lines.push({top:rect.top,bottom:rect.bottom});
+        }
+        const first = Array.from(body.childNodes).find(node => node.nodeType === Node.ELEMENT_NODE || node.textContent.trim());
+        const offset = first?.nodeType === Node.ELEMENT_NODE ? Math.max(0,first.getBoundingClientRect().top-box.top) : 0;
+        let height = offset + line*count;
+        if (lines.length > count && lines[0].top-box.top < offset+line*2) {
+            const last = lines[count-1], next = lines[count];
+            height = last.bottom + Math.min((next.top-last.bottom)/2,line/2) - box.top;
+        }
+        // Large artwork keeps a bounded crop instead of extending a text-line
+        // preview across an image. Never end that fallback through text.
+        const media = Array.from(body.querySelectorAll('img,svg,video,canvas')).some(node => {
+            const rect = node.getBoundingClientRect();
+            return rect.height > line*2 && rect.top < box.top+height;
+        });
+        if (media) height = offset + line*count;
+        const crossing = lines.find(rect => rect.top < box.top+height && rect.bottom > box.top+height);
+        if (crossing) height = crossing.top-box.top;
+        return Math.max(0,height);
+    };
     disclosure.layout = () => {
         if (!authorized()) return;
         const articles = Array.from(document.querySelectorAll('article[data-message-id]'));
@@ -354,6 +390,10 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         for (const article of articles) {
             const body = article.querySelector('.discussion-message-body');
             if (!body) continue;
+            const header = article.querySelector(':scope > header');
+            article.style.display = ''; article.style.gridTemplateColumns = ''; article.style.columnGap = '';
+            body.style.gridColumn = ''; body.style.gridRow = '';
+            if (header) { header.style.gridColumn = ''; header.style.gridRow = ''; }
             const controls = Array.from(body.querySelectorAll('a[href],button,input,select,textarea,[tabindex],audio[controls],video[controls],summary'));
             for (const control of controls) {
                 const original = disclosure.controls.get(control);
@@ -371,17 +411,22 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
             let button = article.querySelector(':scope > button[data-history-disclosure]');
             if (!long || forced) { button?.remove(); continue; }
             const expanded = disclosure.expanded[article.dataset.messageId] === true;
-            article.style.position = 'relative';
+            // Normal grid flow reserves a compact header column for the glyph.
+            // Its full hit area can never cover either preview or full content.
+            article.style.display = 'grid'; article.style.gridTemplateColumns = 'minmax(0,1fr) auto';
+            article.style.columnGap = '8px';
+            if (header) { header.style.gridColumn = '1'; header.style.gridRow = '1'; }
+            body.style.gridColumn = '1 / -1'; body.style.gridRow = '2';
             if (!body.id) body.id = article.id + '-content';
             if (!button) {
                 button = document.createElement('button');
                 button.type = 'button'; button.id = article.id + '-disclosure'; button.dataset.historyDisclosure = '';
-                button.style.cssText = 'position:absolute;inset-inline-end:0;bottom:0;width:28px;height:24px;border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:6px;background:Canvas;color:CanvasText;cursor:pointer;display:grid;place-items:center;padding:0;';
+                button.style.cssText = 'grid-column:2;grid-row:1;align-self:start;width:28px;height:24px;border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:6px;background:Canvas;color:CanvasText;cursor:pointer;display:grid;place-items:center;padding:0;';
                 const icon = document.createElementNS('http://www.w3.org/2000/svg','svg');
                 icon.setAttribute('width','12'); icon.setAttribute('height','12'); icon.setAttribute('viewBox','0 0 12 12'); icon.setAttribute('aria-hidden','true');
                 const path = document.createElementNS('http://www.w3.org/2000/svg','path');
                 path.setAttribute('d','M2 4l4 4 4-4'); path.setAttribute('fill','none'); path.setAttribute('stroke','currentColor'); path.setAttribute('stroke-width','1.5');
-                icon.append(path); button.append(icon); article.append(button);
+                icon.append(path); button.append(icon); article.insertBefore(button,body);
                 button.addEventListener('click', () => {
                     if (!authorized()) return;
                     const rect = button.getBoundingClientRect(), triggerVisible = rect.bottom > 0 && rect.top < innerHeight;
@@ -401,7 +446,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
             button.title = expanded ? showLess : showFull;
             button.firstChild.style.transform = expanded ? 'rotate(180deg)' : '';
             if (!expanded) {
-                body.style.maxHeight = `${line*disclosure.lines}px`; body.style.overflow = 'hidden'; body.scrollTop = 0;
+                body.style.maxHeight = `${previewHeight(body,disclosure.lines,line)}px`; body.style.overflow = 'hidden'; body.scrollTop = 0;
                 const clip = body.getBoundingClientRect();
                 for (const control of controls) {
                     const hidden = Array.from(control.getClientRects()).every(rect => rect.bottom <= clip.top || rect.top >= clip.bottom || rect.right <= clip.left || rect.left >= clip.right);

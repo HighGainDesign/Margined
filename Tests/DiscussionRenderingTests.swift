@@ -286,6 +286,19 @@ final class DiscussionRenderingTests: XCTestCase {
         XCTAssertFalse(clean.contains(ending))
     }
 
+    func testDisclosureGeometryInputUsesRealParagraphsAndPreservesTheTrailingLink() async throws {
+        let body = "First **formatted** line.  \nSecond line.\n\nAnother *formatted* paragraph.\n\n[Final saved link](https://example.invalid/ending)"
+        let thread = conversation(body, second: "Latest reply.")
+        let rendered = try await MarkdownRenderer.shared.renderDiscussion(thread, prepareSpeech: true, includeContext: false)
+        let document = try SwiftSoup.parse(rendered.html)
+        XCTAssertEqual(try document.select("article[data-message-id=m-first] .discussion-message-body > p").size(), 3)
+        XCTAssertEqual(try document.select("article[data-message-id=m-first] .discussion-message-body br").size(), 1)
+        XCTAssertEqual(try document.select("article[data-message-id=m-first] .discussion-message-body a").attr("href"), "https://example.invalid/ending")
+        XCTAssertTrue(rendered.html.contains(".discussion-history"), "The native geometry test consumes the production history stylesheet")
+        XCTAssertTrue(rendered.speech?.segments.map(\.text).joined(separator: " ").contains("Final saved link") == true)
+        XCTAssertEqual(thread.messages.first?.body, body)
+    }
+
     private func conversation(_ body: String, second: String? = nil, firstAuthor: String = "Alex") -> DiscussionThread {
         var messages = [DiscussionMessage(id: "m-first", author: firstAuthor, created: "2026-10-23T10:00:00Z", body: body, inReplyTo: nil)]
         if let second {
