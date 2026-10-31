@@ -54,10 +54,12 @@ struct DiscussionHistoryWebView: UIViewRepresentable {
     let imageGeneration: Int
     let scope: DiscussionHistoryScope
     var speech: DiscussionSpeechHighlight = .inactive
+    var previewLines = 4
+    var targetedMessageID: String? = nil
     func makeCoordinator() -> DiscussionHistoryCoordinator { .init(scope: scope) }
     func makeUIView(context: Context) -> WKWebView { context.coordinator.makeWebView() }
     func updateUIView(_ view: WKWebView, context: Context) {
-        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration, speech: speech)
+        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration, speech: speech, previewLines: previewLines, targetedMessageID: targetedMessageID)
     }
     static func dismantleUIView(_ view: WKWebView, coordinator: DiscussionHistoryCoordinator) { coordinator.invalidate() }
 }
@@ -68,10 +70,12 @@ struct DiscussionHistoryWebView: NSViewRepresentable {
     let imageGeneration: Int
     let scope: DiscussionHistoryScope
     var speech: DiscussionSpeechHighlight = .inactive
+    var previewLines = 4
+    var targetedMessageID: String? = nil
     func makeCoordinator() -> DiscussionHistoryCoordinator { .init(scope: scope) }
     func makeNSView(context: Context) -> WKWebView { context.coordinator.makeWebView() }
     func updateNSView(_ view: WKWebView, context: Context) {
-        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration, speech: speech)
+        context.coordinator.update(html: html, fontSize: fontSize, imageGeneration: imageGeneration, speech: speech, previewLines: previewLines, targetedMessageID: targetedMessageID)
     }
     static func dismantleNSView(_ view: WKWebView, coordinator: DiscussionHistoryCoordinator) { coordinator.invalidate() }
 }
@@ -94,11 +98,14 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     private var imageGeneration = -1
     private var fontSize = 16.0
     private var speech = DiscussionSpeechHighlight.inactive
+    private var previewLines = 4
+    private var targetedMessageID: String?
     private var speechKey: String?
     private static let speechScript: String = {
         guard let url = Bundle.main.url(forResource: "reader-speech", withExtension: "js"),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return "return false;" }
-        return "if (document.documentElement.getAttribute('data-margined-history-token') !== documentToken) return false;\n" + text
+        return "if (document.documentElement.getAttribute('data-margined-history-token') !== documentToken) return false;\n" +
+            "window.marginedHistoryDisclosure?.reveal(Array.from(document.querySelectorAll('[data-margined-speech]')).find(node => node.dataset.marginedSpeech === elementID));\n" + text
     }()
     private var generation = 0
     private var token = UUID().uuidString
@@ -108,6 +115,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         let id = UUID()
     }
     private var presentationRestore: PresentationRestore?
+    private var reconciliationGeneration: Int?
     private var presentationCaptureTask: Task<Void, Never>?
     private var invalidated = false
     private var suspended = false
@@ -153,7 +161,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         webView?.stopLoading(); webView = nil
     }
 
-    func update(html: String, fontSize: Double, imageGeneration: Int, speech: DiscussionSpeechHighlight = .inactive) {
+    func update(html: String, fontSize: Double, imageGeneration: Int, speech: DiscussionSpeechHighlight = .inactive, previewLines: Int = 4, targetedMessageID: String? = nil) {
         guard !invalidated else { return }
         guard scope.isCurrent() else {
             // Navigation and docking can temporarily hide a retained view.
@@ -168,6 +176,9 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         }
         suspended = false
         self.speech = speech
+        let disclosureChanged = self.previewLines != previewLines || self.targetedMessageID != targetedMessageID
+        self.previewLines = previewLines == 3 ? 3 : 4
+        self.targetedMessageID = targetedMessageID
         let fontChanged = self.fontSize != fontSize
         self.fontSize = fontSize
         if self.imageGeneration != imageGeneration {
@@ -178,12 +189,12 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         if self.html != page {
             self.html = page
             load(page)
-        } else if fontChanged, ready {
+        } else if fontChanged || disclosureChanged, ready {
             let expected = generation
             Task { [weak self] in
                 guard let self, valid(expected), let webView else { return }
                 _ = try? await webView.callAsyncJavaScript(Self.finishScript,
-                    arguments: ["documentToken": token, "fontSize": fontSize, "position": NSNull()],
+                    arguments: finishArguments(position: nil),
                     in: nil, contentWorld: Self.world)
                 guard valid(expected) else { return }
                 speechKey = nil; synchronizeSpeech()
@@ -217,7 +228,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         generation += 1
         // A successor load owns restoration, even when it reconciles in place
         // and therefore receives no replacement native didFinish callback.
-        presentationRestore = nil
+        presentationRestore = nil; reconciliationGeneration = nil
         let expected = generation, previousToken = token
         token = UUID().uuidString
         let nextToken = token
@@ -226,9 +237,13 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         loading = Task { [weak self] in
             guard let self, valid(expected) else { return }
             if reconcile {
+                reconciliationGeneration = expected
+                defer { if reconciliationGeneration == expected { reconciliationGeneration = nil } }
                 let updated = try? await webView.callAsyncJavaScript(Self.reconcileScript,
                     arguments: ["html": page, "restoreFocus": Self.hasFocus(webView),
-                        "expectedToken": previousToken, "nextToken": nextToken, "fontSize": fontSize],
+                        "expectedToken": previousToken, "nextToken": nextToken, "fontSize": fontSize,
+                        "previewLines": previewLines, "targetedMessageID": targetedMessageID ?? "",
+                        "showFull": String(localized: "Show full comment"), "showLess": String(localized: "Show less")],
                     in: nil, contentWorld: Self.world) as? Bool
                 guard valid(expected) else { return }
                 if updated == true { ready = true; navigation = nil; speechKey = nil; synchronizeSpeech(); return }
@@ -264,16 +279,26 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
             let restored = await scope.presentationState?.restorePosition()
             guard valid(expected) else { return }
             _ = try? await view.callAsyncJavaScript(Self.finishScript,
-                arguments: ["documentToken": token, "fontSize": fontSize, "position": (position ?? restored) as Any? ?? NSNull()],
+                arguments: finishArguments(position: position ?? restored),
                 in: nil, contentWorld: Self.world)
             guard valid(expected) else { return }
             speechKey = nil; synchronizeSpeech()
         }
     }
 
+    private func finishArguments(position: [String: Any]?) -> [String: Any] {
+        ["documentToken": token, "fontSize": fontSize, "position": position as Any? ?? NSNull(),
+         "previewLines": previewLines, "targetedMessageID": targetedMessageID ?? "",
+         "showFull": String(localized: "Show full comment"), "showLess": String(localized: "Show less")]
+    }
+
     private func capturePresentationPosition() {
         presentationCaptureTask?.cancel(); presentationCaptureTask = nil
-        guard ready, presentationRestore == nil, !invalidated, let webView, let state = scope.presentationState else { return }
+        // WebKit may commit its in-place DOM before the awaiting native task
+        // marks it ready. That generation can capture a committed current-token
+        // page, but can never bypass a generation-owned restoration lease.
+        guard (ready || reconciliationGeneration == generation), presentationRestore == nil,
+              !invalidated, let webView, let state = scope.presentationState else { return }
         let token = token
         state.capture(owner: presentationOwner) {
             try? await webView.callAsyncJavaScript(Self.captureScript,
@@ -311,10 +336,142 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         #endif
     }
 
+    /// Installed only in the history's isolated world. Full sanitized bodies
+    /// remain in the DOM; clipping never changes source, export or speech text.
+    private static let disclosureScript = """
+    const disclosure = window.marginedHistoryDisclosure ??= {expanded:Object.create(null)};
+    if (position?.disclosure) disclosure.expanded = Object.assign(Object.create(null), position.disclosure);
+    disclosure.token = documentToken;
+    disclosure.lines = previewLines;
+    disclosure.target = targetedMessageID;
+    disclosure.controls ??= new WeakMap();
+    const authorized = () => document.documentElement.getAttribute('data-margined-history-token') === disclosure.token;
+    disclosure.layout = () => {
+        if (!authorized()) return;
+        const articles = Array.from(document.querySelectorAll('article[data-message-id]'));
+        const validIDs = new Set(articles.map(a=>a.dataset.messageId));
+        for (const id of Object.keys(disclosure.expanded)) if (!validIDs.has(id)) delete disclosure.expanded[id];
+        for (const article of articles) {
+            const body = article.querySelector('.discussion-message-body');
+            if (!body) continue;
+            const controls = Array.from(body.querySelectorAll('a[href],button,input,select,textarea,[tabindex],audio[controls],video[controls],summary'));
+            for (const control of controls) {
+                const original = disclosure.controls.get(control);
+                if (!original) continue;
+                for (const name of ['tabindex','inert']) {
+                    if (original[name] === null) control.removeAttribute(name); else control.setAttribute(name,original[name]);
+                }
+                disclosure.controls.delete(control);
+            }
+            body.style.maxHeight = ''; body.style.overflow = '';
+            const line = parseFloat(getComputedStyle(body).lineHeight) || parseFloat(getComputedStyle(body).fontSize)*1.5;
+            const long = body.getBoundingClientRect().height > line*8+1;
+            if (article === articles.at(-1) || article.dataset.messageId === disclosure.target) disclosure.expanded[article.dataset.messageId] = true;
+            const forced = article === articles.at(-1) || article.dataset.messageId === disclosure.target;
+            let button = article.querySelector(':scope > button[data-history-disclosure]');
+            if (!long || forced) { button?.remove(); continue; }
+            const expanded = disclosure.expanded[article.dataset.messageId] === true;
+            article.style.position = 'relative';
+            if (!body.id) body.id = article.id + '-content';
+            if (!button) {
+                button = document.createElement('button');
+                button.type = 'button'; button.id = article.id + '-disclosure'; button.dataset.historyDisclosure = '';
+                button.style.cssText = 'position:absolute;inset-inline-end:0;bottom:0;width:28px;height:24px;border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:6px;background:Canvas;color:CanvasText;cursor:pointer;display:grid;place-items:center;padding:0;';
+                const icon = document.createElementNS('http://www.w3.org/2000/svg','svg');
+                icon.setAttribute('width','12'); icon.setAttribute('height','12'); icon.setAttribute('viewBox','0 0 12 12'); icon.setAttribute('aria-hidden','true');
+                const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+                path.setAttribute('d','M2 4l4 4 4-4'); path.setAttribute('fill','none'); path.setAttribute('stroke','currentColor'); path.setAttribute('stroke-width','1.5');
+                icon.append(path); button.append(icon); article.append(button);
+                button.addEventListener('click', () => {
+                    if (!authorized()) return;
+                    const rect = button.getBoundingClientRect(), triggerVisible = rect.bottom > 0 && rect.top < innerHeight;
+                    const saved = disclosure.capture();
+                    disclosure.expanded[article.dataset.messageId] = button.getAttribute('aria-expanded') !== 'true';
+                    disclosure.layout();
+                    documentOperation('restore',saved,false);
+                    if (triggerVisible && button.getAttribute('aria-expanded') === 'false' && article.getBoundingClientRect().bottom < 0)
+                        article.scrollIntoView({block:'start',behavior:'instant'});
+                });
+            }
+            button.style.width = matchMedia('(pointer:coarse)').matches ? '44px' : '28px';
+            button.style.height = matchMedia('(pointer:coarse)').matches ? '44px' : '24px';
+            button.setAttribute('aria-controls',body.id);
+            button.setAttribute('aria-expanded',String(expanded));
+            button.setAttribute('aria-label',expanded ? showLess : showFull);
+            button.title = expanded ? showLess : showFull;
+            button.firstChild.style.transform = expanded ? 'rotate(180deg)' : '';
+            if (!expanded) {
+                body.style.maxHeight = `${line*disclosure.lines}px`; body.style.overflow = 'hidden'; body.scrollTop = 0;
+                const clip = body.getBoundingClientRect();
+                for (const control of controls) {
+                    const hidden = Array.from(control.getClientRects()).every(rect => rect.bottom <= clip.top || rect.top >= clip.bottom || rect.right <= clip.left || rect.left >= clip.right);
+                    if (!hidden) continue;
+                    disclosure.controls.set(control,{tabindex:control.getAttribute('tabindex'),inert:control.getAttribute('inert')});
+                    control.setAttribute('tabindex','-1'); control.inert = true;
+                }
+            }
+        }
+    };
+    disclosure.capture = () => {
+        const saved = documentOperation('capture',null,false);
+        if (!saved) return saved;
+        // A clipped paragraph still has a DOM rectangle. Only painted body
+        // content can own the semantic anchor saved for a later presentation.
+        const nodes = Array.from(document.querySelectorAll('#document h1,#document h2,#document h3,#document h4,#document h5,#document h6,#document p,#document li,#document pre,#document tr,#document dt,#document dd,#document figure'));
+        const painted = nodes.filter(node=>{
+            const rect = node.getBoundingClientRect(), body = node.closest('.discussion-message-body');
+            const clip = body?.style.overflow === 'hidden' ? body.getBoundingClientRect() : null;
+            return rect.height > 0 && (!clip || rect.top < clip.bottom && rect.bottom > clip.top);
+        });
+        const visible = painted.filter(node=>{
+            const rect = node.getBoundingClientRect(); return rect.bottom > 0 && rect.top < innerHeight;
+        }).sort((a,b)=>Math.abs(a.getBoundingClientRect().top)-Math.abs(b.getBoundingClientRect().top));
+        if (visible.length) {
+            const node = visible[0], index = painted.indexOf(node);
+            saved.top = node.getBoundingClientRect().top;
+            saved.candidates = [node,...painted.slice(index+1),...painted.slice(0,index).reverse()].slice(0,128)
+                .map(node=>({id:node.id,tag:node.tagName,text:node.textContent.slice(0,1024),length:node.textContent.length,label:node.getAttribute('aria-label')}));
+        }
+        saved.disclosure = disclosure.expanded;
+        return saved;
+    };
+    disclosure.reveal = node => {
+        if (!authorized()) return;
+        const article = node?.closest('article[data-message-id]');
+        if (article && disclosure.expanded[article.dataset.messageId] !== true) {
+            disclosure.expanded[article.dataset.messageId] = true; disclosure.layout();
+        }
+    };
+    if (!disclosure.listening) {
+        disclosure.listening = true;
+        window.addEventListener('resize',()=>disclosure.layout());
+        document.addEventListener('load',()=>disclosure.layout(),true);
+        document.addEventListener('click',event=>{
+            const link = event.target.closest?.('a[href]');
+            if (!link) return;
+            const url = new URL(link.href,document.baseURI);
+            if (url.origin !== location.origin || url.pathname !== location.pathname || !url.hash) return;
+            let id; try { id = decodeURIComponent(url.hash.slice(1)); } catch { return; }
+            disclosure.reveal(document.getElementById(id));
+        },true);
+        window.addEventListener('hashchange',()=>{
+            let id; try { id = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+            const node = document.getElementById(id); disclosure.reveal(node);
+            node?.scrollIntoView({block:'start',behavior:'instant'});
+        });
+    }
+    disclosure.layout();
+    """
+
     private static let captureScript = """
     if (document.documentElement.getAttribute('data-margined-history-token') !== documentToken) return null;
+    function capture() {
     const operation = 'capture', restoreFocus = false;
     \(documentScript)
+    }
+    const saved = window.marginedHistoryDisclosure?.capture() ?? capture();
+    if (saved) saved.disclosure = window.marginedHistoryDisclosure?.expanded ?? {};
+    return saved;
     """
     private static let reconcileScript = """
     if (document.documentElement.getAttribute('data-margined-history-token') !== expectedToken) return false;
@@ -322,11 +479,13 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     const documentTokenAttribute = 'data-margined-history-token';
     \(documentScript)
     }
-    const saved = documentOperation('capture', null, false);
+    const saved = window.marginedHistoryDisclosure?.capture() ?? documentOperation('capture', null, false);
     if (!documentOperation('update', null, restoreFocus)) return false;
     document.documentElement.setAttribute('data-margined-history-token', nextToken);
     document.body.style.fontSize = `${fontSize}px`;
     document.body.style.webkitTextSizeAdjust = '100%';
+    const documentToken = nextToken, position = null;
+    \(disclosureScript)
     documentOperation('restore', saved, restoreFocus);
     documentOperation('observeResize', null, false, nextToken);
     return true;
@@ -340,9 +499,10 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     await document.fonts.ready;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (document.documentElement.getAttribute('data-margined-history-token') !== documentToken) return false;
-    const saved = position || documentOperation('capture', null, false);
+    const saved = position || window.marginedHistoryDisclosure?.capture() || documentOperation('capture', null, false);
     document.body.style.fontSize = `${fontSize}px`;
     document.body.style.webkitTextSizeAdjust = '100%';
+    \(disclosureScript)
     documentOperation('restore', saved, false);
     documentOperation('observeResize', null, false, documentToken);
     return true;

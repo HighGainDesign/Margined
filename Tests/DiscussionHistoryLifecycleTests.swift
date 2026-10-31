@@ -98,6 +98,8 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
     func testSameMountedHistoryRetainsItsPassageAcrossResizeAndInPlaceTokenRenewal() async throws {
         let scope = DiscussionHistoryScope(fileURL: nil, isCurrent: { true }, imageFailed: { _ in }, openFile: { _ in })
         let coordinator = DiscussionHistoryCoordinator(scope: scope), web = coordinator.makeWebView()
+        let navigation = HistoryNavigationProbe(coordinator: coordinator)
+        web.navigationDelegate = navigation
         defer { coordinator.invalidate() }
         try mount(web)
         let first = historyHTML()
@@ -121,11 +123,161 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         }
         XCTAssertTrue(reconciled)
         try await reveal("history-p32", in: web)
+        let established = await poll {
+            guard web.bounds.width == 500 else { return false }
+            return try await web.callAsyncJavaScript("""
+            const target=document.getElementById('history-p32');
+            const visible=()=>innerWidth===500 && document.documentElement.clientWidth>0 && Math.abs(document.getElementById('document').getBoundingClientRect().width-document.documentElement.clientWidth)<1 &&
+                Math.abs(target.getBoundingClientRect().top-24)<2 && document.elementFromPoint(document.documentElement.clientWidth/2,24)?.closest('p')===target;
+            if(!visible())return false;
+            await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+            return visible();
+            """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory")) as? Bool == true
+        }
+        XCTAssertTrue(established, "Establish the actual visible paragraph and native 500-point layout before resizing it")
         resize(web, to: CGSize(width: 390, height: 400))
         let renewed = await poll {
             try await web.evaluateJavaScript("innerWidth===390 && window.resizingHistoryDocument===document && Math.abs(document.getElementById('history-p32').getBoundingClientRect().top-24)<2") as? Bool == true
         }
         XCTAssertTrue(renewed, "In-place history-token updates must renew the resize lease before later scrolling/reflow")
+        XCTAssertEqual(navigation.completions, 1, "The renewal must retain its original native navigation")
+    }
+
+    func testLongOlderMessagesCollapseInlineWhileLatestAndLinkTargetsStayExpanded() async throws {
+        let scope = DiscussionHistoryScope(fileURL: nil, isCurrent: { true }, imageFailed: { _ in }, openFile: { _ in })
+        let coordinator = DiscussionHistoryCoordinator(scope: scope), web = coordinator.makeWebView()
+        defer { coordinator.invalidate() }
+        try mount(web)
+        let html = disclosureHTML()
+        coordinator.update(html: html, fontSize: 16, imageGeneration: 0)
+        let ready = await poll {
+            try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='false'") as? Bool == true
+        }
+        XCTAssertTrue(ready, "An older body exceeding eight rendered lines needs a compact disclosure")
+        guard ready else { return }
+        let initial = try await web.evaluateJavaScript("""
+        (()=>{const a=document.querySelector('[data-message-id=older]'),b=a.querySelector('.discussion-message-body'),c=a.querySelector('button');return [b.clientHeight,parseFloat(getComputedStyle(b).lineHeight),c.getAttribute('aria-label'),c.textContent,document.querySelector('[data-message-id=latest] button')===null,b.textContent.includes('Tail preserved'),getComputedStyle(b).overflowY]})()
+        """) as? [Any]
+        XCTAssertEqual((initial?[0] as? Double ?? 0) / (initial?[1] as? Double ?? 1), 4, accuracy: 0.1)
+        XCTAssertEqual(initial?[2] as? String, "Show full comment")
+        XCTAssertEqual(initial?[3] as? String, "", "Use a compact chevron, without a full label row")
+        XCTAssertEqual(initial?[4] as? Bool, true)
+        XCTAssertEqual(initial?[5] as? Bool, true)
+        XCTAssertEqual(initial?[6] as? String, "hidden", "The message must not introduce another scroller")
+        let hiddenControl = try await web.evaluateJavaScript("(()=>{const a=document.getElementById('hidden-link');a.focus();return [a.inert,a.tabIndex,document.activeElement===a]})()") as? [Any]
+        XCTAssertEqual(hiddenControl?[0] as? Bool, true, "Wholly clipped controls are excluded from keyboard and accessibility navigation")
+        XCTAssertEqual(hiddenControl?[1] as? Int, -1)
+        XCTAssertEqual(hiddenControl?[2] as? Bool, false)
+        let control = try await web.evaluateJavaScript("(()=>{const b=document.querySelector('[data-message-id=older] button'),r=b.getBoundingClientRect();return {width:r.width,height:r.height,controls:b.getAttribute('aria-controls'),type:b.type}})()") as? [String: Any]
+        #if os(iOS)
+        XCTAssertGreaterThanOrEqual(control?["width"] as? Double ?? 0, 44)
+        XCTAssertGreaterThanOrEqual(control?["height"] as? Double ?? 0, 44)
+        #else
+        XCTAssertGreaterThanOrEqual(control?["width"] as? Double ?? 0, 24)
+        XCTAssertGreaterThanOrEqual(control?["height"] as? Double ?? 0, 24)
+        #endif
+        XCTAssertEqual(control?["type"] as? String, "button")
+        XCTAssertFalse((control?["controls"] as? String ?? "").isEmpty, "The native WebKit button exposes an expanded state for its associated body")
+        let boundaryCollapsed = try await web.evaluateJavaScript("!!document.querySelector('[data-message-id=boundary] button')") as? Bool
+        XCTAssertEqual(boundaryCollapsed, false, "Exactly eight rendered body lines remain fully visible")
+        coordinator.update(html: html, fontSize: 16, imageGeneration: 0, previewLines: 3)
+        let shortTyping = await poll {
+            try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] .discussion-message-body').clientHeight===72") as? Bool == true
+        }
+        XCTAssertTrue(shortTyping, "Short typing uses three lines without rebuilding the history")
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        let expanded = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').getAttribute('aria-expanded')") as? String
+        XCTAssertEqual(expanded, "true")
+        let expandedLabel = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').getAttribute('aria-label')") as? String
+        XCTAssertEqual(expandedLabel, "Show less")
+        let expandedControl = try await web.evaluateJavaScript("(()=>{const a=document.getElementById('hidden-link');return [a.inert,a.tabIndex]})()") as? [Any]
+        XCTAssertEqual(expandedControl?[0] as? Bool, false)
+        XCTAssertEqual(expandedControl?[1] as? Int, 0, "Expanding restores the original native link behavior")
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click();document.querySelector('[data-message-id=latest] a').click()")
+        let targeted = await poll {
+            try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').getAttribute('aria-expanded')==='true'") as? Bool == true
+        }
+        XCTAssertTrue(targeted, "Reply and body fragment links must expand their target before navigation")
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        coordinator.update(html: html, fontSize: 16, imageGeneration: 0,
+            speech: .init(elementID: "saved-body", follow: false))
+        let speechTarget = await poll {
+            try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true'") as? Bool == true
+        }
+        XCTAssertTrue(speechTarget, "The full current speech message is visible even when following is paused")
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        coordinator.update(html: html, fontSize: 16, imageGeneration: 0, targetedMessageID: "older")
+        let explicitTarget = await poll {
+            try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button')===null && document.querySelector('[data-message-id=older] .discussion-message-body').style.maxHeight===''") as? Bool == true
+        }
+        XCTAssertTrue(explicitTarget, "An explicitly targeted message remains fully expanded")
+    }
+
+    func testDisclosureSurvivesReconciliationAndRestoresSessionWithoutMovingTheReadingAnchor() async throws {
+        let state = DiscussionHistoryPresentationState()
+        let scope = DiscussionHistoryScope(fileURL: nil, isCurrent: { true }, imageFailed: { _ in }, openFile: { _ in }, presentationState: state)
+        let coordinator = DiscussionHistoryCoordinator(scope: scope), web = coordinator.makeWebView()
+        defer { coordinator.invalidate() }
+        try mount(web)
+        coordinator.update(html: disclosureHTML(), fontSize: 16, imageGeneration: 0)
+        let ready = await poll { try await web.evaluateJavaScript("!!document.querySelector('[data-message-id=older] button')") as? Bool == true }
+        XCTAssertTrue(ready); guard ready else { return }
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        try await reveal("tail-anchor", in: web)
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        let collapsedAnchor = try await web.evaluateJavaScript("document.getElementById('tail-anchor').getBoundingClientRect().top") as? Double
+        XCTAssertEqual(collapsedAnchor ?? 0, 24, accuracy: 2, "Collapsing an earlier body keeps the paragraph being read in place")
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        let expandedAnchor = try await web.evaluateJavaScript("document.getElementById('tail-anchor').getBoundingClientRect().top") as? Double
+        XCTAssertEqual(expandedAnchor ?? 0, 24, accuracy: 2, "Expanding inline preserves the shared history scroll anchor")
+        _ = try await web.evaluateJavaScript("window.disclosureDocument=document;true")
+        coordinator.update(html: disclosureHTML().replacingOccurrences(of: "Latest text", with: "Updated latest text"), fontSize: 18, imageGeneration: 0)
+        let retained = await poll {
+            try await web.evaluateJavaScript("window.disclosureDocument===document && document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true' && Math.abs(document.getElementById('tail-anchor').getBoundingClientRect().top-24)<2") as? Bool == true
+        }
+        XCTAssertTrue(retained, "Reconciliation retains stable message disclosure and semantic scroll position")
+        let lease = Mirror(reflecting: coordinator).children.filter { ["ready", "generation", "presentationRestore", "navigation"].contains($0.label ?? "") }.map { "\($0.label ?? "")=\($0.value)" }.joined(separator: ", ")
+        coordinator.invalidate()
+        let cached = await state.restorePosition()
+        XCTAssertEqual((cached?["disclosure"] as? [String: Bool])?["older"], true, "Outgoing history must capture its expansion map; \(lease); cached=\(String(describing: cached))")
+        let successor = DiscussionHistoryCoordinator(scope: scope), restored = successor.makeWebView()
+        defer { successor.invalidate() }
+        try mount(restored)
+        successor.update(html: disclosureHTML(), fontSize: 16, imageGeneration: 0)
+        let restoredExpansion = await poll {
+            try await restored.evaluateJavaScript("document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true'") as? Bool == true
+        }
+        XCTAssertTrue(restoredExpansion, "Hide/show must preserve the session's expanded messages")
+    }
+
+    func testAppendedReplyKeepsThePreviouslyLatestMessageVisibleAndImmediateHideCapturesDisclosure() async throws {
+        let state = DiscussionHistoryPresentationState()
+        let scope = DiscussionHistoryScope(fileURL: nil, isCurrent: { true }, imageFailed: { _ in }, openFile: { _ in }, presentationState: state)
+        let coordinator = DiscussionHistoryCoordinator(scope: scope), web = coordinator.makeWebView()
+        defer { coordinator.invalidate() }
+        try mount(web)
+        let first = disclosureHTML()
+        coordinator.update(html: first, fontSize: 16, imageGeneration: 0)
+        let ready = await poll { try await web.evaluateJavaScript("!!document.querySelector('[data-message-id=older] button')") as? Bool == true }
+        XCTAssertTrue(ready); guard ready else { return }
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click();window.appendHistoryDocument=document;true")
+        let latest = first.replacingOccurrences(of: "</main>", with: "<article id='appended' data-message-id='appended'><div class='discussion-message-body'>New saved reply.</div></article></main>")
+        coordinator.update(html: latest, fontSize: 16, imageGeneration: 0)
+        let reconciled = await poll {
+            try await web.evaluateJavaScript("window.appendHistoryDocument===document && !!document.getElementById('appended')") as? Bool == true
+        }
+        XCTAssertTrue(reconciled)
+        let visible = try await web.evaluateJavaScript("document.querySelector('[data-message-id=latest] .discussion-message-body').style.maxHeight===''") as? Bool
+        XCTAssertEqual(visible, true, "A new reply must not collapse the latest message the reader already had expanded")
+        let lease = Mirror(reflecting: coordinator).children.filter { ["ready", "generation", "presentationRestore", "navigation"].contains($0.label ?? "") }.map { "\($0.label ?? "")=\($0.value)" }.joined(separator: ", ")
+        coordinator.invalidate()
+        let cached = await state.restorePosition()
+        XCTAssertEqual((cached?["disclosure"] as? [String: Bool])?["older"], true, "Immediate reconciled hide must capture expansion; \(lease); cached=\(String(describing: cached))")
+    }
+
+    private func disclosureHTML() -> String {
+        let long = (0..<16).map { "Saved line \($0).<br>" }.joined() + "Tail preserved <a id='hidden-link' href='#latest'>Offscreen saved link</a>"
+        return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>html{overflow-anchor:none}body{margin:0;font-size:16px;line-height:24px}main{padding:16px}article{margin-bottom:24px}.discussion-message-body{line-height:24px}</style></head><body><main id='document'><article id='older' data-message-id='older'><header>Earlier author</header><div class='discussion-message-body' data-margined-speech='saved-body'>" + long + "</div></article><article id='boundary' data-message-id='boundary'><div class='discussion-message-body'>One<br>Two<br>Three<br>Four<br>Five<br>Six<br>Seven<br>Eight</div></article><article id='latest' data-message-id='latest'><header>Latest author</header><div class='discussion-message-body'><a href='#older'>Earlier comment</a><p>Latest text</p>" + long + "</div></article>" + (0..<30).map { "<p id='tail-\($0)'>Following paragraph \($0).</p>" }.joined() + "<p id='tail-anchor'>Retained reading anchor.</p><div style='height:800px'></div></main></body></html>"
     }
 
     private func historyHTML() -> String {

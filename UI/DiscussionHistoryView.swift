@@ -17,6 +17,8 @@ struct DiscussionHistoryView: View {
     var playback: DiscussionHistoryPlayback? = nil
     var fillsAvailableSpace = false
     var presentationState: DiscussionHistoryPresentationState? = nil
+    var previewLines = 4
+    var targetedMessageID: String? = nil
     @Environment(\.sizeCategory) private var sizeCategory
 
     private struct Identity: Hashable { let document: UUID; let thread: String }
@@ -34,7 +36,7 @@ struct DiscussionHistoryView: View {
             fontSize: fontSize, imageGeneration: imageGeneration,
             scope: DiscussionHistoryScope(fileURL: fileURL, isCurrent: isCurrent,
                 imageFailed: imageFailed, openFile: openFile, presentationState: presentationState), playback: playback,
-            fillsAvailableSpace: fillsAvailableSpace)
+            fillsAvailableSpace: fillsAvailableSpace, previewLines: previewLines, targetedMessageID: targetedMessageID)
             .id(Identity(document: documentID, thread: thread.id))
     }
 }
@@ -74,6 +76,8 @@ private struct DiscussionHistoryContent: View {
     let scope: DiscussionHistoryScope
     let playback: DiscussionHistoryPlayback?
     let fillsAvailableSpace: Bool
+    let previewLines: Int
+    let targetedMessageID: String?
     @State private var prepared: Prepared?
     @State private var error: String?
     @Environment(\.locale) private var locale
@@ -124,7 +128,7 @@ private struct DiscussionHistoryContent: View {
                 if let error { Label(error, systemImage: "exclamationmark.triangle").font(.caption).textSelection(.enabled) }
                 if let prepared {
                     DiscussionHistoryWebView(html: prepared.output.html, fontSize: fontSize,
-                        imageGeneration: imageGeneration, scope: scope, speech: highlight)
+                        imageGeneration: imageGeneration, scope: scope, speech: highlight, previewLines: previewLines, targetedMessageID: targetedMessageID)
                 } else { ProgressView("Reading discussions…").frame(maxWidth: .infinity, maxHeight: .infinity) }
             }.frame(height: fillsAvailableSpace ? nil : 240)
         }

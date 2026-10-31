@@ -682,6 +682,11 @@ import XCTest
         let paragraphs = (0..<100).map { "Paragraph \($0) keeps the document long enough to test its reading position while an unfinished reply moves between compact navigation and the margin." }.joined(separator: "\n\n")
         let f = try await fixture(withThread: true, tail: "\n\n" + paragraphs)
         let context = f.reader.documentGeneration
+        let observing = await pollAsync {
+            try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool == true
+        }
+        XCTAssertTrue(observing, "Install the app observer before establishing its reading position")
         _ = try await f.web.callAsyncJavaScript("""
         await document.fonts.ready;
         window.mobileResizePage=document;
@@ -691,6 +696,10 @@ import XCTest
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        try await settleMobileResizeObserver(f.web)
+        let seed = try await resizeReadingMetrics(f.web)
+        XCTAssertEqual(seed["visible"] as? Bool, true, "Establish the actual passage before opening its conversation")
+        XCTAssertGreaterThan(seed["scroll"] as? Double ?? 0, 0)
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("An unfinished reply across both displays.", for: .thread("t-mobile"))
         let initial = await poll { self.visibleEditor(in: f.host.view)?.text == "An unfinished reply across both displays." }
@@ -710,6 +719,16 @@ import XCTest
             XCTAssertTrue(settled, "The same selected conversation and unposted reply must survive every live resize")
             let nativeSettled = await settledNavigation(f)
             XCTAssertTrue(nativeSettled, "The actual native top controller must finish resizing before assessing the layout")
+            let widthCommitted = await pollAsync {
+                let width = try await f.web.evaluateJavaScript("innerWidth") as? Double
+                return width.map { abs($0 - f.web.bounds.width) < 1 } == true
+            }
+            XCTAssertTrue(widthCommitted, "Commit the actual native reader width before its next resize")
+            try await settleMobileResizeObserver(f.web)
+            let passageSettled = await pollAsync {
+                try await self.resizeReadingMetrics(f.web)["visible"] as? Bool == true
+            }
+            XCTAssertTrue(passageSettled, "The reading passage must be visible before the next intentional resize or hide")
             sawMargin = sawMargin || f.reader.discussionUsesMargin
             sawCompact = sawCompact || !f.reader.discussionUsesMargin
             XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"))

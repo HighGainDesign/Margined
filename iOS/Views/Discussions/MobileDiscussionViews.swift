@@ -171,7 +171,7 @@ struct MobileDiscussionThread: View {
                     }.padding(.horizontal, 16)
                 }
                 if let thread {
-                    MobileDiscussionMessages(reader: reader, thread: thread, fillsAvailableSpace: true)
+                    MobileDiscussionMessages(reader: reader, thread: thread, fillsAvailableSpace: true, previewLines: shortTyping ? 3 : 4)
                         .labelStyle(MobileDiscussionHistoryLabelStyle(compact: shortTyping))
                         .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 16)
                 } else { Spacer(minLength: 0) }
@@ -257,6 +257,7 @@ private struct MobileDiscussionMessages: View {
     let reader: MobileReaderState
     let thread: DiscussionThread
     var fillsAvailableSpace = false
+    var previewLines = 4
     var body: some View {
         let context = reader.documentGeneration, playback = reader.playback
         DiscussionHistoryView(documentID: context, thread: thread, fileURL: reader.fileURL,
@@ -288,7 +289,7 @@ private struct MobileDiscussionMessages: View {
                     guard playback.ownerID == reader.id, playback.conversationID == thread.id else { return }
                     reader.resumeSpeechPosition()
                 }, showLatest: { reader.showLatest() }), fillsAvailableSpace: fillsAvailableSpace,
-            presentationState: reader.discussionHistoryPosition(for: thread.id))
+            presentationState: reader.discussionHistoryPosition(for: thread.id), previewLines: previewLines)
     }
 }
 

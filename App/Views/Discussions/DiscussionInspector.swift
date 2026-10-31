@@ -41,6 +41,23 @@ struct DiscussionInspector: View {
                     .buttonStyle(.borderless).accessibilityLabel("Hide discussions")
                     .keyboardShortcut(reader.showFind ? nil : KeyboardShortcut(.escape, modifiers: []))
             }
+            if case let .thread(id) = reader.discussions.selection,
+               let thread = reader.rendered?.discussions?.threads.first(where: { $0.id == id }) {
+                Button("Back to Discussions", systemImage: "chevron.left") { reader.discussions.selection = nil }
+                    .buttonStyle(.plain).accessibilityIdentifier("back-to-discussions")
+                if reader.showDiscussionAuthorPrompt { DiscussionAuthorForm(reader: reader) }
+                DiscussionActionPrompts(reader: reader)
+                if let error = reader.discussionError {
+                    Label(error, systemImage: "exclamationmark.triangle").fixedSize(horizontal: false, vertical: true)
+                    Button("Inspect Source…") { reader.inspectDiscussionSource() }.buttonStyle(.link)
+                }
+                DiscussionThreadCard(reader: reader, thread: thread, focused: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: DiscussionCardFrames.self,
+                            value: ["t:" + id: proxy.frame(in: .named("discussion-margin"))])
+                    })
+            } else {
             Picker("Show discussions", selection: Binding(get: { reader.discussions.filter }, set: { reader.discussions.filter = $0 })) {
                 Text("Open").tag(DiscussionSession.Filter.open)
                 Text("All").tag(DiscussionSession.Filter.all)
@@ -129,6 +146,7 @@ struct DiscussionInspector: View {
                         scroll.scrollTo("t:" + id, anchor: .top)
                     }
                 }
+            }
             }
         }
         .font(.callout).padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

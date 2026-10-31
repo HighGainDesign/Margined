@@ -265,6 +265,27 @@ final class DiscussionRenderingTests: XCTestCase {
         XCTAssertEqual(try SwiftSoup.parse(full.html).select("main > blockquote").text(), "Review this sentence.")
     }
 
+    func testLongHistoryKeepsFullRichBodySpeechAndConversationExport() async throws {
+        let ending = "The complete saved ending remains available."
+        let body = (0..<16).map { "Paragraph \($0) with **formatting**." }.joined(separator: "\n\n") +
+            "\n\n| Detail | Value |\n| --- | --- |\n| Final | Safe |\n\n" + ending
+        let thread = conversation(body, second: "Latest reply.")
+        let rendered = try await MarkdownRenderer.shared.renderDiscussion(thread, prepareSpeech: true, includeContext: false)
+        let document = try SwiftSoup.parse(rendered.html)
+        XCTAssertTrue(try document.select("article[data-message-id=m-first] .discussion-message-body").text().contains(ending))
+        XCTAssertEqual(try document.select("table td").text(), "Final Safe")
+        XCTAssertEqual(try document.select("button[data-history-disclosure]").size(), 0, "Disclosure belongs to the native mounted history, not exported HTML")
+        XCTAssertTrue(rendered.speech?.segments.map(\.text).joined(separator: " ").contains(ending) == true)
+        let prose = "Review this sentence.\n"
+        let source = try MarkdownSourceEdits.apply(DiscussionEdits.splices(for: .newThread(thread), in: DiscussionCodec.parse(prose)), to: Data(prose.utf8), expectedSource: prose)
+        let parsed = try DiscussionCodec.parse(MarkdownSource.decode(source))
+        XCTAssertEqual(parsed.threads.first?.messages.first?.body, body)
+        XCTAssertTrue(DiscussionExports.conversation(parsed).contains(ending))
+        let clean = try MarkdownSource.decode(DiscussionExports.cleanCopy(source).data)
+        XCTAssertTrue(clean.hasPrefix(prose))
+        XCTAssertFalse(clean.contains(ending))
+    }
+
     private func conversation(_ body: String, second: String? = nil, firstAuthor: String = "Alex") -> DiscussionThread {
         var messages = [DiscussionMessage(id: "m-first", author: firstAuthor, created: "2026-10-23T10:00:00Z", body: body, inReplyTo: nil)]
         if let second {
