@@ -7,6 +7,211 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    func testMountingANativeDraftEditorRestoresTheRetainedCaretBeforeObservingSelection() async throws {
+        let f = try await fixture(withThread: true)
+        let key = DiscussionSession.DraftKey.thread("t-mobile")
+        let draft = "Retain this native editor selection."
+        let caret = NSRange(location: 7, length: 4)
+        f.reader.discussions.setDraft(draft, for: key)
+        f.reader.discussionComposerSelections[key] = caret
+        let host = UIHostingController(rootView: MobileDiscussionDraftEditor(reader: f.reader, key: key,
+            text: Binding(get: { f.reader.discussions.drafts[key]?.body ?? "" },
+                set: { f.reader.discussions.setDraft($0, for: key) }), document: f.reader.documentGeneration).frame(height: 100))
+        let window = UIWindow(windowScene: try XCTUnwrap(f.window.windowScene))
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 200)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        host.loadViewIfNeeded(); host.view.layoutIfNeeded()
+        defer { window.isHidden = true; window.rootViewController = nil; f.window.makeKey() }
+        let mounted = await poll { self.editor(in: host.view)?.text == draft }
+        XCTAssertTrue(mounted)
+        let editor = try XCTUnwrap(self.editor(in: host.view))
+        print("DRAFT-MOUNT retainedBefore=\(caret) retainedAfter=\(String(describing: f.reader.discussionComposerSelections[key])) native=\(editor.selectedRange)")
+        XCTAssertEqual(f.reader.discussionComposerSelections[key], caret, "Initial native text assignment must not replace retained selection")
+        XCTAssertEqual(editor.selectedRange, caret, "A newly mounted editor must restore the actual native caret")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testCompactBackRetainsTheDiscussionListWhenTheWideInspectorMounts() async throws {
+        try await assertDiscussionListIntentSurvivesRemount(startWide: false)
+    }
+
+    func testWideBackRetainsTheDiscussionListAfterACompactRoundTrip() async throws {
+        try await assertDiscussionListIntentSurvivesRemount(startWide: true)
+    }
+
+    private func assertDiscussionListIntentSurvivesRemount(startWide: Bool) async throws {
+        let f = try await fixture(withThread: true)
+        let draft = "Retain this list-owned reply and caret."
+        let caret = NSRange(location: 7, length: 4)
+        let key = DiscussionSession.DraftKey.thread("t-mobile")
+        f.reader.discussions.filter = .all
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft(draft, for: key)
+        let opened = await poll { self.visibleEditor(in: f.host.view)?.text == draft }
+        XCTAssertTrue(opened); guard opened else { return }
+        let initiallySettled = await settledNavigation(f); XCTAssertTrue(initiallySettled)
+        let editor = try XCTUnwrap(self.visibleEditor(in: f.host.view))
+        let keyboard = MobileKeyboardFrameObservation(window: f.window)
+        XCTAssertTrue(editor.becomeFirstResponder())
+        let typingReady = await poll {
+            editor.isFirstResponder && keyboard.frame.height > 100 && f.reader.discussionFocus?.input == .body
+        }
+        XCTAssertTrue(typingReady)
+        // Select after the native keyboard/focus transition, as a user would.
+        editor.selectedRange = caret
+        editor.delegate?.textViewDidChangeSelection?(editor)
+        let selectionReady = await poll {
+            editor.selectedRange == caret && f.reader.discussionComposerSelections[key] == caret
+        }
+        XCTAssertTrue(selectionReady, "Seed an actual native editing caret before Back or resizing")
+        XCTAssertEqual(f.reader.discussionComposerSelections[key], caret)
+        if startWide {
+            f.window.frame.size = CGSize(width: 1120, height: 780)
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled && f.reader.discussionUsesMargin)
+            // Invoke the same retained action as wide Back. Native button
+            // activation is covered separately by the app UI gate.
+            f.reader.backToDiscussionList()
+        } else {
+            MobileDocumentWorkspace(reader: f.reader, openFolder: {}, closeFile: {}).navigationBinding().wrappedValue = [.list]
+        }
+        let listIntent = await poll { f.reader.discussionRoute == nil }
+        XCTAssertTrue(listIntent)
+        let widths: [CGFloat] = startWide ? [390, 1120] : [1120]
+        for width in widths {
+            f.window.frame.size = CGSize(width: width, height: 780)
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled)
+            let listVisible = await poll { self.editor(in: f.host.view) == nil }
+            XCTAssertTrue(listVisible, "Back must keep the filter/list visible after mounting at width \(width)")
+            let text = try recognizedText(in: f.window)
+            XCTAssertTrue(text.contains("Document Actions") && text.contains("All"), "The actual list/filter must be rendered: \(text)")
+            XCTAssertNil(f.reader.discussionRoute)
+            XCTAssertEqual(f.reader.discussions.selection, key)
+            XCTAssertEqual(f.reader.discussions.filter, .all)
+            XCTAssertEqual(f.reader.discussions.drafts[key]?.body, draft)
+            XCTAssertEqual(f.reader.discussionComposerSelections[key], caret)
+        }
+        for width in [CGFloat(1120), CGFloat(390)] {
+            f.window.frame.size = CGSize(width: width, height: 780)
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled)
+            f.reader.openDiscussion("t-mobile")
+            let reopened = await poll { self.visibleEditor(in: f.host.view)?.text == draft }
+            XCTAssertTrue(reopened)
+            XCTAssertEqual(self.editor(in: f.host.view)?.selectedRange, caret)
+            XCTAssertEqual(f.reader.discussionRoute, key)
+        }
+        XCTAssertEqual(Data(f.reader.source.utf8), f.original)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testGermanLargestTextTypingComposerFitsANarrowShortNativeHost() async throws {
+        let f = try await fixture(withThread: true)
+        let key = DiscussionSession.DraftKey.thread("t-mobile")
+        f.reader.discussions.displayName = "A deliberately long saved author name"
+        f.reader.discussions.setDraft("A narrow localized reply.", for: key)
+        f.reader.discussionFocus = .init(id: UUID(), input: .body)
+        let scene = try XCTUnwrap(f.window.windowScene)
+        let host = UIHostingController(rootView: MobileDiscussionComposer(reader: f.reader, key: key, compact: true, shortTyping: true)
+            .padding(.horizontal, 16).environment(\.locale, Locale(identifier: "de")))
+        host.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 200)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        host.loadViewIfNeeded(); host.view.layoutIfNeeded()
+        defer { window.isHidden = true; window.rootViewController = nil; f.window.makeKey() }
+        let mounted = await poll { self.editor(in: host.view)?.text == "A narrow localized reply." }
+        XCTAssertTrue(mounted)
+        let editor = try XCTUnwrap(self.editor(in: host.view))
+        let frame = editor.convert(editor.bounds, to: window)
+        XCTAssertGreaterThan(frame.width, 20, "The fixed action column must leave a usable native input")
+        XCTAssertGreaterThanOrEqual(frame.minX, 0)
+        XCTAssertLessThanOrEqual(frame.maxX, window.bounds.maxX)
+        XCTAssertGreaterThanOrEqual(editor.font?.pointSize ?? 0, 35)
+        // At this native text size the real German title exceeds the action
+        // column, so ViewThatFits must choose the existing paperplane fallback.
+        let german = try XCTUnwrap(Bundle(path: XCTUnwrap(Bundle.main.path(forResource: "de", ofType: "lproj"))))
+        let title = german.localizedString(forKey: "Reply", value: nil, table: nil)
+        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: host.traitCollection)
+        XCTAssertEqual(title, "Antworten")
+        XCTAssertGreaterThan((title as NSString).size(withAttributes: [.font: font]).width, 190)
+        let text = try recognizedText(in: window)
+        XCTAssertFalse(text.contains(title), "The too-wide localized title must yield to its icon fallback: \(text)")
+        let capture = XCTAttachment(image: UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }); capture.name = "German-largest-text-narrow-composer"; capture.lifetime = .keepAlways; add(capture)
+        func all(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(all) }
+        print("LOCALIZED-COMPOSER frame=\(frame) nativeFont=\(editor.font?.pointSize ?? 0) titleWidth=\((title as NSString).size(withAttributes: [.font: font]).width) OCR=\(text) identified=\(all(host.view).filter { $0.accessibilityIdentifier != nil }.map { [$0.accessibilityIdentifier ?? "", String(describing: $0.convert($0.bounds, to: window)), $0.accessibilityLabel ?? ""] })")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testTypingBeforeAnySoftwareKeyboardStaysInsideNativeNavigationContent() async throws {
+        let f = try await fixture(withThread: true, useNativeSceneBounds: true)
+        f.reader.discussions.displayName = "Reader"
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Retain this hardware keyboard draft.", for: .thread("t-mobile"))
+        let mounted = await poll { self.editor(in: f.host.view)?.text == "Retain this hardware keyboard draft." }
+        XCTAssertTrue(mounted); guard mounted else { return }
+        let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        let historyReady = await pollAsync {
+            guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
+            return try await history.evaluateJavaScript("document.querySelector('article .discussion-message-body')?.textContent.includes('A portable note.')===true") as? Bool == true
+        }
+        XCTAssertTrue(historyReady)
+        let readingHeight = f.web.bounds.height
+        let keyboard = MobileKeyboardFrameObservation(window: f.window)
+        func navigation(in controller: UIViewController) -> UINavigationController? {
+            if let value = controller as? UINavigationController { return value }
+            return controller.children.lazy.compactMap { navigation(in: $0) }.first
+        }
+        // Retained focus may precede the software keyboard animation and is
+        // legitimate with hardware input. No responder or keyboard override.
+        f.reader.discussionFocus = .init(id: UUID(), input: .name)
+        f.reader.discussionSheetExpanded = true
+        let naturalSize = f.window.bounds.size
+        for size in [naturalSize, CGSize(width: 390, height: 320)] {
+            f.window.frame.size = size
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled)
+            // Await real layout propagation, including the async native budget
+            // callback, using the independent navigation-safe bounds themselves.
+            let fits = await poll {
+                guard let top = navigation(in: f.host)?.topViewController?.viewIfLoaded,
+                      let name = self.nameField(in: f.host.view),
+                      let history = self.history(in: f.host.view, excluding: f.web) else { return false }
+                let content = top.convert(top.safeAreaLayoutGuide.layoutFrame, to: f.window)
+                let nameFrame = name.convert(name.bounds, to: f.window)
+                let historyFrame = history.convert(history.bounds, to: f.window)
+                return name.bounds.height > 20 && history.bounds.height > 20 &&
+                    (self.editor(in: f.host.view)?.bounds.height ?? 100) < 1 &&
+                    nameFrame.maxY <= content.maxY + 1 && historyFrame.minY >= content.minY
+            }
+            XCTAssertTrue(fits, "Typing must settle inside independently measured native content at \(size)")
+            let top = try XCTUnwrap(navigation(in: f.host)?.topViewController?.viewIfLoaded)
+            let content = top.convert(top.safeAreaLayoutGuide.layoutFrame, to: f.window)
+            let name = try XCTUnwrap(nameField(in: f.host.view))
+            let history = try XCTUnwrap(history(in: f.host.view, excluding: f.web))
+            let nameFrame = name.convert(name.bounds, to: f.window)
+            let historyFrame = history.convert(history.bounds, to: f.window)
+            XCTAssertEqual(keyboard.frame.height, 0, "Exercise no software keyboard")
+            XCTAssertFalse(name.isFirstResponder)
+            XCTAssertFalse(try XCTUnwrap(editor(in: f.host.view)).isFirstResponder)
+            try await recordDuoGeometry(f, keyboard: keyboard, phase: "no-software-keyboard-typing-\(Int(size.width))x\(Int(size.height))")
+            XCTAssertGreaterThanOrEqual(historyFrame.minY, content.minY, "Typing history cannot cover the native title")
+            XCTAssertLessThanOrEqual(nameFrame.maxY, content.maxY + 1)
+            let reply = try XCTUnwrap(recognizedBounds("Reply", in: f.window), "Reply remains visible without a software keyboard")
+            XCTAssertLessThanOrEqual(reply.maxY, content.maxY + 1)
+            recordSheetEvidence(f, name: "Sheet-no-software-keyboard-\(Int(size.width))x\(Int(size.height))")
+        }
+        f.reader.endDiscussionEditing(); f.reader.discussionSheetExpanded = false
+        f.window.frame.size = naturalSize
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let readingRestored = await poll { abs(f.web.bounds.height - readingHeight) < 1 }
+        XCTAssertTrue(readingRestored, "Leaving typing must restore the original reading detent allocation")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
     func testCompactDiscussionSheetKeepsTheSelectedPassageInItsActualReaderViewport() async throws {
         let f = try await fixture(withThread: true, tail: String(repeating: "Later paragraph.\n\n", count: 90))
         _ = try await f.web.evaluateJavaScript("window.sheetReadingPage=document;true")
@@ -306,6 +511,8 @@ import XCTest
         XCTAssertEqual(editor.text, reply)
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
         recordSheetEvidence(f, name: "Sheet-largest-text-keyboard", keyboard: keyboard.frame)
+        let metrics = try await history.evaluateJavaScript("(()=>{const p=document.querySelector('article .discussion-message-body p'),r=document.createRange();r.selectNodeContents(p);return {height:innerHeight,font:document.body.style.fontSize,lines:Array.from(r.getClientRects()).map(b=>({top:b.top,bottom:b.bottom,height:b.height}))};})()")
+        print("FINAL-LARGEST nativeFont=\(editor.font?.pointSize ?? 0) history=\(String(describing: metrics)) keyboard=\(keyboard.frame) editor=\(editor.convert(editor.bounds, to: f.window))")
         editor.resignFirstResponder()
     }
 

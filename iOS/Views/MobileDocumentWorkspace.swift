@@ -98,7 +98,7 @@ struct MobileDocumentWorkspace: View {
                 reader.discussionUsesMargin = value
             }
             .background {
-                MobileDiscussionKeyboardViewport { keyboardAvailableHeight = $0 }
+                MobileDiscussionKeyboardViewport(typing: reader.discussionFocus != nil) { keyboardAvailableHeight = $0 }
                     .allowsHitTesting(false).accessibilityHidden(true)
             }
             .background { MobilePrintPresenter(reader: reader).allowsHitTesting(false).accessibilityHidden(true) }
@@ -295,6 +295,7 @@ private final class MobileNavigationGeometryView: UIView {
 /// The system safe-area animation alone need not resize a GeometryReader's
 /// proposed height; use the actual public keyboard frame to clamp the detent.
 private struct MobileDiscussionKeyboardViewport: UIViewRepresentable {
+    let typing: Bool
     let changed: (CGFloat?) -> Void
     func makeUIView(context: Context) -> MobileDiscussionKeyboardViewportView {
         let view = MobileDiscussionKeyboardViewportView()
@@ -303,13 +304,14 @@ private struct MobileDiscussionKeyboardViewport: UIViewRepresentable {
         return view
     }
     func updateUIView(_ view: MobileDiscussionKeyboardViewportView, context: Context) {
-        view.changed = changed; view.measure()
+        view.typing = typing; view.changed = changed; view.measure()
     }
     static func dismantleUIView(_ view: MobileDiscussionKeyboardViewportView, coordinator: ()) { view.changed = nil }
 }
 
 @MainActor
 private final class MobileDiscussionKeyboardViewportView: UIView {
+    var typing = false
     var changed: ((CGFloat?) -> Void)?
     private var keyboardFrame: CGRect?
     private var lastHeight: CGFloat?
@@ -336,9 +338,7 @@ private final class MobileDiscussionKeyboardViewportView: UIView {
             guard let self else { return }
             queued = false
             let height: CGFloat?
-            if let window, window.isKeyWindow, let keyboardFrame, bounds.height > 0 {
-                let keyboard = convert(keyboardFrame, from: window.screen.coordinateSpace)
-                let onScreen = window.convert(keyboardFrame, from: window.screen.coordinateSpace).intersection(window.bounds)
+            if let window, window.isKeyWindow, bounds.height > 0 {
                 // SwiftUI may already end this background at the keyboard. A
                 // zero intersection here still leaves a real keyboard onscreen.
                 // Measure the navigation content's top in the SAME coordinates
@@ -348,9 +348,18 @@ private final class MobileDiscussionKeyboardViewportView: UIView {
                     return controller.children.lazy.compactMap { navigation(in: $0) }.first
                 }
                 let top = window.rootViewController.flatMap { navigation(in: $0) }?.topViewController?.viewIfLoaded
-                let contentTop = top.map { convert($0.safeAreaLayoutGuide.layoutFrame, from: $0).minY } ?? bounds.minY
-                height = onScreen.isNull || onScreen.height <= 0 ? nil :
-                    max(0, min(bounds.maxY, keyboard.minY) - max(bounds.minY, contentTop))
+                let content = top.map { convert($0.safeAreaLayoutGuide.layoutFrame, from: $0) } ?? bounds
+                let keyboard = keyboardFrame.map { convert($0, from: window.screen.coordinateSpace) }
+                let onScreen = keyboardFrame.map { window.convert($0, from: window.screen.coordinateSpace).intersection(window.bounds) }
+                if let keyboard, let onScreen, !onScreen.isNull, onScreen.height > 0 {
+                    height = max(0, min(bounds.maxY, keyboard.minY) - max(bounds.minY, content.minY))
+                } else if typing {
+                    // Hardware-keyboard input and focus before the software
+                    // keyboard arrives still need the navigation-safe budget.
+                    // Reading keeps its original detent and history allocation.
+                    let visible = content.intersection(bounds)
+                    height = visible.isNull ? 0 : max(0, visible.height)
+                } else { height = nil }
             } else { height = nil }
             guard height != lastHeight else { return }
             lastHeight = height; changed?(height)

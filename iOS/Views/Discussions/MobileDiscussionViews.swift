@@ -444,7 +444,6 @@ struct MobileDiscussionMargin: View {
     @Bindable var reader: MobileReaderState
     var includesInspectorPicker = false
     @State private var frames: [String: CGRect] = [:]
-    @State private var showsList = false
     var body: some View {
         VStack(spacing: 12) {
             if includesInspectorPicker {
@@ -456,10 +455,10 @@ struct MobileDiscussionMargin: View {
                     Button("Hide discussions", systemImage: "xmark") { reader.hideDiscussions() }.labelStyle(.iconOnly)
                 }
             }
-            if let key = reader.discussions.selection, !showsList {
+            if let key = reader.discussionRoute {
                 HStack {
                     Button("Back to Discussions", systemImage: "chevron.left") {
-                        reader.backToDiscussionList(); showsList = true
+                        reader.backToDiscussionList()
                     }.font(.subheadline)
                     Spacer(minLength: 0)
                     Menu("Document Actions", systemImage: "ellipsis.circle") { MobileDiscussionFileActions(reader: reader) }
@@ -489,7 +488,7 @@ struct MobileDiscussionMargin: View {
                                 let bottom = previous.map { $0.top + Double(frames[$0.id]?.height ?? 100) } ?? 0
                                 Color.clear.frame(height: max(0, position.top - bottom)).accessibilityHidden(true)
                                 if let thread = indexed[position.id] {
-                                    Button { reader.openDiscussion(thread.id); showsList = false } label: {
+                                    Button { reader.openDiscussion(thread.id) } label: {
                                         MobileDiscussionSummary(reader: reader, thread: thread)
                                     }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
                                         .background(GeometryReader { proxy in Color.clear.preference(key: MobileDiscussionFrames.self,
@@ -498,7 +497,7 @@ struct MobileDiscussionMargin: View {
                             }
                             ForEach(newDrafts, id: \.self) { key in
                                 Button {
-                                    reader.discussions.selection = key; reader.discussionRoute = key; showsList = false
+                                    reader.discussions.selection = key; reader.discussionRoute = key
                                 } label: {
                                     VStack(alignment: .leading, spacing: 12) {
                                         Text("Unposted discussion").font(.headline)
@@ -511,7 +510,6 @@ struct MobileDiscussionMargin: View {
                 }
             }
         }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onChange(of: reader.discussionRoute) { _, route in if route != nil { showsList = false } }
             .coordinateSpace(name: "mobile-discussion-margin")
             .onPreferenceChange(MobileDiscussionFrames.self) { frames = $0 }
     }

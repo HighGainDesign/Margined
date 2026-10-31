@@ -16,11 +16,13 @@ struct MobileDiscussionDraftEditor: UIViewRepresentable {
         view.backgroundColor = .clear
         view.adjustsFontForContentSizeCategory = true
         view.textContainerInset = UIEdgeInsets(top: 6, left: 4, bottom: 6, right: 4)
-        view.delegate = context.coordinator
         view.text = text
         if let selection = reader.discussionComposerSelections[key] {
             view.selectedRange = Self.clamp(selection, length: view.text.utf16.count)
         }
+        // Initial text assignment can emit selection changes. Observe only
+        // after restoring the retained range so it cannot be replaced by EOF.
+        view.delegate = context.coordinator
         return view
     }
     func updateUIView(_ view: UITextView, context: Context) {
