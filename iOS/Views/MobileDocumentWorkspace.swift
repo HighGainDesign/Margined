@@ -337,8 +337,20 @@ private final class MobileDiscussionKeyboardViewportView: UIView {
             queued = false
             let height: CGFloat?
             if let window, window.isKeyWindow, let keyboardFrame, bounds.height > 0 {
-                let occlusion = convert(keyboardFrame, from: window.screen.coordinateSpace).intersection(bounds)
-                height = occlusion.isNull || occlusion.height <= 0 ? nil : max(0, occlusion.minY)
+                let keyboard = convert(keyboardFrame, from: window.screen.coordinateSpace)
+                let onScreen = window.convert(keyboardFrame, from: window.screen.coordinateSpace).intersection(window.bounds)
+                // SwiftUI may already end this background at the keyboard. A
+                // zero intersection here still leaves a real keyboard onscreen.
+                // Measure the navigation content's top in the SAME coordinates
+                // instead of spending a constant assumed navigation-bar height.
+                func navigation(in controller: UIViewController) -> UINavigationController? {
+                    if let owner = controller as? UINavigationController { return owner }
+                    return controller.children.lazy.compactMap { navigation(in: $0) }.first
+                }
+                let top = window.rootViewController.flatMap { navigation(in: $0) }?.topViewController?.viewIfLoaded
+                let contentTop = top.map { convert($0.safeAreaLayoutGuide.layoutFrame, from: $0).minY } ?? bounds.minY
+                height = onScreen.isNull || onScreen.height <= 0 ? nil :
+                    max(0, min(bounds.maxY, keyboard.minY) - max(bounds.minY, contentTop))
             } else { height = nil }
             guard height != lastHeight else { return }
             lastHeight = height; changed?(height)

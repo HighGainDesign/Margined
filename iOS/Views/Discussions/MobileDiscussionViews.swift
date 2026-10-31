@@ -51,10 +51,12 @@ struct MobileCompactDiscussionSheet: View {
     private let document: UUID
     private let layout: UUID
     private let intent: UUID
+    private let version: MobileDiscussionVersion
     @MainActor init(reader: MobileReaderState, availableHeight: CGFloat, navigation: Binding<[MobileDiscussionRoute]>) {
         self.reader = reader; self.availableHeight = availableHeight; self.navigation = navigation
         document = reader.documentGeneration; layout = reader.discussionLayoutGeneration
         intent = reader.discussionPresentationGeneration
+        version = reader.currentDiscussionVersion
     }
     private var isCurrent: Bool {
         document == reader.documentGeneration && layout == reader.discussionLayoutGeneration &&
@@ -64,8 +66,18 @@ struct MobileCompactDiscussionSheet: View {
     private var expanded: Bool { reader.discussionSheetExpanded }
     private var shortTyping: Bool { reader.discussionFocus != nil }
     private var height: CGFloat {
-        let usable = max(0, availableHeight - 48)
+        let usable = max(0, availableHeight - (shortTyping ? 0 : 48))
         return expanded ? usable : min(480, max(0, usable - 160))
+    }
+    private func context(for key: DiscussionSession.DraftKey) -> String {
+        if case let .thread(id) = key {
+            return reader.rendered?.discussions?.threads.first(where: { $0.id == id })?.target.exact ?? ""
+        }
+        return reader.discussions.drafts[key]?.target?.exact ?? ""
+    }
+    private func canReveal(_ key: DiscussionSession.DraftKey) -> Bool {
+        if case let .thread(id) = key { return reader.rendered?.discussionText?.anchorResults[id]?.status == .attached }
+        return reader.discussions.draftAnchor(for: key)?.status == .attached
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -75,11 +87,12 @@ struct MobileCompactDiscussionSheet: View {
                 reader.discussionSheetExpanded.toggle()
             } label: {
                 Image(systemName: expanded ? "chevron.compact.down" : "chevron.compact.up")
-                    .font(.system(size: 16, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 28)
+                    .font(.system(size: 16, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel(expanded ? String(localized: "Collapse discussion") : String(localized: "Expand discussion"))
             .accessibilityValue(expanded ? String(localized: "Expanded") : String(localized: "Collapsed"))
+            .frame(height: shortTyping ? 0 : nil).clipped().accessibilityHidden(shortTyping).allowsHitTesting(!shortTyping)
             .gesture(DragGesture(minimumDistance: 15).onEnded { value in
                 guard isCurrent else { return }
                 reader.endDiscussionEditing()
@@ -88,21 +101,41 @@ struct MobileCompactDiscussionSheet: View {
             HStack(spacing: 12) {
                 if reader.discussionRoute != nil {
                     Button { navigation.wrappedValue = [.list] } label: {
-                        if textSize.isAccessibilitySize, shortTyping { Image(systemName: "chevron.left") }
+                        if shortTyping { Image(systemName: "chevron.left") }
                         else if textSize.isAccessibilitySize { Label("Discussions", systemImage: "chevron.left") }
                         else { Label("Back to Discussions", systemImage: "chevron.left") }
-                    }.accessibilityLabel("Back to Discussions").font(.subheadline)
+                    }.accessibilityLabel("Back to Discussions").font(shortTyping ? .system(size: 17) : .subheadline).frame(minWidth: 44, minHeight: 44)
                 } else {
                     Text("Discussions").font(.headline)
                 }
                 Spacer(minLength: 0)
-                if textSize.isAccessibilitySize, shortTyping { Text("Discussion").font(.caption) }
+                if shortTyping, let key = reader.discussionRoute {
+                    Menu {
+                        Text(verbatim: context(for: key))
+                        Button(expanded ? "Collapse discussion" : "Expand discussion") {
+                            guard isCurrent else { return }
+                            reader.endDiscussionEditing(); reader.discussionSheetExpanded.toggle()
+                        }
+                        if case let .thread(id) = key,
+                           let thread = reader.rendered?.discussions?.threads.first(where: { $0.id == id }) {
+                            MobileDiscussionControls(reader: reader, thread: thread)
+                        }
+                    } label: { Image(systemName: "quote.bubble") }
+                    .accessibilityLabel(String(localized: "Quoted passage") + ", " + context(for: key))
+                    .frame(minWidth: 44, minHeight: 44)
+                    Button("Go to Passage", systemImage: "arrow.up.forward") {
+                        guard isCurrent else { return }
+                        if case let .thread(id) = key { reader.goToDiscussion(id, version: version) }
+                        else { reader.goToDiscussionDraft(key, version: version) }
+                    }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                        .disabled(reader.isRendering || reader.fileSaving || !canReveal(key))
+                }
                 Spacer(minLength: 0)
                 Button { navigation.wrappedValue = [] } label: {
-                    if textSize.isAccessibilitySize { Image(systemName: "xmark") }
+                    if shortTyping || textSize.isAccessibilitySize { Image(systemName: "xmark") }
                     else { Label("Hide", systemImage: "xmark") }
                 }.accessibilityLabel("Hide").frame(minWidth: 44, minHeight: 44)
-            }.padding(.horizontal, 16).frame(minHeight: 44)
+            }.font(shortTyping ? .system(size: 17) : .body).padding(.horizontal, 16).frame(minHeight: 44)
             Divider()
             if let key = reader.discussionRoute {
                 MobileDiscussionThread(reader: reader, key: key, compactSheet: true)
@@ -162,6 +195,7 @@ struct MobileDiscussionThread: View {
                             .disabled(reader.isRendering || reader.fileSaving || reader.discussions.draftAnchor(for: key)?.status != .attached)
                     }
                 }.padding(.horizontal, 16).padding(.top, shortTyping ? 2 : 6)
+                    .frame(height: shortTyping ? 0 : nil).clipped().accessibilityHidden(shortTyping).allowsHitTesting(!shortTyping)
                 if reader.discussionDecision?.key == key || reader.discussionError != nil {
                     MobileDiscussionScrollSection(maxHeight: max(44, geometry.size.height * 0.24)) {
                         MobileDiscussionDecisionView(reader: reader, key: key)
@@ -176,10 +210,10 @@ struct MobileDiscussionThread: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 16)
                 } else { Spacer(minLength: 0) }
                 Divider()
-                MobileDiscussionScrollSection(maxHeight: shortTyping ? max(154, geometry.size.height * 0.40) : max(100, geometry.size.height * (textSize.isAccessibilitySize ? 0.44 : 0.58)),
+                MobileDiscussionScrollSection(maxHeight: shortTyping ? max(124, geometry.size.height * 0.50) : max(100, geometry.size.height * (textSize.isAccessibilitySize ? 0.44 : 0.58)),
                     revealBottom: shortTyping && reader.discussionFocus?.input == .body,
                     revealTop: shortTyping && reader.discussionFocus?.input == .name) {
-                    MobileDiscussionComposer(reader: reader, key: key, compact: compactSheet, shortTyping: shortTyping).padding(.horizontal, 16).padding(.bottom, shortTyping && textSize.isAccessibilitySize ? 8 : 20)
+                    MobileDiscussionComposer(reader: reader, key: key, compact: compactSheet, shortTyping: shortTyping).padding(.horizontal, 16).padding(.bottom, shortTyping ? 4 : 20)
                 }
             }
         }
@@ -189,7 +223,7 @@ struct MobileDiscussionThread: View {
 private struct MobileDiscussionHistoryLabelStyle: LabelStyle {
     let compact: Bool
     @ViewBuilder func makeBody(configuration: Configuration) -> some View {
-        if compact { Label(configuration).labelStyle(.iconOnly) }
+        if compact { Label(configuration).labelStyle(.iconOnly).font(.system(size: 17)) }
         else { Label(configuration).labelStyle(.titleAndIcon) }
     }
 }
@@ -327,47 +361,79 @@ private struct MobileDiscussionComposerFields: View {
         Binding(get: { isCurrent ? reader.discussions.drafts[key]?.body ?? "" : "" },
                 set: { if isCurrent { reader.discussions.setDraft($0, for: key) } })
     }
+    private var fieldLayout: AnyLayout {
+        shortTyping ? AnyLayout(HStackLayout(alignment: .bottom, spacing: 8)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+    }
+    private var actionLayout: AnyLayout {
+        shortTyping ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 0)) : AnyLayout(HStackLayout())
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !compact {
                 Text("This name is saved in the Markdown file. It is not a verified identity.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            TextField("Your name", text: Binding(get: { reader.discussions.displayName },
-                set: { if isCurrent { reader.discussions.displayName = $0 } }))
-                .textFieldStyle(.roundedBorder).textInputAutocapitalization(.words)
-                .accessibilityHint("This name is saved in the Markdown file. It is not a verified identity.")
-                .focused($nameFocused)
-                .onChange(of: nameFocused) { _, focused in
-                    guard isCurrent else { return }
-                    if focused {
-                        reader.discussionFocus = .init(id: nameFocusID, input: .name)
-                        if !reader.discussionUsesMargin { reader.discussionSheetExpanded = true }
-                    } else if reader.discussionFocus?.id == nameFocusID { reader.discussionFocus = nil }
-                }
-                .onChange(of: reader.discussionEditingDismissal) { _, _ in nameFocused = false }
-            MobileDiscussionDraftEditor(reader: reader, key: key, text: bodyBinding, document: documentContext)
-                .frame(minHeight: compact ? 66 : 90, maxHeight: compact ? 100 : 150)
-                .padding(5).background(.background, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
-                .accessibilityLabel(isReply ? "Reply" : "Discussion")
-                .accessibilityHint("Command-Return posts. Return starts a new line.")
-            HStack {
-                if shortTyping {
-                    Button { nameFocused = true } label: {
-                        if reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("Your name") }
-                        else { Text("Reply as \(reader.discussions.displayName)") }
-                    }.font(.caption).lineLimit(1)
+            fieldLayout {
+                VStack(alignment: .leading, spacing: shortTyping ? 0 : 10) {
+                    TextField("Your name", text: Binding(get: { reader.discussions.displayName },
+                        set: { if isCurrent { reader.discussions.displayName = $0 } }))
+                        .textFieldStyle(.roundedBorder).textInputAutocapitalization(.words)
                         .accessibilityHint("This name is saved in the Markdown file. It is not a verified identity.")
-                } else { Text("Replies are saved in this Markdown file.").font(.caption).foregroundStyle(.secondary) }
-                Spacer()
-                Button(isReply ? "Reply" : "Post") {
-                    guard isCurrent, reader.discussionDecision?.key != key else { return }
-                    reader.discussions.selection = key; reader.postDiscussion()
+                        .focused($nameFocused)
+                        .onChange(of: nameFocused) { _, focused in
+                            guard isCurrent else { return }
+                            if focused {
+                                reader.discussionFocus = .init(id: nameFocusID, input: .name)
+                                if !reader.discussionUsesMargin { reader.discussionSheetExpanded = true }
+                            } else if reader.discussionFocus?.id == nameFocusID { reader.discussionFocus = nil }
+                        }
+                        .onChange(of: reader.discussionEditingDismissal) { _, _ in nameFocused = false }
+                        .frame(height: shortTyping && reader.discussionFocus?.input != .name ? 0 : nil)
+                        .clipped().accessibilityHidden(shortTyping && reader.discussionFocus?.input != .name)
+                        .allowsHitTesting(!shortTyping || reader.discussionFocus?.input == .name)
+                    MobileDiscussionDraftEditor(reader: reader, key: key, text: bodyBinding, document: documentContext)
+                        .frame(minHeight: shortTyping && reader.discussionFocus?.input == .name ? 0 : (compact ? 66 : 90),
+                            maxHeight: shortTyping && reader.discussionFocus?.input == .name ? 0 : (compact ? 100 : 150))
+                        .padding(shortTyping && reader.discussionFocus?.input == .name ? 0 : 5).background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
+                        .accessibilityLabel(isReply ? "Reply" : "Discussion")
+                        .accessibilityHint("Command-Return posts. Return starts a new line.")
+                        .clipped().accessibilityHidden(shortTyping && reader.discussionFocus?.input == .name)
+                        .allowsHitTesting(!shortTyping || reader.discussionFocus?.input != .name)
                 }
-                    .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
-                    .accessibilityHint("Replies are saved in this Markdown file.")
-                    .disabled(!isCurrent || reader.discussionDecision?.key == key || reader.fileSaving || reader.isRendering || reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                actionLayout {
+                    if shortTyping {
+                        Button {
+                            guard isCurrent else { return }
+                            reader.discussionFocus = .init(id: nameFocusID, input: .name)
+                            nameFocused = true
+                        } label: {
+                            Label {
+                                if reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("Your name") }
+                                else { Text("Reply as \(reader.discussions.displayName)") }
+                            } icon: { Image(systemName: "person.crop.circle").font(.system(size: 17)) }
+                                .labelStyle(.iconOnly)
+                        }.font(.caption).lineLimit(1).frame(minWidth: 44, minHeight: 44)
+                            .accessibilityIdentifier("discussion-author-action")
+                            .accessibilityHint("This name is saved in the Markdown file. It is not a verified identity.")
+                    } else { Text("Replies are saved in this Markdown file.").font(.caption).foregroundStyle(.secondary) }
+                    Spacer(minLength: 0).frame(width: shortTyping ? 0 : nil, height: shortTyping ? 0 : nil)
+                    Button {
+                        guard isCurrent, reader.discussionDecision?.key != key else { return }
+                        reader.discussions.selection = key; reader.postDiscussion()
+                    } label: {
+                        ViewThatFits(in: .horizontal) {
+                            Text(isReply ? LocalizedStringKey("Reply") : LocalizedStringKey("Post")).font(.body).fixedSize()
+                            Image(systemName: "paperplane.fill").font(.system(size: 17))
+                        }.frame(maxWidth: shortTyping ? .infinity : nil)
+                    }
+                        .controlSize(shortTyping ? .small : .regular)
+                        .accessibilityLabel(isReply ? Text("Reply") : Text("Post"))
+                        .buttonStyle(.borderedProminent).frame(minWidth: 44, minHeight: 44)
+                        .accessibilityIdentifier("discussion-post-action").keyboardShortcut(.return, modifiers: .command)
+                        .accessibilityHint("Replies are saved in this Markdown file.")
+                        .disabled(!isCurrent || reader.discussionDecision?.key == key || reader.fileSaving || reader.isRendering || reader.discussions.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bodyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.frame(width: shortTyping ? 190 : nil)
             }
         }
     }

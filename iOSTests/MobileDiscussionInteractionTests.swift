@@ -35,13 +35,15 @@ import XCTest
     }
 
     func testCompactTypingExpandsAboveTheActualKeyboardAndGoToPassageRetainsCaret() async throws {
-        let f = try await fixture(withThread: true)
+        let f = try await fixture(withThread: true, useNativeSceneBounds: true)
         f.reader.discussions.displayName = "Reader"
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("Keep this reply and its caret.", for: .thread("t-mobile"))
         let mounted = await poll { self.editor(in: f.host.view)?.text == "Keep this reply and its caret." }
         XCTAssertTrue(mounted); guard mounted else { return }
-        let editor = try XCTUnwrap(self.editor(in: f.host.view))
+        let navigationReady = await settledNavigation(f)
+        XCTAssertTrue(navigationReady, "Establish the actual native navigation before selecting its live editor")
+        let editor = try XCTUnwrap(self.visibleEditor(in: f.host.view))
         let readingHeight = f.web.bounds.height
         let keyboardObservation = MobileKeyboardFrameObservation(window: f.window)
         editor.selectedRange = NSRange(location: 5, length: 4)
@@ -53,9 +55,11 @@ import XCTest
                 (self.history(in: f.host.view, excluding: f.web)?.bounds.height ?? 0) > 20
         }
         if !typing {
+            try await recordDuoGeometry(f, keyboard: keyboardObservation, phase: "compact-typing")
             print("SHEET-KEYBOARD window=\(f.window.bounds) host=\(f.host.view.bounds) readingBefore=\(readingHeight) reader=\(f.web.bounds) editor=\(editor.convert(editor.bounds, to: f.window)) keyboard=\(keyboardObservation.frame) expanded=\(f.reader.discussionSheetExpanded) focused=\(editor.isFirstResponder)")
         }
         XCTAssertTrue(typing, "The real focused editor must expand the discussion above the real keyboard")
+        XCTAssertTrue(self.visibleEditor(in: f.host.view) === editor, "Adaptive typing must retain its actual native draft editor")
         recordSheetEvidence(f, name: "Sheet-typing-keyboard", keyboard: keyboardObservation.frame)
         let replyBounds = try XCTUnwrap(recognizedBounds("Reply", in: f.window), "The actual Reply button stays visible while typing")
         XCTAssertLessThanOrEqual(replyBounds.maxY, keyboardObservation.frame.minY + 1)
@@ -68,6 +72,51 @@ import XCTest
         XCTAssertTrue(restored)
         XCTAssertEqual(self.editor(in: f.host.view)?.selectedRange, NSRange(location: 5, length: 4))
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testTypingRetainsNativeNameAndBodyEditorsAcrossAuthorEditingWithoutLosingDraftOrCaret() async throws {
+        let f = try await fixture(withThread: true, useNativeSceneBounds: true)
+        f.reader.discussions.displayName = "Reader"
+        f.reader.openDiscussion("t-mobile")
+        let draft = "Keep this author-editing draft and caret."
+        f.reader.discussions.setDraft(draft, for: .thread("t-mobile"))
+        let mounted = await poll { self.visibleEditor(in: f.host.view)?.text == draft }
+        XCTAssertTrue(mounted); guard mounted else { return }
+        let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        let body = try XCTUnwrap(visibleEditor(in: f.host.view))
+        let name = try XCTUnwrap(nameField(in: f.host.view))
+        let selection = NSRange(location: 5, length: 4)
+        body.selectedRange = selection
+        let keyboard = MobileKeyboardFrameObservation(window: f.window)
+        XCTAssertTrue(body.becomeFirstResponder())
+        let typing = await poll { keyboard.frame.height > 100 && body.isFirstResponder && f.reader.discussionFocus?.input == .body }
+        XCTAssertTrue(typing)
+        // This unit host exposes no SwiftUI virtual accessibility elements.
+        // Exercise native field focus here; actual author-action tap/AX remains
+        // an app UI verification, not a claim made by this host test.
+        XCTAssertTrue(name.becomeFirstResponder())
+        let editingName = await poll {
+            name.isFirstResponder && f.reader.discussionFocus?.input == .name &&
+                name.convert(name.bounds, to: f.window).height > 20 &&
+                name.convert(name.bounds, to: f.window).maxY <= keyboard.frame.minY + 1
+        }
+        XCTAssertTrue(editingName)
+        XCTAssertTrue(nameField(in: f.host.view) === name)
+        XCTAssertTrue(editor(in: f.host.view) === body)
+        name.text = "Updated Author"; name.sendActions(for: .editingChanged)
+        let renamed = await poll { f.reader.discussions.displayName == "Updated Author" }
+        XCTAssertTrue(renamed)
+        XCTAssertTrue(body.becomeFirstResponder())
+        let returned = await poll {
+            body.isFirstResponder && f.reader.discussionFocus?.input == .body &&
+                body.convert(body.bounds, to: f.window).height >= 66 &&
+                body.convert(body.bounds, to: f.window).maxY <= keyboard.frame.minY + 1
+        }
+        XCTAssertTrue(returned)
+        XCTAssertTrue(editor(in: f.host.view) === body)
+        XCTAssertEqual(body.text, draft); XCTAssertEqual(body.selectedRange, selection)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        body.resignFirstResponder()
     }
 
     func testDiscussionHistoryRetainsItsSemanticPositionAcrossHideAndWidthChanges() async throws {
@@ -206,8 +255,8 @@ import XCTest
     }
 
     func testLargestTextTypingKeepsCaretReplyAndACompleteMessageLineAboveTheKeyboard() async throws {
-        let f = try await fixture(withThread: true)
-        f.window.frame.size = CGSize(width: 402, height: 874)
+        let f = try await fixture(withThread: true, useNativeSceneBounds: true)
+        f.window.frame = try XCTUnwrap(f.window.windowScene).coordinateSpace.bounds
         f.host.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         f.reader.discussions.displayName = "Reader"
@@ -221,6 +270,7 @@ import XCTest
         editor.selectedRange = NSRange(location: 5, length: 4)
         XCTAssertTrue(editor.becomeFirstResponder())
         let typing = await poll { keyboard.frame.height > 100 && editor.isFirstResponder && editor.convert(editor.bounds, to: f.window).maxY <= keyboard.frame.minY + 1 }
+        if !typing { try await recordDuoGeometry(f, keyboard: keyboard, phase: "largest-typing") }
         XCTAssertTrue(typing)
         let history = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
         let loaded = await pollAsync {
@@ -232,13 +282,20 @@ import XCTest
             try await history.evaluateJavaScript("(()=>{const p=document.querySelector('article .discussion-message-body p'),r=document.createRange();r.selectNodeContents(p);return Array.from(r.getClientRects()).some(b=>b.top>=0 && b.bottom<=innerHeight);})()") as? Bool == true
         }
         if !lineVisible {
+            try await recordDuoGeometry(f, keyboard: keyboard, phase: "largest-line")
             let metrics = try await history.evaluateJavaScript("(()=>{const p=document.querySelector('article .discussion-message-body p'),r=document.createRange();r.selectNodeContents(p);return {height:innerHeight,font:document.body.style.fontSize,lines:Array.from(r.getClientRects()).map(b=>({top:b.top,bottom:b.bottom,height:b.height}))};})()")
             print("COMBINED-LINE \(String(describing: metrics)) native=\(history.convert(history.bounds, to: f.window)) editor=\(editor.convert(editor.bounds, to: f.window)) keyboard=\(keyboard.frame)")
         }
         XCTAssertTrue(lineVisible, "Largest text and the real keyboard must still allow one complete saved-message line")
+        XCTAssertTrue(self.visibleEditor(in: f.host.view) === editor, "Largest-text adaptation must retain its actual native draft editor")
         let historyFrame = history.convert(history.bounds, to: f.window)
         XCTAssertGreaterThanOrEqual(historyFrame.minY, f.window.bounds.minY)
         XCTAssertLessThanOrEqual(historyFrame.maxY, keyboard.frame.minY + 1)
+        if try recognizedBounds("Reply", in: f.window) == nil {
+            recordSheetEvidence(f, name: "Largest-Reply-fit-failure", keyboard: keyboard.frame)
+            let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: f.host.traitCollection)
+            print("REPLY-FIT font=\(font.pointSize) text=\(("Reply" as NSString).size(withAttributes:[.font:font])) OCR=\(try recognizedText(in:f.window))")
+        }
         let replyBounds = try XCTUnwrap(recognizedBounds("Reply", in: f.window), "The actual Reply button remains visible at largest text while typing")
         XCTAssertLessThanOrEqual(replyBounds.maxY, keyboard.frame.minY + 1)
         XCTAssertGreaterThanOrEqual(editor.font?.pointSize ?? 0, 35)
@@ -467,6 +524,64 @@ import XCTest
         let text = try recognizedText(in: f.window)
         XCTAssertTrue(text.contains("Go to Passage"), "A visible discussion needs a route to its actual passage: \(text)")
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    private func recordDuoGeometry(_ f: Fixture, keyboard: MobileKeyboardFrameObservation, phase: String) async throws {
+        let window=f.window,screen=window.screen,root=f.host.view!
+        func frame(_ view:UIView)->String { String(describing:view.convert(view.bounds,to:window)) }
+        func all(_ view:UIView)->[UIView] { [view]+view.subviews.flatMap(all) }
+        func dom(_ web:WKWebView,world:WKContentWorld) async throws -> Any {
+            try await web.callAsyncJavaScript("""
+            const r=document.querySelector('main')?.getBoundingClientRect();
+            return {innerWidth,innerHeight,y:scrollY,client:document.documentElement.clientWidth,pageHeight:document.documentElement.scrollHeight,
+                visual:visualViewport?{width:visualViewport.width,height:visualViewport.height,top:visualViewport.offsetTop,scale:visualViewport.scale}:null,
+                font:document.body.style.fontSize,main:r?{top:r.top,bottom:r.bottom,width:r.width}:null,
+                historyToken:document.documentElement.getAttribute('data-margined-history-token'),mobileToken:document.documentElement.getAttribute('data-margined-mobile-token'),
+                observing:typeof window.marginedReadingResize?.stop==='function',articles:document.querySelectorAll('article').length};
+            """,arguments:[:],in:nil,contentWorld:world) ?? NSNull()
+        }
+        var data:[String:Any]=["phase":phase,"windowFrame":String(describing:window.frame),"windowBounds":String(describing:window.bounds),
+            "windowTransform":String(describing:window.transform),"windowSafe":String(describing:window.safeAreaInsets),"key":window.isKeyWindow,"hidden":window.isHidden,
+            "windowOnScreen":String(describing:window.convert(window.bounds,to:screen.coordinateSpace)),"screen":String(describing:screen.bounds),
+            "screenCoordinate":String(describing:screen.coordinateSpace.bounds),"screenFixed":String(describing:screen.fixedCoordinateSpace.bounds),"nativeScreen":String(describing:screen.nativeBounds),
+            "sceneBounds":String(describing:window.windowScene?.coordinateSpace.bounds),"sceneID":window.windowScene?.session.persistentIdentifier ?? "none","orientation":window.windowScene?.interfaceOrientation.rawValue ?? -1,
+            "hostFrame":String(describing:root.frame),"hostBounds":String(describing:root.bounds),"hostSafe":String(describing:root.safeAreaInsets),"hostTransform":String(describing:root.transform),
+            "windowKeyboardGuide":String(describing:window.keyboardLayoutGuide.layoutFrame),"hostKeyboardGuide":String(describing:root.convert(root.keyboardLayoutGuide.layoutFrame,to:window)),
+            "notificationFrame":String(describing:keyboard.frame),"notifications":keyboard.diagnostics,
+            "readerFrame":frame(f.web),"readerBounds":String(describing:f.web.bounds),"readerSafe":String(describing:f.web.safeAreaInsets),
+            "expanded":f.reader.discussionSheetExpanded,"focus":String(describing:f.reader.discussionFocus)]
+        func nav(_ controller:UIViewController)->UINavigationController? {
+            if let value=controller as? UINavigationController{return value}
+            return controller.children.lazy.compactMap(nav).first
+        }
+        if let navigation=nav(f.host),let top=navigation.topViewController?.viewIfLoaded {
+            data["navigation"]=["frame":frame(navigation.view),"bounds":String(describing:navigation.view.bounds),"safe":String(describing:navigation.view.safeAreaInsets),
+                "topFrame":frame(top),"topBounds":String(describing:top.bounds),"topSafe":String(describing:top.safeAreaInsets),"topSafeFrame":String(describing:top.convert(top.safeAreaLayoutGuide.layoutFrame,to:window)),
+                "topKeyboardGuide":String(describing:top.convert(top.keyboardLayoutGuide.layoutFrame,to:window)),"transition":navigation.transitionCoordinator != nil]
+        }
+        data["generation"]=["document":String(describing:f.reader.documentGeneration),"layout":String(describing:f.reader.discussionLayoutGeneration),"intent":String(describing:f.reader.discussionPresentationGeneration),"route":String(describing:f.reader.discussionRoute)]
+        data["allEditors"]=all(root).compactMap{view->[String:Any]? in
+            guard let editor=view as? UITextView,editor.isEditable else{return nil}
+            return ["id":String(describing:ObjectIdentifier(editor)),"first":editor.isFirstResponder,"frame":frame(editor),"hidden":editor.isHidden,"ownedWindow":editor.window===window]
+        }
+        data["identifiedViews"]=all(root).filter{$0.accessibilityIdentifier=="compact-discussion-sheet" || $0 is UITextField || ($0.accessibilityIdentifier?.hasPrefix("discussion-") == true)}.prefix(12).map{view in
+            ["class":String(describing:type(of:view)),"id":view.accessibilityIdentifier ?? "none","label":view.accessibilityLabel ?? "none","frame":frame(view)]
+        }
+        data["scenes"]=UIApplication.shared.connectedScenes.compactMap{$0 as? UIWindowScene}.map{scene in
+            ["id":scene.session.persistentIdentifier,"activation":scene.activationState.rawValue,"orientation":scene.interfaceOrientation.rawValue,"bounds":String(describing:scene.coordinateSpace.bounds),"keyOwned":scene.keyWindow===window] as [String:Any]
+        }
+        data["keyboardHelpers"]=all(root).filter{String(describing:type(of:$0)).contains("MobileDiscussionKeyboardViewportView")}.map{view in
+            ["class":String(describing:type(of:view)),"frame":frame(view),"bounds":String(describing:view.bounds),"safe":String(describing:view.safeAreaInsets),
+             "ownedWindow":view.window===window,"occlusion":keyboard.lastScreenFrame.map{String(describing:view.convert($0,from:screen.coordinateSpace).intersection(view.bounds))} ?? "none"] as [String:Any]
+        }
+        if let editor=editor(in:root) {data["editor"]=["frame":frame(editor),"bounds":String(describing:editor.bounds),"safe":String(describing:editor.safeAreaInsets),"first":editor.isFirstResponder,"ownedWindow":editor.window===window,"font":editor.font?.pointSize ?? -1]}
+        if let history=history(in:root,excluding:f.web) {
+            data["history"]=["frame":frame(history),"bounds":String(describing:history.bounds),"safe":String(describing:history.safeAreaInsets),
+                "scrollBounds":String(describing:history.scrollView.bounds),"scrollContent":String(describing:history.scrollView.contentSize),"scrollOffset":String(describing:history.scrollView.contentOffset),"scrollAdjusted":String(describing:history.scrollView.adjustedContentInset)]
+            data["historyDOM"]=try await dom(history,world:.world(name:"MarginedDiscussionHistory"))
+        }
+        data["readerDOM"]=try await dom(f.web,world:MobileWebView.Coordinator.contentWorld)
+        let encoded=try JSONSerialization.data(withJSONObject:data,options:[.sortedKeys]);print("DUO-MOBILE "+String(decoding:encoded,as:UTF8.self))
     }
 
     private func recordSheetEvidence(_ fixture: Fixture, name: String, keyboard: CGRect? = nil) {
@@ -1875,7 +1990,7 @@ import XCTest
     }
 
     func testNativeHistoryRefreshKeepsItsPageReadingPositionAndFocusedDraft() async throws {
-        let f = try await fixture(withThread: true)
+        let f = try await fixture(withThread: true, useNativeSceneBounds: true)
         let paragraphs = (0..<45).map { "History paragraph \($0) stays readable." }.joined(separator: "\n\n")
         _ = try appendHistoryReply(paragraphs, id: "m-long", file: f.file, threadID: "t-mobile")
         await f.reader.refresh(); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
@@ -1900,6 +2015,7 @@ import XCTest
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         let scrolled = await pollAsync { try await history.evaluateJavaScript("scrollY>=159 && scrollY<=161") as? Bool == true }
+        if !scrolled { try await recordDuoGeometry(f, keyboard: keyboard, phase: "refresh-scroll") }
         XCTAssertTrue(scrolled, "Establish an actual scrolled history with its native editor focused before refreshing")
         guard scrolled else { return }
         _ = try await history.evaluateJavaScript("window.historyPage=document;true")
@@ -2005,7 +2121,7 @@ import XCTest
         let host: UIHostingController<MobileDocumentWorkspace>
         let web: WKWebView
     }
-    private func fixture(withThread: Bool = false, tail: String = "") async throws -> Fixture {
+    private func fixture(withThread: Bool = false, useNativeSceneBounds: Bool = false, tail: String = "") async throws -> Fixture {
         var source = "# Plan\n\nBefore.\n\nCafe\u{301} **bold** passage.\n\nAfter.\n" + tail
         if withThread {
             let thread = DiscussionThread(id: "t-mobile", state: .open,
@@ -2023,7 +2139,7 @@ import XCTest
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let host = UIHostingController(rootView: MobileDocumentWorkspace(reader: reader, openFolder: {}, closeFile: {}))
         let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 390, height: 780)
+        window.frame = useNativeSceneBounds ? scene.coordinateSpace.bounds : CGRect(x: 0, y: 0, width: 390, height: 780)
         window.rootViewController = host; window.makeKeyAndVisible(); host.loadViewIfNeeded(); host.view.layoutIfNeeded()
         addTeardownBlock { @MainActor in
             reader.discussions.discardDrafts(); await reader.close()
@@ -2105,14 +2221,27 @@ private final class MobileHistoryImageRequest: NSObject, WKURLSchemeTask {
 private final class MobileKeyboardFrameObservation: NSObject {
     let window: UIWindow
     private(set) var frame = CGRect.zero
+    private(set) var lastScreenFrame: CGRect?
+    private(set) var diagnostics: [[String:Any]] = []
     init(window: UIWindow) {
         self.window = window
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(changed(_:)),
             name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(willChange(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+    }
+    @objc private func willChange(_ notification: Notification) { record(notification) }
+    private func record(_ notification:Notification) {
+        let info=notification.userInfo ?? [:]
+        func responders(_ view:UIView)->[String] { (view.isFirstResponder ? ["\(type(of:view)):\(ObjectIdentifier(view))"] : [])+view.subviews.flatMap(responders) }
+        diagnostics.append(["responders":responders(window),"name":notification.name.rawValue,"begin":String(describing:info[UIResponder.keyboardFrameBeginUserInfoKey]),
+            "end":String(describing:info[UIResponder.keyboardFrameEndUserInfoKey]),"local":String(describing:info[UIResponder.keyboardIsLocalUserInfoKey]),
+            "object":String(describing:notification.object.map{type(of:$0)}),"key":window.isKeyWindow,"scene":window.windowScene?.session.persistentIdentifier ?? "none"])
+        if diagnostics.count>12 {diagnostics.removeFirst()}
     }
     @objc private func changed(_ notification: Notification) {
         guard let screen = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        lastScreenFrame=screen;record(notification)
         frame = window.convert(screen, from: window.screen.coordinateSpace).intersection(window.bounds)
     }
     deinit { NotificationCenter.default.removeObserver(self) }

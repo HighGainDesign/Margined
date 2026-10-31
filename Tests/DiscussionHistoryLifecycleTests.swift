@@ -112,8 +112,10 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         try await reveal("history-p22", in: web)
         resize(web, to: CGSize(width: 500, height: 400))
         let firstResize = await poll {
-            try await web.evaluateJavaScript("innerWidth===500 && window.resizingHistoryDocument===document && Math.abs(document.getElementById('history-p22').getBoundingClientRect().top-24)<2") as? Bool == true
+            guard web.bounds.width == 500 else { return false }
+            return try await web.callAsyncJavaScript("return Math.abs(innerWidth-expectedWidth)<1 && window.resizingHistoryDocument===document && Math.abs(document.getElementById('history-p22').getBoundingClientRect().top-24)<2", arguments: ["expectedWidth": self.layoutViewportWidth(web)], in: nil, contentWorld: .page) as? Bool == true
         }
+        if !firstResize { try await recordDuoHistoryGeometry(web, coordinator: coordinator, phase: "first500", navigations: navigation.completions) }
         XCTAssertTrue(firstResize, "The history token must authorize its own same-mounted resize observer after scrolling")
 
         let latest = first.replacingOccurrences(of: "</main>", with: "<p id='new-message'>Appended saved message.</p></main>")
@@ -127,18 +129,21 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
             guard web.bounds.width == 500 else { return false }
             return try await web.callAsyncJavaScript("""
             const target=document.getElementById('history-p32');
-            const visible=()=>innerWidth===500 && document.documentElement.clientWidth>0 && Math.abs(document.getElementById('document').getBoundingClientRect().width-document.documentElement.clientWidth)<1 &&
+            const visible=()=>Math.abs(innerWidth-expectedWidth)<1 && document.documentElement.clientWidth>0 && Math.abs(document.getElementById('document').getBoundingClientRect().width-document.documentElement.clientWidth)<1 &&
                 Math.abs(target.getBoundingClientRect().top-24)<2 && document.elementFromPoint(document.documentElement.clientWidth/2,24)?.closest('p')===target;
             if(!visible())return false;
             await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
             return visible();
-            """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory")) as? Bool == true
+            """, arguments: ["expectedWidth": self.layoutViewportWidth(web)], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory")) as? Bool == true
         }
+        if !established { try await recordDuoHistoryGeometry(web, coordinator: coordinator, phase: "establish500", navigations: navigation.completions) }
         XCTAssertTrue(established, "Establish the actual visible paragraph and native 500-point layout before resizing it")
         resize(web, to: CGSize(width: 390, height: 400))
         let renewed = await poll {
-            try await web.evaluateJavaScript("innerWidth===390 && window.resizingHistoryDocument===document && Math.abs(document.getElementById('history-p32').getBoundingClientRect().top-24)<2") as? Bool == true
+            guard web.bounds.width == 390 else { return false }
+            return try await web.callAsyncJavaScript("return Math.abs(innerWidth-expectedWidth)<1 && window.resizingHistoryDocument===document && Math.abs(document.getElementById('history-p32').getBoundingClientRect().top-24)<2", arguments: ["expectedWidth": self.layoutViewportWidth(web)], in: nil, contentWorld: .page) as? Bool == true
         }
+        if !renewed { try await recordDuoHistoryGeometry(web, coordinator: coordinator, phase: "renew390", navigations: navigation.completions) }
         XCTAssertTrue(renewed, "In-place history-token updates must renew the resize lease before later scrolling/reflow")
         XCTAssertEqual(navigation.completions, 1, "The renewal must retain its original native navigation")
     }
@@ -380,6 +385,42 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
     private func disclosureHTML() -> String {
         let long = (0..<16).map { "Saved line \($0).<br>" }.joined() + "Tail preserved <a id='hidden-link' href='#latest'>Offscreen saved link</a>"
         return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>html{overflow-anchor:none}body{margin:0;font-size:16px;line-height:24px}main{padding:16px}article{margin-bottom:24px}.discussion-message-body{line-height:24px}</style></head><body><main id='document'><article id='older' data-message-id='older'><header>Earlier author</header><div class='discussion-message-body' data-margined-speech='saved-body'>" + long + "</div></article><article id='boundary' data-message-id='boundary'><div class='discussion-message-body'>One<br>Two<br>Three<br>Four<br>Five<br>Six<br>Seven<br>Eight</div></article><article id='latest' data-message-id='latest'><header>Latest author</header><div class='discussion-message-body'><a href='#older'>Earlier comment</a><p>Latest text</p>" + long + "</div></article>" + (0..<30).map { "<p id='tail-\($0)'>Following paragraph \($0).</p>" }.joined() + "<p id='tail-anchor'>Retained reading anchor.</p><div style='height:800px'></div></main></body></html>"
+    }
+
+    private func layoutViewportWidth(_ web: WKWebView) -> CGFloat {
+        #if os(iOS)
+        // The public native safe-area insets predict CSS layout independently;
+        // Duo's sidebar can consume part of the requested native window width.
+        return web.scrollView.bounds.width - web.scrollView.adjustedContentInset.left - web.scrollView.adjustedContentInset.right
+        #else
+        return web.bounds.width
+        #endif
+    }
+
+    private func recordDuoHistoryGeometry(_ web: WKWebView, coordinator: DiscussionHistoryCoordinator, phase: String, navigations: Int) async throws {
+        #if os(iOS)
+        let window = try XCTUnwrap(web.window), screen = window.screen
+        var data: [String: Any] = ["phase":phase,"navigationCompletions":navigations,
+            "windowFrame":String(describing:window.frame),"windowBounds":String(describing:window.bounds),"windowTransform":String(describing:window.transform),
+            "windowSafe":String(describing:window.safeAreaInsets),"key":window.isKeyWindow,
+            "sceneBounds":String(describing:window.windowScene?.coordinateSpace.bounds),"orientation":window.windowScene?.interfaceOrientation.rawValue ?? -1,
+            "screenBounds":String(describing:screen.bounds),"screenCoordinate":String(describing:screen.coordinateSpace.bounds),"screenFixed":String(describing:screen.fixedCoordinateSpace.bounds),
+            "webFrame":String(describing:web.frame),"webBounds":String(describing:web.bounds),"webSafe":String(describing:web.safeAreaInsets),
+            "scrollFrame":String(describing:web.scrollView.frame),"scrollBounds":String(describing:web.scrollView.bounds),"scrollInset":String(describing:web.scrollView.contentInset),
+            "scrollAdjusted":String(describing:web.scrollView.adjustedContentInset),"scrollOffset":String(describing:web.scrollView.contentOffset),"scrollContent":String(describing:web.scrollView.contentSize),
+            "scrollZoom":web.scrollView.zoomScale,"pageZoom":web.pageZoom]
+        data["pageIdentity"] = try await web.evaluateJavaScript("window.resizingHistoryDocument===document")
+        data["coordinator"] = Mirror(reflecting:coordinator).children.filter{["ready","generation","reconciliationGeneration","presentationRestore","token"].contains($0.label ?? "")}.map{"\($0.label ?? "")=\($0.value)"}.joined(separator:",")
+        data["dom"] = try await web.callAsyncJavaScript("""
+        const rect=id=>{const r=document.getElementById(id)?.getBoundingClientRect();return r?{top:r.top,bottom:r.bottom,width:r.width,height:r.height}:null};
+        return {innerWidth,innerHeight,x:scrollX,y:scrollY,clientWidth:document.documentElement.clientWidth,clientHeight:document.documentElement.clientHeight,
+            visual:visualViewport?{width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale,top:visualViewport.offsetTop}:null,
+            main:rect('document'),p22:rect('history-p22'),p32:rect('history-p32'),font:document.body.style.fontSize,
+            token:document.documentElement.getAttribute('data-margined-history-token'),observing:typeof window.marginedReadingResize?.stop==='function',
+            hit24:document.elementFromPoint(document.documentElement.clientWidth/2,24)?.closest('p')?.id??null};
+        """, arguments:[:],in:nil,contentWorld:.world(name:"MarginedDiscussionHistory"))
+        let encoded=try JSONSerialization.data(withJSONObject:data,options:[.sortedKeys]);print("DUO-HISTORY "+String(decoding:encoded,as:UTF8.self))
+        #endif
     }
 
     private func historyHTML() -> String {
