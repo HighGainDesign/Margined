@@ -53,7 +53,7 @@ extension MobileReaderState {
             switch newValue.last {
             case .thread(let key): inspector = .discussions; discussionRoute = key; discussions.selection = key
             case .list: inspector = .discussions; discussionRoute = nil
-            case nil: inspector = nil; discussionRoute = nil
+            case nil: hideDiscussions()
             }
         }
     }
@@ -219,7 +219,7 @@ extension MobileReaderState {
             threadID: "", selectionRange: range)
     }
     func backToDiscussionList() { endDiscussionEditing(); discussionRoute = nil; inspector = .discussions }
-    func hideDiscussions() { endDiscussionEditing(); inspector = nil; discussionRoute = nil; discussionSheetExpanded = false }
+    func hideDiscussions() { endDiscussionEditing(); inspector = nil; discussionSheetExpanded = false }
     func acceptDiscussionMargin(_ value: DiscussionMarginSnapshot) {
         guard value.sourceID == rendered?.discussionText?.sourceID else { return }
         discussionMargin = value

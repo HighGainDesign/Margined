@@ -726,43 +726,82 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), replacement)
     }
 
-    func testDockedHistoryReopensWithoutRepairingTheClearedCompactRoute() async throws {
+    func testHideReopensTheRetainedThreadWhileBackKeepsTheListAcrossWidths() async throws {
         let f = try await fixture(withThread: true)
-        f.window.frame.size = CGSize(width: 1120, height: 780)
-        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
-        let wide = await settledNavigation(f); XCTAssertTrue(wide)
-        f.reader.openDiscussion("t-mobile")
-        f.reader.discussions.setDraft("Keep my unposted reply.", for: .thread("t-mobile"))
-        let initial = await pollAsync {
-            guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
-            return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+        let key = DiscussionSession.DraftKey.thread("t-mobile")
+        let draft = "Keep my unposted reply."
+        let caret = NSRange(location: 5, length: 3)
+        let historyPosition = f.reader.discussionHistoryPosition(for: "t-mobile")
+        let document = f.reader.documentGeneration
+        _ = try await f.web.evaluateJavaScript("window.hideDiscussionReadingPage=document;true")
+        f.reader.discussions.filter = .all
+        for width in [CGFloat(1120), CGFloat(390)] {
+            f.window.frame.size = CGSize(width: width, height: 780)
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled)
+            XCTAssertEqual(f.reader.discussionUsesMargin, width == 1120)
+            f.reader.openDiscussion("t-mobile")
+            f.reader.discussions.setDraft(draft, for: key)
+            let initial = await pollAsync {
+                guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
+                return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+            }
+            XCTAssertTrue(initial); guard initial else { return }
+            let editor = try XCTUnwrap(self.editor(in: f.host.view))
+            editor.selectedRange = caret; editor.delegate?.textViewDidChangeSelection?(editor)
+            let workspace = MobileDocumentWorkspace(reader: f.reader, openFolder: {}, closeFile: {})
+            let old = workspace.navigationBinding()
+            let presentation = f.reader.discussionPresentationGeneration
+            if f.reader.discussionUsesMargin { f.reader.hideDiscussions() }
+            else { workspace.navigationBinding().wrappedValue = [] }
+            let hidden = await poll { self.history(in: f.host.view, excluding: f.web) == nil }
+            XCTAssertTrue(hidden)
+            XCTAssertNil(f.reader.inspector)
+            XCTAssertEqual(f.reader.discussionRoute, key, "Hide must retain thread intent at width \(width)")
+            XCTAssertNotEqual(f.reader.discussionPresentationGeneration, presentation, "Hide invalidates queued native bindings even when retaining its route")
+            f.reader.inspector = .discussions
+            let reopened = await pollAsync {
+                guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
+                return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+            }
+            XCTAssertTrue(reopened, "Hide/show must reload retained history without another openDiscussion call at width \(width)")
+            XCTAssertEqual(self.editor(in: f.host.view)?.selectedRange, caret)
+            old.wrappedValue = []
+            XCTAssertEqual(f.reader.inspector, .discussions, "A pre-Hide binding cannot dismiss the reopened inspector")
+            XCTAssertEqual(f.reader.discussionRoute, key)
+            XCTAssertTrue(f.reader.discussionHistoryPosition(for: "t-mobile") === historyPosition)
+            XCTAssertEqual(f.reader.discussions.drafts[key]?.body, draft)
+            XCTAssertEqual(f.reader.discussionComposerSelections[key], caret)
         }
-        XCTAssertTrue(initial); guard initial else { return }
-        f.reader.hideDiscussions()
-        let hidden = await poll { self.history(in: f.host.view, excluding: f.web) == nil }
-        XCTAssertTrue(hidden); XCTAssertNil(f.reader.discussionRoute)
-        f.reader.inspector = .discussions
-        let reopened = await pollAsync {
-            guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
-            return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
-        }
-        XCTAssertTrue(reopened, "The visible selected history must load after hiding and reopening without another openDiscussion call")
-        f.window.frame.size = CGSize(width: 390, height: 780)
-        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
-        let compact = await settledNavigation(f); XCTAssertTrue(compact)
         f.reader.backToDiscussionList()
-        let list = await settledNavigation(f); XCTAssertTrue(list)
-        f.window.frame.size = CGSize(width: 1120, height: 780)
-        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
-        let restored = await settledNavigation(f); XCTAssertTrue(restored)
-        let widened = await pollAsync {
-            guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
-            return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
+        for width in [CGFloat(390), CGFloat(1120)] {
+            f.window.frame.size = CGSize(width: width, height: 780)
+            f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+            let settled = await settledNavigation(f); XCTAssertTrue(settled)
+            let list = await poll { self.editor(in: f.host.view) == nil && self.history(in: f.host.view, excluding: f.web) == nil }
+            XCTAssertTrue(list, "Back remains the list at width \(width)")
+            XCTAssertTrue(try recognizedText(in: f.window).contains("All"), "The actual discussion filter must be visible")
+            XCTAssertNil(f.reader.discussionRoute)
+            f.reader.hideDiscussions(); f.reader.inspector = .discussions
+            let shown = await settledNavigation(f); XCTAssertTrue(shown)
+            XCTAssertNil(f.reader.discussionRoute, "Hiding a list must retain list intent")
+            XCTAssertNil(self.editor(in: f.host.view))
         }
-        XCTAssertTrue(widened, "Compact Back and widening must restore selected history without repairing the route")
-        XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "Keep my unposted reply.")
+        XCTAssertEqual(f.reader.discussions.selection, key)
+        XCTAssertEqual(f.reader.discussions.drafts[key]?.body, draft)
+        XCTAssertEqual(f.reader.discussionComposerSelections[key], caret)
         XCTAssertTrue(self.webView(in: f.host.view) === f.web)
+        let samePage = try await f.web.evaluateJavaScript("window.hideDiscussionReadingPage===document") as? Bool
+        XCTAssertEqual(samePage, true)
+        XCTAssertEqual(Data(f.reader.source.utf8), f.original)
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+        let oldDocument = MobileDocumentWorkspace(reader: f.reader, openFolder: {}, closeFile: {}).navigationBinding()
+        f.reader.discussions.discardDrafts(); await f.reader.close()
+        oldDocument.wrappedValue = [.thread(key)]
+        XCTAssertNotEqual(f.reader.documentGeneration, document)
+        XCTAssertNil(f.reader.inspector); XCTAssertNil(f.reader.discussionRoute)
+        XCTAssertTrue(f.reader.discussionComposerSelections.isEmpty)
+        XCTAssertTrue(f.reader.discussionHistoryPositions.isEmpty)
     }
 
     func testCurrentFileDiagnosticsAreVisibleInCompactAndDockedDiscussions() async throws {
