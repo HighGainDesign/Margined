@@ -8,6 +8,7 @@ struct MobileSetupGuide: View {
     @Bindable var tutorial: TutorialSession
     var openPractice: (TutorialLesson) -> Void
     var resumePractice: (URL) -> Void = { _ in }
+    var imageFolderDirectory: URL? = nil
     @State private var showFolderPicker = false
     @State private var folderError: String?
     @Environment(\.dismiss) private var dismiss
@@ -45,5 +46,6 @@ struct MobileSetupGuide: View {
                 if (error as? CocoaError)?.code != .userCancelled { folderError = error.localizedDescription }
             }
         }
+        .fileDialogDefaultDirectory(imageFolderDirectory)
     }
 }

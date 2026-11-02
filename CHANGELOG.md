@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep checklists usable with adjacent inline shell pipelines and fenced commands inside tasks.
+- Suggest the open document's folder when choosing iOS image-folder access.
 - Discuss selected text from the native context menu.
 - Improve discussion layouts, long comments and Mac recents.
 
