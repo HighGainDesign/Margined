@@ -29,6 +29,7 @@ struct MobileDocumentWorkspace: View {
     let closeFile: () -> Void
     @Environment(\.dynamicTypeSize) private var textSize
     @State private var measuredWidth: WorkspaceWidth?
+    @State private var keyboardAvailableHeight: CGFloat?
     @StateObject private var readingPage: MobileReadingPage
 
     @MainActor
@@ -50,8 +51,7 @@ struct MobileDocumentWorkspace: View {
     }
 
     private func report(_ width: Double, in viewport: CGSize, for route: MobileDiscussionRoute?) {
-        let activeRoute = reader.discussionUsesMargin ? nil : reader.discussionNavigationPath.last
-        guard activeRoute == route, width.isFinite, width > 0 else { return }
+        guard route == nil, width.isFinite, width > 0 else { return }
         let measurement = WorkspaceWidth(viewport: viewport, width: width)
         guard measuredWidth != measurement else { return }
         measuredWidth = measurement
@@ -60,15 +60,17 @@ struct MobileDocumentWorkspace: View {
     /// Native navigation is a projection of the retained discussion intent.
     func navigationBinding() -> Binding<[MobileDiscussionRoute]> {
         let document = reader.documentGeneration, presentation = reader.discussionLayoutGeneration
-        let inspector = reader.inspector
+        let inspector = reader.inspector, intent = reader.discussionPresentationGeneration
         return Binding(get: { reader.discussionUsesMargin ? [] : reader.discussionNavigationPath },
             set: { path in
                 // A queued native pop belongs to the presentation that created
                 // its binding, even if a newer layout has become compact again.
                 guard document == reader.documentGeneration,
                       presentation == reader.discussionLayoutGeneration,
+                      intent == reader.discussionPresentationGeneration,
                       inspector == .discussions, inspector == reader.inspector,
                       !reader.discussionUsesMargin else { return }
+                reader.endDiscussionEditing()
                 reader.discussionNavigationPath = path
             })
     }
@@ -80,24 +82,24 @@ struct MobileDocumentWorkspace: View {
                     bodyFont: reader.discussionMargin?.bodyFont ?? 16 * reader.zoom,
                     horizontalInsets: reader.discussionMargin?.horizontalInsets ?? 88)
             }
-            NavigationStack(path: navigationBinding()) {
+            NavigationStack {
                 MobileReaderView(reader: reader, openFolder: openFolder, closeFile: closeFile,
                     readingPage: readingPage, viewport: geometry.size, contentWidthChanged: { report($0, in: geometry.size, for: nil) })
                     .navigationTitle(reader.title).navigationBarTitleDisplayMode(.inline)
-                    .navigationDestination(for: MobileDiscussionRoute.self) { route in
-                        switch route {
-                        case .list:
-                            MobileDiscussionList(reader: reader, viewport: geometry.size,
-                                contentWidthChanged: { report($0, in: geometry.size, for: route) })
-                        case .thread(let key):
-                            MobileDiscussionThread(reader: reader, key: key, viewport: geometry.size,
-                                contentWidthChanged: { report($0, in: geometry.size, for: route) })
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        if reader.inspector == .discussions, !reader.discussionUsesMargin {
+                            MobileCompactDiscussionSheet(reader: reader, availableHeight: min(geometry.size.height, keyboardAvailableHeight ?? geometry.size.height),
+                                navigation: navigationBinding())
                         }
                     }
             }
             .onChange(of: fits, initial: true) { _, value in
                 guard let value else { return }
                 reader.discussionUsesMargin = value
+            }
+            .background {
+                MobileDiscussionKeyboardViewport(typing: reader.discussionFocus != nil) { keyboardAvailableHeight = $0 }
+                    .allowsHitTesting(false).accessibilityHidden(true)
             }
             .background { MobilePrintPresenter(reader: reader).allowsHitTesting(false).accessibilityHidden(true) }
             .overlay {
@@ -286,5 +288,81 @@ private final class MobileNavigationGeometryView: UIView {
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
         changed?()
+    }
+}
+
+/// Measures keyboard occlusion in this workspace's own native coordinate space.
+/// The system safe-area animation alone need not resize a GeometryReader's
+/// proposed height; use the actual public keyboard frame to clamp the detent.
+private struct MobileDiscussionKeyboardViewport: UIViewRepresentable {
+    let typing: Bool
+    let changed: (CGFloat?) -> Void
+    func makeUIView(context: Context) -> MobileDiscussionKeyboardViewportView {
+        let view = MobileDiscussionKeyboardViewportView()
+        view.isUserInteractionEnabled = false; view.isAccessibilityElement = false
+        view.backgroundColor = .clear
+        return view
+    }
+    func updateUIView(_ view: MobileDiscussionKeyboardViewportView, context: Context) {
+        view.typing = typing; view.changed = changed; view.measure()
+    }
+    static func dismantleUIView(_ view: MobileDiscussionKeyboardViewportView, coordinator: ()) { view.changed = nil }
+}
+
+@MainActor
+private final class MobileDiscussionKeyboardViewportView: UIView {
+    var typing = false
+    var changed: ((CGFloat?) -> Void)?
+    private var keyboardFrame: CGRect?
+    private var lastHeight: CGFloat?
+    private var queued = false
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)),
+            name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
+    }
+    required init?(coder: NSCoder) { return nil }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func keyboardChanged(_ notification: Notification) {
+        keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        measure()
+    }
+    override func layoutSubviews() { super.layoutSubviews(); measure() }
+    override func didMoveToWindow() { super.didMoveToWindow(); measure() }
+    func measure() {
+        guard !queued else { return }
+        queued = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            queued = false
+            let height: CGFloat?
+            if let window, window.isKeyWindow, bounds.height > 0 {
+                // SwiftUI may already end this background at the keyboard. A
+                // zero intersection here still leaves a real keyboard onscreen.
+                // Measure the navigation content's top in the SAME coordinates
+                // instead of spending a constant assumed navigation-bar height.
+                func navigation(in controller: UIViewController) -> UINavigationController? {
+                    if let owner = controller as? UINavigationController { return owner }
+                    return controller.children.lazy.compactMap { navigation(in: $0) }.first
+                }
+                let top = window.rootViewController.flatMap { navigation(in: $0) }?.topViewController?.viewIfLoaded
+                let content = top.map { convert($0.safeAreaLayoutGuide.layoutFrame, from: $0) } ?? bounds
+                let keyboard = keyboardFrame.map { convert($0, from: window.screen.coordinateSpace) }
+                let onScreen = keyboardFrame.map { window.convert($0, from: window.screen.coordinateSpace).intersection(window.bounds) }
+                if let keyboard, let onScreen, !onScreen.isNull, onScreen.height > 0 {
+                    height = max(0, min(bounds.maxY, keyboard.minY) - max(bounds.minY, content.minY))
+                } else if typing {
+                    // Hardware-keyboard input and focus before the software
+                    // keyboard arrives still need the navigation-safe budget.
+                    // Reading keeps its original detent and history allocation.
+                    let visible = content.intersection(bounds)
+                    height = visible.isNull ? 0 : max(0, visible.height)
+                } else { height = nil }
+            } else { height = nil }
+            guard height != lastHeight else { return }
+            lastHeight = height; changed?(height)
+        }
     }
 }

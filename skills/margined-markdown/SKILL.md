@@ -7,19 +7,19 @@ description: Use when creating or updating Markdown intended for Margined, inclu
 
 Produce ordinary, portable `.md` files. Margined renders Markdown with Apex and stores optional discussions inside the same file. No account, sidecar, or special filename is required.
 
-Verified against Margined 2.0 internal Build 13, source `9de60d5`, on 2026-10-31. Discussions are a 2.0 feature; do not assume stable 1.7.1 supports them.
+Baseline verified against Margined 2.0 internal Build 13, source `9de60d5`, on 2026-10-31. Build 14 fixes for inline pipelines and multi-block tasks are verified at source `bd1d96e` on 2026-11-01. Select guidance for the recipient's actual reader. Discussions are a 2.0 feature; do not assume stable 1.7.1 supports them.
 
 ## Authoring contract
 
 - Save UTF-8 Markdown to the requested location; return a usable file link. When the user wants to test or review, give them an actual file, not just a checklist in chat.
 - Use descriptive headings, ordinary links, fenced code, GFM tables with an explicit header separator, and `- [ ]` / `- [x]` tasks. Make each task independently checkable with an observable expected result.
-- Keep each task's content to one paragraph. Nested fenced commands currently prevent safe checkbox mapping too; put longer examples in top-level fenced blocks outside the list and refer to them from a task.
+- For Build 13 or an unknown reader, keep each task's content to one paragraph and put longer commands in top-level fenced blocks outside the list. The verified Build 14 source also maps fenced commands and additional paragraphs inside a task; indent those blocks under their task, as in the [Build 14 example](assets/build14-checklist.md). Nested tasks remain independently checkable.
 - Keep prose outside code blocks. Four-space/tab indentation can turn prose into code; `**bold**` inside code is literal. Use fences for commands and backticks for short code.
 - Preserve existing checkmarks, discussion blocks, IDs, messages, unknown fields, and unrelated prose when updating an existing document. Re-read the latest file before writing so user ticks and comments are not overwritten by a stale draft. Prefer small edits over rewriting the whole document.
 
-## Current checklist workaround
+## Checklist compatibility
 
-Adjacent checklist items containing inline-code pipes can disable every checkbox in affected builds. **Blank lines alone do not fix this.** Separate such items with an ordinary HTML comment:
+In Build 13 and earlier affected readers, adjacent checklist items containing inline-code pipes can disable every checkbox. **Blank lines alone do not fix this.** For these readers, separate such items with an ordinary HTML comment:
 
 ```markdown
 - [ ] Verify `echo a | cat` prints a.
@@ -29,7 +29,7 @@ Adjacent checklist items containing inline-code pipes can disable every checkbox
 - [ ] Verify `echo b | cat` prints b.
 ```
 
-This is an Apex parser defect, not invalid Markdown or a Dropbox permission issue: [Margined #22](https://github.com/HighGainDesign/Margined/issues/22), [Apex #37](https://github.com/ApexMarkdown/apex/issues/37). Keep the workaround until the target reader is confirmed fixed. Do not weaken checkbox source mapping.
+This is an Apex parser defect, not invalid Markdown or a Dropbox permission issue: [Margined #22](https://github.com/HighGainDesign/Margined/issues/22), [Apex #37](https://github.com/ApexMarkdown/apex/issues/37). Build 14 fixes this defect and the separate nested-fence mapping limitation while retaining exact source validation. The separator can be omitted for that verified source, but keep the compatible form when sharing with Build 13 or an unknown version. Confirm the recipient has Build 14 or later before using the new form.
 
 ## Images and richer content
 

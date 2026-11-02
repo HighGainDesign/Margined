@@ -4,10 +4,10 @@ A native Markdown reader for Mac, iPhone and iPad, with live updates, change
 review, checklists, Read Aloud and portable passage discussions. Documents stay
 ordinary `.md` files that people and agents can use in their own tools.
 
-**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.2)
+**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.3)
 to try passage discussions alongside the established reading, Quick Look, live
-streaming and change-review features. Discussions remain experimental; compact layouts still need refinement.
-Build 12 is available for testing; hands-on acceptance testing is incomplete. iPhone/iPad TestFlight testing remains invitation-only.
+streaming and change-review features. Discussions remain experimental and hands-on
+beta testing is ongoing. iPhone/iPad TestFlight testing remains invitation-only.
 Join the [public Mac TestFlight beta](https://testflight.apple.com/join/CDxY24jy).
 
 ## Install and open
@@ -62,10 +62,12 @@ captures use the app’s previous MDView name. See [streaming setup](#drafts-and
 
 ## Discuss a passage
 
-Select text and add a discussion. Give replies an author name, resolve or reopen
-threads, and explicitly reattach a passage when its text moves or becomes
-ambiguous. Wide layouts show discussions and change review in an inspector;
-compact layouts open a dedicated view. Unposted replies stay with their discussion.
+Select text and choose **Discuss Selection** from its context menu. Post named
+replies, resolve or reopen threads, and reattach passages when their text moves.
+Wide layouts use a sidebar; compact discussions use a resizable sheet that expands
+for typing. **Go to Passage** reveals the text while keeping your unfinished reply.
+Older long comments have a disclosure chevron; saved text and conversation exports
+always remain complete. Unposted replies stay with their discussion.
 
 Saved messages, authors, dates and passage anchors live in bounded HTML comments
 containing readable YAML. Other editors can read and edit the same file; ordinary

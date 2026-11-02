@@ -314,7 +314,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             menu.addItem(item)
         }
         if !menu.items.isEmpty { menu.addItem(.separator()) }
-        add(String(localized: "Clear Menu"), to: menu, action: #selector(NSDocumentController.clearRecentDocuments(_:)))
+        add(String(localized: "Clear Menu"), to: menu, action: #selector(clearRecentDocuments(_:)), target: self)
+    }
+
+    @objc private func clearRecentDocuments(_ sender: Any?) {
+        let documents = NSDocumentController.shared
+        documents.clearRecentDocuments(sender)
+        if let host = welcome?.window?.contentViewController as? NSHostingController<WelcomeView> {
+            host.rootView.recentDocuments = documents.recentDocumentURLs
+        }
     }
 
     @objc private func openRecent(_ sender: NSMenuItem) {
@@ -347,7 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         add(String(localized: "Live Streaming Preview"), to: file, action: #selector(liveStreamingPreview(_:)), target: self)
         let recent = NSMenu(title: String(localized: "Open Recent"))
         recent.delegate = self
-        add(String(localized: "Clear Menu"), to: recent, action: #selector(NSDocumentController.clearRecentDocuments(_:)))
+        add(String(localized: "Clear Menu"), to: recent, action: #selector(clearRecentDocuments(_:)), target: self)
         let recentItem = NSMenuItem(title: String(localized: "Open Recent"), action: nil, keyEquivalent: "")
         recentItem.submenu = recent
         file.addItem(recentItem)

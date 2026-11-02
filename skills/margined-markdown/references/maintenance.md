@@ -2,6 +2,12 @@
 
 User request: keep the Margined authoring skill current for other agents. Updates are driven by verified product changes and demonstrated authoring failures, not a periodic rewrite or an untested roadmap.
 
+Latest behavior check: Build 14 parser/source-mapper revision `bd1d96e`, 2026-11-01.
+Inline-pipeline and multi-block task mapping pass the real renderer/source-mapper
+checks on Mac and the focused iOS rendering suite. Retain the Build 13
+compatible example and guidance for older readers. Discussion v1
+and its baseline `9de60d5` contract remain unchanged.
+
 The maintained source is `skills/margined-markdown/` in the [Margined repository](https://github.com/HighGainDesign/Margined/tree/main/skills/margined-markdown). Update it in Git alongside authoring-relevant product changes. Installed skill folders are consumers; compare local edits before refreshing them from GitHub. Keep the complete skill directory together when distributing it.
 
 ## When Margined changes
@@ -39,6 +45,11 @@ machine-local installation or silently replace a previous release's snapshot.
 
 1. Read the changed contract and its regression tests. Do not turn a proposed feature into authoring guidance before it exists.
 2. Recheck the skill's runnable Markdown example with the actual codec and task mapper when available; preserve readable prose, expected tasks, two messages and the reply link. For parser fixes, test the minimal former failure as well as the recommended workaround.
+   `assets/review-example.md` remains compatible with Build 13. The separate
+   `assets/build14-checklist.md` exercises the Build 14 source and must not be
+   used to claim that older installed readers gained the fix. After building Mac
+   products without launching the app, set `MARGINED_TASK_PRODUCTS` and run
+   `python3 script/tests/test_markdown_tasks.py` to check both examples.
 3. Validate skill frontmatter and local links. If the skill-creator validator is installed, run `python3 <skill-creator>/scripts/quick_validate.py <skill-directory>`.
 4. If guidance changed substantially, try a realistic authoring task with the skill and inspect the produced `.md`, rather than checking only wording.
 

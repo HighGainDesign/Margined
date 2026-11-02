@@ -3,6 +3,28 @@ import SwiftSoup
 @testable import MarginediOS
 
 final class RenderingTests: XCTestCase {
+    func testPipelineAndFencedTasksKeepTheirSourceMappings() async throws {
+        for source in ["- [ ] One `echo a | cat`.\n- [x] Two `echo b | cat`.\n",
+                       "- [ ] Run commands.\n  ```sh\n  echo a | cat\n  ```\n- [x] Finish.\n"] {
+            let rendered = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+            XCTAssertEqual(rendered.checkboxCount, 2)
+            XCTAssertEqual(rendered.tasks.count, 2)
+            let task = try XCTUnwrap(rendered.tasks.first)
+            let changed = try MarkdownTasks.patch(Data(source.utf8), expectedSource: source, task: task, checked: true)
+            XCTAssertEqual(zip(Data(source.utf8), changed).filter { $0 != $1 }.count, 1)
+        }
+    }
+
+    func testSingleCellTablesKeepLeadingOnlyRows() async throws {
+        for source in ["| Heading\n| --- |\n| Value |\n", "| --- |\n| value\n"] {
+            let rendered = try await MarkdownRenderer.shared.render(source)
+            let document = try SwiftSoup.parse(rendered.html)
+            XCTAssertEqual(try document.select("table").size(), 1)
+            XCTAssertEqual(try document.select("tbody td, tbody th").text().lowercased(), "value")
+            if source.contains("Heading") { XCTAssertEqual(try document.select("th").text(), "Heading") }
+        }
+    }
+
     #if DEBUG
     func testTrustedStartupLongerThanTheDiagramBudgetStillRenders() async throws {
         let artifact = await DiagramRenderer.renderForTesting("flowchart LR\nA[Read]-->B[Review]",

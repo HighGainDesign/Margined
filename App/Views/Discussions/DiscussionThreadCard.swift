@@ -4,6 +4,7 @@ import SwiftUI
 struct DiscussionThreadCard: View {
     let reader: ReaderState
     let thread: DiscussionThread
+    var focused = false
     var revealComposer: () -> Void = {}
     @FocusState private var headerFocused: Bool
     @AccessibilityFocusState private var accessibleHeaderFocused: Bool
@@ -42,20 +43,23 @@ struct DiscussionThreadCard: View {
             }
             if selected {
                 HStack {
-                    if thread.state == .open {
-                        Button("Resolve", systemImage: "checkmark.bubble") { reader.requestResolveDiscussion(thread.id) }
-                    } else {
-                        Button("Reopen", systemImage: "arrow.uturn.backward") { reader.reopenDiscussion(thread.id) }
-                    }
-                    Spacer()
+                    if reader.rendered?.discussionText?.anchorResults[thread.id]?.status == .attached {
+                        Button("Go to Passage", systemImage: "arrow.up.forward") { reader.goToDiscussion(thread.id) }
+                    } else { Label("Passage needs attention", systemImage: "link.badge.plus").font(.caption) }
+                    Spacer(minLength: 0)
+                    Menu("Discussion Actions", systemImage: "ellipsis.circle") {
+                        if thread.state == .open {
+                            Button("Resolve", systemImage: "checkmark.bubble") { reader.requestResolveDiscussion(thread.id) }
+                        } else {
+                            Button("Reopen", systemImage: "arrow.uturn.backward") { reader.reopenDiscussion(thread.id) }
+                        }
+                        Button("Reattach to Selection…", systemImage: "link") { reader.requestReattachDiscussion(thread.id) }
+                            .help("Select replacement text in the document, then compare the old and new passages before attaching.")
+                        Button("Change Comment Name…", systemImage: "person.crop.circle") { reader.requestChangeDiscussionAuthor() }
+                    }.menuStyle(.borderlessButton).fixedSize().labelStyle(.iconOnly)
                 }.disabled(reader.fileSaving || reader.isRendering)
-                if reader.rendered?.discussionText?.anchorResults[thread.id]?.status == .attached {
-                    Button("Go to Passage", systemImage: "arrow.up.forward") { reader.goToDiscussion(thread.id) }
-                } else { Label("Passage needs attention", systemImage: "link.badge.plus").font(.caption) }
-                Button("Reattach to Selection…", systemImage: "link") { reader.requestReattachDiscussion(thread.id) }
-                    .disabled(reader.fileSaving || reader.isRendering)
-                    .help("Select replacement text in the document, then compare the old and new passages before attaching.")
-                history
+                history.frame(maxWidth: .infinity, maxHeight: focused ? .infinity : nil)
+                Divider()
                 if thread.state == .resolved { Label("Resolved", systemImage: "checkmark.circle").font(.caption) }
                 DiscussionComposer(reader: reader, key: .thread(thread.id), isReply: true, reveal: revealComposer)
             }
@@ -94,6 +98,7 @@ struct DiscussionThreadCard: View {
                 }, resumeDocument: {
                     guard reader.existingSpeech?.conversationID == thread.id else { return }
                     reader.speech.resumeSaved()
-                }, showLatest: { reader.speech.showLatest() }))
+                }, showLatest: { reader.speech.showLatest() }), fillsAvailableSpace: focused,
+            presentationState: reader.discussionHistoryPosition(for: thread.id))
     }
 }

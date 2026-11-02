@@ -69,6 +69,17 @@ final class MobileNavigationBindingTests: XCTestCase {
                        "Keep this reply while reviewing changes.")
     }
 
+    func testAHiddenAndReopenedSheetRejectsItsPreviousDismissCallback() async throws {
+        let (reader, _) = try await fixture()
+        let workspace = MobileDocumentWorkspace(reader: reader, openFolder: {}, closeFile: {})
+        reader.openDiscussion("t-binding")
+        let old = workspace.navigationBinding()
+        reader.hideDiscussions(); reader.openDiscussion("t-binding")
+        old.wrappedValue = []
+        XCTAssertEqual(reader.inspector, .discussions)
+        XCTAssertEqual(reader.discussionRoute, .thread("t-binding"))
+    }
+
     func testPanelWidthPolicyCoversIPadPortraitLandscapeAndDuo() {
         for (width, expected) in [(834.0, false), (1032, true), (1194, true), (1376, true), (890, true), (390, false)] {
             for insets in [44.0, 88.0] {

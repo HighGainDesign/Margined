@@ -29,6 +29,9 @@ final class Build12DeliveryTests: XCTestCase {
             window.center(); window.makeKeyAndOrderFront(nil)
             for _ in 0..<20 { host.view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
             for name in ["Open Markdown…", "Live Streaming Preview", "Take a Tour"] {
+                if button(named: name, in: host.view) == nil {
+                    _ = nativeTestButton(named: [name], in: window, diagnose: true)
+                }
                 XCTAssertNotNil(button(named: name, in: host.view), "Native launch action must remain accessible: \(name)")
             }
             try await captureIfRequested(window, label: label, root: captureRoot)
@@ -55,7 +58,9 @@ final class Build12DeliveryTests: XCTestCase {
             window.setContentSize(NSSize(width: width, height: height))
             window.makeKeyAndOrderFront(nil)
             for _ in 0..<20 { window.contentView?.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
-            XCTAssertNotNil(button(named: "Done", in: try XCTUnwrap(window.contentView)))
+            let content = try XCTUnwrap(window.contentView)
+            if button(named: "Done", in: content) == nil { _ = nativeTestButton(named: ["Done"], in: window, diagnose: true) }
+            XCTAssertNotNil(button(named: "Done", in: content))
             try await captureIfRequested(window, label: label, root: captureRoot)
         }
         window.makeKeyAndOrderFront(nil)
@@ -85,15 +90,6 @@ final class Build12DeliveryTests: XCTestCase {
     }
 
     private func button(named name: String, in root: NSView) -> AnyObject? {
-        var visited: Set<ObjectIdentifier> = []
-        func walk(_ item: Any) -> AnyObject? {
-            guard let object = item as? NSObject, visited.insert(ObjectIdentifier(object)).inserted else { return nil }
-            let element: AnyObject = object
-            if [.button, .link].contains(element.accessibilityRole?() ?? .unknown), element.accessibilityLabel?() == name { return element }
-            for child in element.accessibilityChildren?() ?? [] { if let found = walk(child) { return found } }
-            for child in (object as? NSView)?.subviews ?? [] { if let found = walk(child) { return found } }
-            return nil
-        }
-        return walk(root)
+        nativeTestButton(named: [name], in: root)
     }
 }

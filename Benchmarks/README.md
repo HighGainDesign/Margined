@@ -146,3 +146,19 @@ python3 script/tests/test_apex_tables.py
 Set `MARGINED_BENCHMARK_PRODUCTS` if the Release products are elsewhere. Its
 2-second conversion guard catches pathological table processing; it is not a
 viewing-speed target or a substitute for native frame benchmarks.
+
+For checkbox correctness, `python3 script/tests/test_relaxed_tables.py` builds
+only the real C preprocessor and needs no app products. After a Mac
+`xcodebuild ... build-for-testing` (which does not execute the app), run:
+
+```sh
+MARGINED_TASK_PRODUCTS=/path/to/Build/Products/Debug \
+  python3 script/tests/test_markdown_tasks.py
+```
+
+That runner links the actual reader objects with the owning MarkdownTaskTests,
+excludes the application entrypoint, and verifies synthetic 50-item mapping,
+one-byte edits and the authoring example without activating a Mac application.
+It can also use separately built Apex C products through
+`MARGINED_TASK_PARSER_PRODUCTS`. This checks parser/source behavior, not native
+checkbox interaction or visual/accessibility acceptance.

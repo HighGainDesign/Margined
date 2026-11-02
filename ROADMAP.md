@@ -40,14 +40,29 @@ are implemented. Manual acceptance testing continues, including File Providers,
 background audio, accessibility and file handoff. iOS 27 Quick Look dispatch
 remains limited; use Open With or Share.
 
-Next, address testing regressions and refine compact discussions after design
-review. Folder-picker convenience and clearer selection/navigation actions remain
-polish work; editing posted comments and other new features are separate backlog
-items.
+The current [2.0 delivery tracker](https://github.com/HighGainDesign/Margined/issues/24)
+targets these next steps; build numbers may move if additional fixes are needed:
+
+- **Build 14:** correct checklists containing inline pipelines and nested
+  commands, and suggest the current document's folder for iOS image access.
+  Combined Build 11–14 manual testing continues. Broader menu/navigation changes
+  remain pending feedback and acceptance.
+- **Build 15:** required compact choose-one checkboxes and focused text responses,
+  with explicit readable Markdown conventions, safe saves/Undo and a matching
+  authoring-skill update. The exact grammar and UX need focused review; these
+  controls are not implemented yet.
+- **Build 16:** release candidate, remaining accessibility/performance and manual
+  acceptance checks, documentation and verified distribution.
+
+Keep the maintained Markdown authoring skill aligned with each release's actual
+formats and limits; package its committed ZIP/checksum with that release. Internal
+implementation, human acceptance and public availability are separate gates.
 
 ## Future enhancements
 
 - Syntax-highlighted JSON, YAML, TOML and other text files; evaluate HTML separately.
+- Fenced-code highlighting, editing posted comments, Find/outline refinements,
+  diagram navigation and clipboard/CLI input follow 2.0.
 
 ## Released foundation
 

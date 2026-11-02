@@ -149,7 +149,7 @@ if (operation==='project') {
     return {text:value.text,barriers:value.barriers,units:value.units.map(({id,kind,text,location,length,section,raw})=>({id,kind,text,location,length,section,rawLength:raw.length}))};
 }
 if (operation==='selection') return selectionPayload(project());
-if (operation==='decorate' || operation==='goTo') return marginedDiscussionLayout();
+if (operation==='decorate' || operation==='goTo' || operation==='goToSelection') return marginedDiscussionLayout();
 if (operation!=='configure') return false;
 window.__marginedDiscussions?.abort.abort();
 const state={token,sourceID,allowed:new Set(allowedThreadIDs),abort:new AbortController(),pending:null};
@@ -166,10 +166,11 @@ document.addEventListener('click',event=>{
     event.preventDefault();send({kind:'openThread',id,token,sourceID});
 },options);
 function selected(event) {
-    if(!event.isTrusted || getSelection()?.isCollapsed)return;
+    if(!event.isTrusted)return;
     if(state.pending!==null)cancelAnimationFrame(state.pending);
-    state.pending=requestAnimationFrame(()=>{state.pending=null;send(selectionPayload(project()));});
+    state.pending=requestAnimationFrame(()=>{state.pending=null;send(selectionPayload(project()) ?? {kind:'clearSelection',token,sourceID});});
 }
+document.addEventListener('selectionchange',selected,options);
 document.addEventListener('pointerup',selected,options);
 document.addEventListener('keyup',selected,options);
 return true;

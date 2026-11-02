@@ -4,6 +4,34 @@ import SwiftSoup
 @testable import Margined
 
 final class MarkdownTaskTests: XCTestCase {
+    func testAdjacentInlinePipelinesKeepExactCheckboxMappings() async throws {
+        let source = "- [ ] One `echo a | cat`.\n- [x] Two `echo b | cat`.\n"
+        let result = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+        XCTAssertEqual(result.checkboxCount, 2)
+        XCTAssertEqual(result.tasks.map(\.label), ["One echo a | cat.", "Two echo b | cat."])
+        XCTAssertEqual(result.tasks.map(\.checked), [false, true])
+        let task = try XCTUnwrap(result.tasks.first)
+        let updated = try MarkdownTasks.patch(Data(source.utf8), expectedSource: source, task: task, checked: true)
+        XCTAssertEqual(String(decoding: updated, as: UTF8.self), "- [x] One `echo a | cat`.\n- [x] Two `echo b | cat`.\n")
+    }
+
+    func testFencedCommandsInsideATaskRetainExactSourceMappings() async throws {
+        let source = "- [ ] Run commands.\n  ```sh\n  echo a | cat\n  ```\n- [x] Finish.\n"
+        let result = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+        XCTAssertEqual(result.checkboxCount, 2)
+        XCTAssertEqual(result.tasks.map(\.label), ["Run commands. echo a | cat", "Finish."])
+        let task = try XCTUnwrap(result.tasks.first)
+        let changed = try MarkdownTasks.patch(Data(source.utf8), expectedSource: source, task: task, checked: true)
+        XCTAssertEqual(String(decoding: changed, as: UTF8.self), "- [x] Run commands.\n  ```sh\n  echo a | cat\n  ```\n- [x] Finish.\n")
+    }
+
+    func testMultiParagraphTaskLabelsExcludeNestedTaskContent() async throws {
+        let source = "- [ ] Parent.\n\n  More detail.\n\n  - [x] Child.\n\n- [ ] Next.\n"
+        let result = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+        XCTAssertEqual(result.tasks.map(\.label), ["Parent. More detail.", "Child.", "Next."])
+        XCTAssertEqual(result.tasks.map(\.checked), [false, true, false])
+    }
+
     func testMapsOnlyActualTasksIncludingNestedQuotedOrderedAndUnicode() async throws {
         let text = """
         # Checklist

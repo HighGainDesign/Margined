@@ -29,6 +29,11 @@ import XCTest
         try await settle { !reader.isRendering && self.webView(in: controller.view)?.isLoading == false }
         reader.showDiscussions = true
         try await settle { reader.discussionMargin?.anchors.first?.id == "alignment-thread" }
+        // Showing discussions intentionally selects its first focused pane.
+        // Back's exact selection transition exposes the anchor-aligned summaries.
+        XCTAssertEqual(reader.discussions.selection, .thread("alignment-thread"))
+        reader.discussions.selection = nil
+        try await settle { reader.discussions.selection == nil && self.selectedHistory(in: controller.view) == nil }
         let web = try XCTUnwrap(webView(in: controller.view))
         let anchor = try XCTUnwrap(reader.discussionMargin?.anchors.first)
         let root = controller.view
@@ -45,6 +50,7 @@ import XCTest
         let authorTop = try await Self.recognizedTop("Reviewer", in: image, height: root.bounds.height,
             trailingColumn: webFrame.maxX / root.bounds.width)
         let delta = authorTop - passageTop
+        XCTAssertNil(reader.discussions.selection, "This alignment check exercises the summaries after Back")
         XCTAssertGreaterThanOrEqual(delta, -8, "Author top \(authorTop), passage top \(passageTop)")
         XCTAssertLessThanOrEqual(delta, 40, "The card should align with its passage, allowing only its own inner padding; author top \(authorTop), passage top \(passageTop)")
         for (width, zoom) in [(1_200.0, 1.0), (1_000.0, 1.0), (1_200.0, 1.25)] {
@@ -66,6 +72,10 @@ import XCTest
     private func settle(_ condition: () -> Bool) async throws {
         for _ in 0..<200 { if condition() { return }; try await Task.sleep(for: .milliseconds(20)) }
         XCTFail("Mounted discussion did not settle")
+    }
+    private func selectedHistory(in view: NSView) -> WKWebView? {
+        if let web = view as? WKWebView, web.accessibilityLabel() == "Discussion history" { return web }
+        return view.subviews.lazy.compactMap { self.selectedHistory(in: $0) }.first
     }
     private func webView(in view: NSView) -> WKWebView? {
         if let web = view as? WKWebView { return web }

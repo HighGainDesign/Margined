@@ -85,9 +85,11 @@ struct MobileSettingsView: View {
         .sheet(isPresented: $showTour) {
             MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial,
                 openPractice: { lesson in showTour = false; openPractice(lesson) },
-                resumePractice: { url in showTour = false; resumePractice(url) })
+                resumePractice: { url in showTour = false; resumePractice(url) },
+                imageFolderDirectory: reader.fileURL?.deletingLastPathComponent())
                 .preferredColorScheme(appearance == "system" ? nil : (appearance == "dark" ? .dark : .light))
         }
+        .fileDialogDefaultDirectory(reader.fileURL?.deletingLastPathComponent())
         .onChange(of: appearance) { _, value in reader.appearance = DocumentAppearance(rawValue: value) ?? .system }
     }
 }

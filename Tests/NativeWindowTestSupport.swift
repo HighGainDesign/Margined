@@ -5,6 +5,13 @@ import XCTest
 /// to activate that exact running test host, never another installed copy.
 @MainActor
 func activateNativeTestApplication() async throws {
+    // SwiftUI lazily exposes AX children only after an accessibility client
+    // enables the owned process. Match WebKit's own native test harness without
+    // enabling VoiceOver or changing any system accessibility preference.
+    // https://github.com/WebKit/WebKit/blob/main/Tools/TestWebKitAPI/Tests/WebKit/WKPage/cocoa/EnableAccessibility.mm
+    let enable = NSSelectorFromString("accessibilitySetEnhancedUserInterfaceAttribute:")
+    XCTAssertTrue(NSApp.responds(to: enable), "The native test host must support accessibility activation")
+    if NSApp.responds(to: enable) { NSApp.perform(enable, with: NSNumber(value: true)) }
     guard !NSApp.isActive else { return }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
@@ -22,4 +29,38 @@ func activateNativeTestApplication() async throws {
         try await Task.sleep(for: .milliseconds(20))
     }
     XCTFail("Launch Services did not activate the native test host")
+}
+
+/// Fixed-size layout fixtures may exceed the hosted runner's 1024×768 desktop.
+/// Preserve their requested viewport instead of silently testing a smaller one.
+@MainActor
+final class NativeLayoutTestWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+}
+
+/// AX children are opaque objects; a SwiftUI accessibility proxy need not be an
+/// NSObject subclass. Use selector availability and retain cycle protection.
+@MainActor
+func nativeTestButton(named names: [String], in root: Any, diagnose: Bool = false) -> AnyObject? {
+    var visited: Set<ObjectIdentifier> = []
+    var count = 0
+    func walk(_ item: Any) -> AnyObject? {
+        let element = item as AnyObject
+        guard visited.insert(ObjectIdentifier(element)).inserted else { return nil }
+        let role = element.accessibilityRole?() ?? .unknown
+        let labels = [element.accessibilityLabel?(), element.accessibilityTitle?()].compactMap { $0 }
+        let children = element.accessibilityChildren?() ?? []
+        if diagnose, count < 150 {
+            print("NATIVE-AX type=\(type(of: item)) NSObject=\(item is NSObject) role=\(role) names=\(labels) children=\(children.count) frame=\(String(describing: element.accessibilityFrame?()))")
+            count += 1
+        }
+        if [.button, .link].contains(role), labels.contains(where: names.contains) {
+            if !(item is NSObject) { print("NATIVE-AX-MATCH type=\(type(of: item)) names=\(labels) NSObject=false") }
+            return element
+        }
+        for child in children { if let found = walk(child) { return found } }
+        for child in (item as? NSView)?.subviews ?? [] { if let found = walk(child) { return found } }
+        return nil
+    }
+    return walk(root)
 }

@@ -67,7 +67,9 @@ struct MobileRootView: View {
                 switch destination {
                 case .settings: MobileSettingsView(reader: reader, imageFolders: imageFolders, tutorial: tutorial, openPractice: preparePractice, resumePractice: resumePractice)
                 case .guide:
-                    MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial, openPractice: preparePractice, resumePractice: resumePractice)
+                    MobileSetupGuide(imageFolders: imageFolders, foldersChanged: { reader.retryLocalImages() }, tutorial: tutorial,
+                        openPractice: preparePractice, resumePractice: resumePractice,
+                        imageFolderDirectory: reader.fileURL?.deletingLastPathComponent())
                 }
             }
             .preferredColorScheme(appearance == .system ? nil : (appearance == .dark ? .dark : .light))

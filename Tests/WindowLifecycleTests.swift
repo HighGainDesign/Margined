@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Margined
 
@@ -52,4 +53,40 @@ final class WindowLifecycleTests: XCTestCase {
         XCTAssertTrue(reader.isVisible)
         XCTAssertFalse(welcome.isVisible)
     }
+
+    @MainActor
+    func testClearingRecentMenuRefreshesTheVisibleWelcome() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let documents = NSDocumentController.shared
+        XCTAssertTrue(documents.documents.isEmpty)
+        let originalRecents = documents.recentDocumentURLs
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Welcome-recents-" + UUID().uuidString + ".md")
+        try Data("# Recent document\n".utf8).write(to: file)
+        defer {
+            documents.clearRecentDocuments(nil)
+            for url in originalRecents.reversed() { documents.noteNewRecentDocumentURL(url) }
+            try? FileManager.default.removeItem(at: file)
+        }
+        documents.noteNewRecentDocumentURL(file)
+        app.showWelcome()
+        let window = try XCTUnwrap(NSApp.windows.first { $0.title == "Margined" && $0.isVisible })
+        defer { window.close() }
+        let host = try XCTUnwrap(window.contentViewController as? NSHostingController<WelcomeView>)
+        XCTAssertTrue(host.rootView.recentDocuments.contains { $0.resolvingSymlinksInPath() == file.resolvingSymlinksInPath() },
+                      "Welcome should include the fixture: \(host.rootView.recentDocuments) vs \(file)")
+
+        let menu = NSMenu()
+        app.menuNeedsUpdate(menu)
+        let clear = try XCTUnwrap(menu.items.last)
+        let action = try XCTUnwrap(clear.action)
+        XCTAssertTrue(NSApp.sendAction(action, to: clear.target, from: clear),
+                      "Exercise the real Open Recent menu action")
+        XCTAssertTrue(documents.recentDocumentURLs.isEmpty)
+        XCTAssertTrue(host.rootView.recentDocuments.isEmpty,
+                      "The visible Welcome must reflect Clear Menu immediately")
+        XCTAssertTrue(window.isVisible)
+        XCTAssertTrue(documents.documents.isEmpty)
+    }
+
 }

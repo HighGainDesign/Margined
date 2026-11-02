@@ -91,6 +91,10 @@ if (operation === 'navigate') {
 // resize event arrives after WebKit has already changed line wrapping.
 if (operation === 'observeResize') {
     window.marginedReadingResize?.stop();
+    // Callers lease their own document namespace. Mobile remains the default
+    // for existing reading-page callers; history must opt into its token.
+    const tokenAttribute = typeof documentTokenAttribute === 'undefined' ? 'data-margined-mobile-token' : documentTokenAttribute;
+    if (tokenAttribute !== 'data-margined-mobile-token' && tokenAttribute !== 'data-margined-history-token') return false;
     const controller = new AbortController();
     let width = innerWidth, height = innerHeight, pending = 0;
     function sample() {
@@ -115,7 +119,7 @@ if (operation === 'observeResize') {
     }
     function current() {
         return !controller.signal.aborted &&
-            document.documentElement.getAttribute('data-margined-mobile-token') === documentToken;
+            document.documentElement.getAttribute(tokenAttribute) === documentToken;
     }
     let saved = sample();
     const options = {passive:true, signal:controller.signal};

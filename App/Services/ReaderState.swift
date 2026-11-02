@@ -18,6 +18,14 @@ final class ReaderState {
     @ObservationIgnored private var renderedContext: UUID?
     let announcements: ReaderAnnouncements
     let discussions = DiscussionSession()
+    @ObservationIgnored private var discussionHistoryPositions: [String: DiscussionHistoryPresentationState] = [:]
+    @ObservationIgnored var discussionComposerSelections: [DiscussionSession.DraftKey: NSRange] = [:]
+    func discussionHistoryPosition(for thread: String) -> DiscussionHistoryPresentationState {
+        if let state = discussionHistoryPositions[thread] { return state }
+        let state = DiscussionHistoryPresentationState()
+        discussionHistoryPositions[thread] = state
+        return state
+    }
     private(set) var discussionSaving = false
     var discussionError: String?
     private(set) var discussionCopyOffered = false
@@ -326,6 +334,7 @@ final class ReaderState {
             resetDiscussionActions()
             discussionCardFocusIntent = nil
             sourceSnapshot = nil; pendingDiskSnapshot = nil; discussionCopyOffered = false
+            discussionHistoryPositions.removeAll(); discussionComposerSelections.removeAll()
             sourceContext = UUID(); renderedContext = nil
             externalFileRevision += 1
             cancelChecklistConfirmation()
@@ -947,6 +956,7 @@ final class ReaderState {
         discussionMargin = nil; discussionPassageID = nil
         discardDiscussionImport()
         classifyUpdateTask?.cancel()
+        discussionHistoryPositions.removeAll(); discussionComposerSelections.removeAll()
         sourceContext = UUID()
         _ = sourceGate.close()
         speechModel?.close(discardHold: true)
