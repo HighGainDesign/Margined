@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     if: github.repository == 'HighGainDesign/Margined'
-    runs-on: macos-26-intel
+    runs-on: macos-26
     timeout-minutes: 180
     # Configure this environment to allow only protected v* release tags.
     environment: release

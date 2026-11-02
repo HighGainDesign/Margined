@@ -1216,7 +1216,10 @@ import XCTest
             XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "An unfinished reply across both displays.")
         }
         XCTAssertTrue(sawMargin && sawCompact, "The test must actually move the reply between native navigation and the margin")
+        await installResizeReturnTrace(f.web)
+        recordResizeReturnPhase(f, phase: "before-hide", metrics: try await resizeReadingMetrics(f.web, diagnostics: true))
         f.reader.hideDiscussions()
+        recordResizeReturnPhase(f, phase: "hide-requested")
         let visible = await poll { self.webView(in: f.host.view) === f.web }
         XCTAssertTrue(visible)
         let samePage = try await f.web.callAsyncJavaScript("return window.mobileResizePage===document;",
@@ -1227,7 +1230,9 @@ import XCTest
         // An unattached page cannot complete requestAnimationFrame. Preserve the
         // failed assertions above without hanging before XCTest can report them.
         guard visible, returned else { return }
-        let reading = try await resizeReadingMetrics(f.web)
+        let reading = try await resizeReadingMetrics(f.web, diagnostics: true)
+        recordResizeReturnPhase(f, phase: "original-final", metrics: reading)
+        await observeResizeReturnPaint(f, original: reading)
         XCTAssertEqual(reading["visible"] as? Bool, true,
                        "Returning from a compact conversation must retain the passage being read")
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
@@ -1554,14 +1559,107 @@ import XCTest
             arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
     }
 
-    private func resizeReadingMetrics(_ web: WKWebView) async throws -> [String: Any] {
+    private func installResizeReturnTrace(_ web: WKWebView) async {
+        _ = try? await web.callAsyncJavaScript("""
+        window.resizeReturnTrace?.stop();
+        const controller=new AbortController(),original=window.scrollTo;
+        const trace={events:[],dropped:0};
+        // No rectangle queries or semantic captures in these hot callbacks.
+        const record=(phase,requested)=>{
+            trace.events.push({phase,time:performance.now(),x:scrollX,y:scrollY,width:innerWidth,height:innerHeight,
+                ...(requested?{requested}:{})});
+            if(trace.events.length>40){trace.events.splice(12,1);trace.dropped++;}
+        };
+        const wrapped=function(...args){
+            const requested=typeof args[0]==='number'?{x:args[0],y:args[1]}:
+                {x:args[0]?.left??null,y:args[0]?.top??null,behavior:args[0]?.behavior??null};
+            record('scrollTo-before',requested);
+            try{return Reflect.apply(original,this,args);}finally{record('scrollTo-after');}
+        };
+        window.scrollTo=wrapped;
+        for(const type of ['scroll','resize'])window.addEventListener(type,()=>record(type),{passive:true,signal:controller.signal});
+        trace.stop=()=>{controller.abort();if(window.scrollTo===wrapped)window.scrollTo=original;};
+        window.resizeReturnTrace=trace;record('installed');return true;
+        """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        addTeardownBlock { @MainActor in
+            _ = try? await web.callAsyncJavaScript("window.resizeReturnTrace?.stop();return true;",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        }
+    }
+
+    private func observeResizeReturnPaint(_ f: Fixture, original: [String: Any]) async {
+        // Never replace the asserted sample or issue a corrective scroll.
+        // Only a failing original sample adds the three bounded observations.
+        do {
+            let configuration = WKSnapshotConfiguration()
+            configuration.afterScreenUpdates = true
+            let image = try await f.web.takeSnapshot(configuration: configuration)
+            recordResizeReturnPhase(f, phase: "snapshot-returned")
+            if original["visible"] as? Bool != true {
+                let capture = XCTAttachment(image: image)
+                capture.name = "Resize-return-first-painted"; capture.lifetime = .keepAlways; add(capture)
+            }
+            recordResizeReturnPhase(f, phase: "painted", metrics: try await resizeReadingMetrics(f.web, diagnostics: true))
+            if original["visible"] as? Bool != true {
+                for delay in [100, 250, 500] {
+                    try await Task.sleep(for: .milliseconds(delay))
+                    recordResizeReturnPhase(f, phase: "observe-after-\(delay)ms", metrics: try await resizeReadingMetrics(f.web, diagnostics: true))
+                }
+            }
+        } catch {
+            let nativeError = error as NSError
+            print("RESIZE-RETURN diagnostic-error code=\(nativeError.code)")
+        }
+        await recordResizeReturnTrace(f.web, includeEvents: original["visible"] as? Bool != true)
+    }
+
+    private func recordResizeReturnTrace(_ web: WKWebView, includeEvents: Bool) async {
+        let value = try? await web.callAsyncJavaScript("""
+        const trace=window.resizeReturnTrace;
+        if(!trace)return 'unavailable';
+        trace.stop();
+        return JSON.stringify({count:trace.events.length,dropped:trace.dropped,
+            observing:typeof window.marginedReadingResize?.stop==='function',
+            events:includeEvents?trace.events:trace.events.slice(-2)});
+        """, arguments: ["includeEvents": includeEvents], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        print("RESIZE-RETURN-TRACE \(value as? String ?? "unavailable")")
+    }
+
+    private func recordResizeReturnPhase(_ f: Fixture, phase: String, metrics: [String: Any]? = nil) {
+        let scroll = f.web.scrollView
+        var data: [String: Any] = ["phase": phase, "window": String(describing: f.window.bounds),
+            "readerFrame": String(describing: f.web.convert(f.web.bounds, to: f.window)), "readerBounds": String(describing: f.web.bounds),
+            "readerSafe": String(describing: f.web.safeAreaInsets), "scrollBounds": String(describing: scroll.bounds),
+            "scrollOffset": String(describing: scroll.contentOffset), "scrollContent": String(describing: scroll.contentSize),
+            "scrollInset": String(describing: scroll.adjustedContentInset), "presentationBounds": String(describing: scroll.layer.presentation()?.bounds),
+            "keyboardGuide": String(describing: f.window.keyboardLayoutGuide.layoutFrame),
+            "inspector": String(describing: f.reader.inspector), "margin": f.reader.discussionUsesMargin,
+            "expanded": f.reader.discussionSheetExpanded, "focus": String(describing: f.reader.discussionFocus?.input),
+            "route": String(describing: f.reader.discussionRoute), "readerAttached": f.web.window === f.window]
+        if let metrics { data["dom"] = metrics }
+        if let encoded = try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]) {
+            print("RESIZE-RETURN \(String(decoding: encoded, as: UTF8.self))")
+        }
+    }
+
+    private func resizeReadingMetrics(_ web: WKWebView, diagnostics: Bool = false) async throws -> [String: Any] {
         let value = try await web.callAsyncJavaScript("""
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-        const box=document.getElementById('resize-reading-passage').getBoundingClientRect();
-        return {samePage:window.mobileResizePage===document,scroll:scrollY,
+        const target=document.getElementById('resize-reading-passage'),box=target.getBoundingClientRect();
+        const metrics={samePage:window.mobileResizePage===document,scroll:scrollY,
+            top:box.top,bottom:box.bottom,width:innerWidth,height:innerHeight,
             visible:box.bottom>0&&box.top<innerHeight,
             overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
-        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        if(!diagnostics)return metrics;
+        const paragraphs=Array.from(document.querySelectorAll('main p'));
+        return {...metrics,documentTop:box.top+scrollY,clientWidth:document.documentElement.clientWidth,
+            clientHeight:document.documentElement.clientHeight,scrollHeight:document.documentElement.scrollHeight,
+            visual:visualViewport?{pageTop:visualViewport.pageTop,offsetTop:visualViewport.offsetTop,height:visualViewport.height,scale:visualViewport.scale}:null,
+            hits:[24,64,128].filter(y=>y<innerHeight).map(y=>{
+                const node=document.elementFromPoint(document.documentElement.clientWidth/2,y)?.closest('p');
+                return {y,index:node?paragraphs.indexOf(node):null,target:node===target};
+            })};
+        """, arguments: ["diagnostics": diagnostics], in: nil, contentWorld: .defaultClient)
         return try XCTUnwrap(value as? [String: Any])
     }
 
