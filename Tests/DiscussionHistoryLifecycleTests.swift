@@ -92,6 +92,13 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         let retained = await poll {
             try await restored.evaluateJavaScript("document.body.style.fontSize==='16px' && Math.abs(document.getElementById('history-p23').getBoundingClientRect().top-24)<2") as? Bool == true
         }
+        if !retained {
+            let dom = try? await restored.evaluateJavaScript("JSON.stringify({ready:document.readyState,font:document.body?.style.fontSize,anchor:document.getElementById('history-p23')?.getBoundingClientRect().top,y:scrollY})")
+            let cached = await state.restorePosition()
+            let candidate = (cached?["candidates"] as? [[String: Any]])?.first?["id"]
+            let cachedTop = cached?["top"]
+            print("INTERRUPTED-RESTORE-FAIL progress=\(restored.estimatedProgress) loading=\(restored.isLoading) dom=\(String(describing:dom)) cachedID=\(String(describing:candidate)) top=\(String(describing:cachedTop))")
+        }
         XCTAssertTrue(retained, "A superseded restore must not prevent capturing the later paragraph being read")
     }
 
@@ -247,10 +254,12 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
         try await reveal("tail-anchor", in: web)
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        try await present(web)
         let collapsedAnchor = try await web.evaluateJavaScript("document.getElementById('tail-anchor').getBoundingClientRect().top") as? Double
         XCTAssertEqual(collapsedAnchor ?? 0, 24, accuracy: 2, "Collapsing an earlier body keeps the paragraph being read in place")
         if abs((collapsedAnchor ?? 0) - 24) > 2 { await recordDisclosureFailure(web, phase: "collapsed") }
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
+        try await present(web)
         let expandedAnchor = try await web.evaluateJavaScript("document.getElementById('tail-anchor').getBoundingClientRect().top") as? Double
         XCTAssertEqual(expandedAnchor ?? 0, 24, accuracy: 2, "Expanding inline preserves the shared history scroll anchor")
         let captured = try await web.callAsyncJavaScript("""
@@ -263,7 +272,8 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         _ = try await web.evaluateJavaScript("window.disclosureDocument=document;true")
         coordinator.update(html: disclosureHTML().replacingOccurrences(of: "Latest text", with: "Updated latest text"), fontSize: 18, imageGeneration: 0)
         let retained = await poll {
-            try await web.evaluateJavaScript("window.disclosureDocument===document && document.body.textContent.includes('Updated latest text') && document.body.style.fontSize==='18px' && document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true' && Math.abs(document.getElementById('tail-anchor').getBoundingClientRect().top-24)<2") as? Bool == true
+            try await self.present(web)
+            return try await web.evaluateJavaScript("window.disclosureDocument===document && document.body.textContent.includes('Updated latest text') && document.body.style.fontSize==='18px' && document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true' && Math.abs(document.getElementById('tail-anchor').getBoundingClientRect().top-24)<2") as? Bool == true
         }
         XCTAssertTrue(retained, "Reconciliation retains stable message disclosure and semantic scroll position")
         if !retained { await recordDisclosureFailure(web, phase: "reconciled") }
@@ -499,6 +509,16 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
         return true;
         """, arguments: ["id": id], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
+        try await present(web)
+    }
+
+    // A completed JavaScript call/rAF can precede iOS's native scroll commit.
+    // Establish the painted passage before measuring it or hiding the page.
+    private func present(_ web: WKWebView) async throws {
+        let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+        let image = try await web.takeSnapshot(configuration: configuration)
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertGreaterThan(image.size.height, 0)
     }
     private func resize(_ web: WKWebView, to size: CGSize) {
         #if os(iOS)

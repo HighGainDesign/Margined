@@ -226,6 +226,43 @@ struct MobileWebView: UIViewRepresentable {
         private var passageInFlight: UUID?
         private var loadingTask: Task<Void, Never>?
         private var isInvalidated = false
+        #if DEBUG
+        private let diagnosticID = UUID()
+        private let diagnosticStarted = ContinuousClock.now
+        private var diagnosticEvents = 0
+
+        private func traceNavigation(_ event: String, navigation: WKNavigation? = nil,
+                                     details: [String: Any] = [:]) {
+            guard diagnosticEvents < 96 else { return }
+            diagnosticEvents += 1
+            let elapsed = diagnosticStarted.duration(to: .now).components
+            var report: [String: Any] = [
+                "id": diagnosticID.uuidString, "event": event, "sequence": diagnosticEvents,
+                "elapsedMS": Double(elapsed.seconds) * 1_000 + Double(elapsed.attoseconds) / 1e15,
+                "generation": generation, "token": token,
+                "navigation": navigation.map { String(describing: ObjectIdentifier($0)) } ?? "none",
+                "activeNavigation": activeNavigation.map { String(describing: ObjectIdentifier($0)) } ?? "none",
+                "matchesActive": navigation != nil && navigation === activeNavigation,
+                "currentDocument": documentGeneration == reader.documentGeneration,
+                "invalidated": isInvalidated, "contentReady": contentReady,
+                "taskCancelled": Task.isCancelled, "renderedExists": reader.rendered != nil,
+                "loading": webView?.isLoading ?? false, "progress": webView?.estimatedProgress ?? -1,
+                "urlScheme": webView?.url?.scheme ?? "none", "mounted": webView?.window != nil]
+            report.merge(details, uniquingKeysWith: { _, value in value })
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+                FileHandle.standardError.write(Data("MOBILE-NAV ".utf8) + data + Data("\n".utf8))
+            }
+        }
+
+        private func policyDiagnostics(_ action: WKNavigationAction) -> [String: Any] {
+            let url = action.request.url
+            return ["requestScheme": url?.scheme ?? "none",
+                    "aboutBlank": url?.absoluteString == "about:blank",
+                    "matchesBaseURL": url == loadedFile?.deletingLastPathComponent(),
+                    "targetMainFrame": action.targetFrame.map { $0.isMainFrame as Any } ?? NSNull(),
+                    "navigationType": action.navigationType.rawValue]
+        }
+        #endif
 
         init(reader: MobileReaderState) {
             self.reader = reader
@@ -237,6 +274,9 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         func invalidate() {
+            #if DEBUG
+            traceNavigation("invalidate")
+            #endif
             nativeSelection = nil
             images.cancelPendingLoads()
             isInvalidated = true
@@ -251,6 +291,9 @@ struct MobileWebView: UIViewRepresentable {
             defer { configureDiscussions() }
             self.category = category
             if documentGeneration != reader.documentGeneration {
+                #if DEBUG
+                traceNavigation("document-reset")
+                #endif
                 documentGeneration = reader.documentGeneration
                 generation += 1
                 loadingTask?.cancel()
@@ -268,7 +311,13 @@ struct MobileWebView: UIViewRepresentable {
                 webView?.stopLoading()
                 // New document identity also covers a new Drafts snapshot, for
                 // which both the previous and new file URL are nil.
+                #if DEBUG
+                traceNavigation("blank-will-issue")
+                let blankNavigation = webView?.loadHTMLString("<!doctype html><html><body></body></html>", baseURL: nil)
+                traceNavigation("blank-issued", navigation: blankNavigation)
+                #else
                 webView?.loadHTMLString("<!doctype html><html><body></body></html>", baseURL: nil)
+                #endif
             }
             images.documentURL = reader.fileURL
             images.generation = resourceToken
@@ -298,7 +347,12 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         private func load(_ html: String, forceNavigation: Bool, preservePosition: Bool) {
-            guard let webView else { return }
+            guard let webView else {
+                #if DEBUG
+                traceNavigation("load-skip-no-webview")
+                #endif
+                return
+            }
             let reconcile = contentReady && !forceNavigation
             generation += 1
             let expectedGeneration = generation
@@ -311,8 +365,20 @@ struct MobileWebView: UIViewRepresentable {
             taskKey = ""
             speechKey = ""
             loadingTask?.cancel()
+            #if DEBUG
+            traceNavigation("load-task-created", details: ["expectedGeneration": expectedGeneration,
+                "reconcile": reconcile, "preservePosition": preservePosition, "forceNavigation": forceNavigation])
+            #endif
             loadingTask = Task { [weak self] in
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled else {
+                    #if DEBUG
+                    self?.traceNavigation("load-task-skip-cancelled", details: ["expectedGeneration": expectedGeneration])
+                    #endif
+                    return
+                }
+                #if DEBUG
+                traceNavigation("load-task-started", details: ["expectedGeneration": expectedGeneration])
+                #endif
                 if reconcile {
                     let renderedCategory = category, renderedZoom = reader.zoom
                     let updated = try? await webView.callAsyncJavaScript(MobileWebTypography.reconcileScript,
@@ -320,7 +386,15 @@ struct MobileWebView: UIViewRepresentable {
                                     "fontSize": Double(MobileWebTypography.fontSize(category: renderedCategory, zoom: renderedZoom)),
                                     "expectedToken": previousToken, "nextToken": currentToken],
                         in: nil, contentWorld: Self.contentWorld) as? Bool
-                    guard valid(expectedGeneration) else { return }
+                    guard valid(expectedGeneration) else {
+                        #if DEBUG
+                        traceNavigation("load-task-skip-after-reconcile", details: ["expectedGeneration": expectedGeneration])
+                        #endif
+                        return
+                    }
+                    #if DEBUG
+                    traceNavigation("reconcile-result", details: ["updated": updated == true])
+                    #endif
                     if updated == true {
                         typographyKey = "\(renderedCategory.rawValue):\(renderedZoom)"
                         contentReady = true
@@ -333,12 +407,23 @@ struct MobileWebView: UIViewRepresentable {
                     readingPosition = try? await webView.callAsyncJavaScript(Self.guarded(MobileWebScripts.document),
                         arguments: ["operation": "capture", "documentToken": previousToken], in: nil, contentWorld: Self.contentWorld) as? [String: Any]
                 }
-                guard valid(expectedGeneration) else { return }
+                guard valid(expectedGeneration) else {
+                    #if DEBUG
+                    traceNavigation("load-task-skip-before-navigation", details: ["expectedGeneration": expectedGeneration])
+                    #endif
+                    return
+                }
                 var page = html
                 if let opening = page.range(of: "<html", options: .caseInsensitive) {
                     page.replaceSubrange(opening, with: "<html data-margined-mobile-token=\"\(currentToken)\"")
                 }
+                #if DEBUG
+                traceNavigation("real-will-issue", details: ["hasFileBaseURL": loadedFile != nil])
+                #endif
                 activeNavigation = webView.loadHTMLString(page, baseURL: loadedFile?.deletingLastPathComponent())
+                #if DEBUG
+                traceNavigation("real-issued", navigation: activeNavigation)
+                #endif
             }
         }
 
@@ -349,7 +434,15 @@ struct MobileWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard !isInvalidated, documentGeneration == reader.documentGeneration,
-                  navigation === activeNavigation else { return }
+                  navigation === activeNavigation else {
+                #if DEBUG
+                traceNavigation("did-finish-ignored", navigation: navigation)
+                #endif
+                return
+            }
+            #if DEBUG
+            traceNavigation("did-finish-accepted", navigation: navigation)
+            #endif
             contentReady = true
             let expectedGeneration = generation
             let position = readingPosition
@@ -367,6 +460,9 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         private func ready() {
+            #if DEBUG
+            traceNavigation("ready", navigation: activeNavigation)
+            #endif
             defer { configureDiscussions() }
             observeReadingPositionDuringResize()
             synchronizeTypography()
@@ -740,19 +836,59 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+            #if DEBUG
+            let native = error as NSError
+            traceNavigation("did-fail-provisional", navigation: navigation,
+                details: ["errorDomain": native.domain, "errorCode": native.code,
+                          "accepted": !isInvalidated && navigation === activeNavigation && native.code != NSURLErrorCancelled])
+            #endif
             guard !isInvalidated, navigation === activeNavigation, (error as NSError).code != NSURLErrorCancelled else { return }
             reader.errorMessage = error.localizedDescription
         }
 
+        #if DEBUG
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            traceNavigation("did-start-provisional", navigation: navigation)
+        }
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            traceNavigation("did-commit", navigation: navigation)
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+            let native = error as NSError
+            traceNavigation("did-fail", navigation: navigation,
+                details: ["errorDomain": native.domain, "errorCode": native.code])
+        }
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            traceNavigation("process-terminated", navigation: activeNavigation)
+        }
+        #endif
+
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+            #if DEBUG
+            traceNavigation("policy-enter", details: policyDiagnostics(navigationAction))
+            #endif
             guard !isInvalidated, documentGeneration == reader.documentGeneration,
                   let url = navigationAction.request.url,
-                  navigationAction.targetFrame?.isMainFrame != false else { return .cancel }
+                  navigationAction.targetFrame?.isMainFrame != false else {
+                #if DEBUG
+                traceNavigation("policy-cancel-invalid", details: policyDiagnostics(navigationAction))
+                #endif
+                return .cancel
+            }
             if navigationAction.navigationType != .linkActivated {
                 let initial = loadedFile?.deletingLastPathComponent()
+                #if DEBUG
+                traceNavigation("policy-programmatic-result", details: policyDiagnostics(navigationAction).merging(
+                    ["allow": url.absoluteString == "about:blank" || url == initial], uniquingKeysWith: { _, value in value }))
+                #endif
                 return url.absoluteString == "about:blank" || url == initial ? .allow : .cancel
             }
-            if url.fragment != nil && url.withoutFragment == webView.url?.withoutFragment { return .allow }
+            if url.fragment != nil && url.withoutFragment == webView.url?.withoutFragment {
+                #if DEBUG
+                traceNavigation("policy-allow-current-fragment", details: policyDiagnostics(navigationAction))
+                #endif
+                return .allow
+            }
             switch url.scheme?.lowercased() {
             case "https", "http", "mailto":
                 await UIApplication.shared.open(url)
@@ -764,6 +900,9 @@ struct MobileWebView: UIViewRepresentable {
                 }
             default: break
             }
+            #if DEBUG
+            traceNavigation("policy-cancel-link", details: policyDiagnostics(navigationAction))
+            #endif
             return .cancel
         }
     }
