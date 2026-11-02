@@ -27,8 +27,9 @@ struct MobileDiscussionDraftEditor: UIViewRepresentable {
     }
     func updateUIView(_ view: UITextView, context: Context) {
         context.coordinator.owner = self
-        view.font = UIFont.preferredFont(forTextStyle: .body,
+        let font = UIFont.preferredFont(forTextStyle: .body,
             compatibleWith: UITraitCollection(preferredContentSizeCategory: sizeCategory.uiCategory))
+        if view.font != font { view.font = font }
         view.textColor = .label
         if view.text != text {
             let selection = view.selectedRange
@@ -80,10 +81,25 @@ struct MobileDiscussionDraftEditor: UIViewRepresentable {
 /// UIKit's initial selection scroll. Keep the insertion end visible once the
 /// actual viewport has settled without changing the user's selected range.
 private final class DiscussionDraftTextView: UITextView {
+    private struct Layout: Equatable {
+        let size: CGSize
+        let insets: UIEdgeInsets
+        let font: UIFont?
+        let selection: NSRange
+        let focused: Bool
+    }
+    private var lastLayout: Layout?
     override func layoutSubviews() {
         super.layoutSubviews()
         guard isFirstResponder, window != nil, bounds.height > 0,
-              let selection = selectedTextRange else { return }
+              let selection = selectedTextRange else { lastLayout = nil; return }
+        let layout = Layout(size: bounds.size, insets: adjustedContentInset,
+                            font: font, selection: selectedRange, focused: isFirstResponder)
+        let changed = lastLayout != layout
+        lastLayout = layout
+        // A scroll changes bounds.origin, but does not change this key. Let the
+        // user browse a long draft without an unrelated layout moving it back.
+        guard changed else { return }
         scrollRectToVisible(caretRect(for: selection.start).insetBy(dx: 0, dy: -4), animated: false)
     }
 }
