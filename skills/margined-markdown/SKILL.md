@@ -7,7 +7,7 @@ description: Use when creating or updating Markdown intended for Margined, inclu
 
 Produce ordinary, portable `.md` files. Margined renders Markdown with Apex and stores optional discussions inside the same file. No account, sidecar, or special filename is required.
 
-Baseline verified against Margined 2.0 internal Build 13, source `9de60d5`, on 2026-10-31. Local Build 14 development fixes for inline pipelines and multi-block tasks are verified at source `7bd3660` on 2026-11-01; they have not been distributed yet. Select guidance for the recipient's actual reader. Discussions are a 2.0 feature; do not assume stable 1.7.1 supports them.
+Baseline verified against Margined 2.0 internal Build 13, source `9de60d5`, on 2026-10-31. Local Build 14 development fixes for inline pipelines and multi-block tasks are verified at source `bd1d96e` on 2026-11-01; they have not been distributed yet. Select guidance for the recipient's actual reader. Discussions are a 2.0 feature; do not assume stable 1.7.1 supports them.
 
 ## Authoring contract
 

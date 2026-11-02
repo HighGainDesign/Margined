@@ -2,7 +2,7 @@
 
 User request: keep the Margined authoring skill current for other agents. Updates are driven by verified product changes and demonstrated authoring failures, not a periodic rewrite or an untested roadmap.
 
-Latest behavior check: local Build 14 development source `7bd3660`, 2026-11-01.
+Latest behavior check: local Build 14 development source `bd1d96e`, 2026-11-01.
 Inline-pipeline and multi-block task mapping pass the real renderer/source-mapper
 checks on Mac and the focused iOS rendering suite. These fixes are not yet
 distributed; retain the Build 13 compatible example and guidance. Discussion v1
