@@ -1,8 +1,7 @@
 # Build 14 checklist example
 
-Requires the verified local Build 14 development source (`bd1d96e` or later with
-these fixes). It is not a newly distributed build. For Build 13 or an unknown
-reader, use `review-example.md` and keep commands outside tasks.
+Requires Build 14 or later with the fixes verified at source `bd1d96e`.
+For Build 13 or an unknown reader, use `review-example.md` and keep commands outside tasks.
 
 - [ ] Verify `echo a | cat` prints `a`.
 - [x] Verify `echo b | cat` prints `b`.

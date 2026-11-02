@@ -26,6 +26,18 @@ final class MobileWebViewTests: XCTestCase {
         let found = try await eventually { reader.searchMatch == true }
         XCTAssertTrue(found)
         let highlighted = try await eventually { try await self.yellowPixels(in: web) > 80 }
+        if !highlighted {
+            let snapshot = try await web.takeSnapshot(configuration: nil)
+            let native = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            for (name, image) in [("Find-WebKit-snapshot", snapshot), ("Find-native-window", native)] {
+                let attachment = XCTAttachment(image: image)
+                attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            }
+            let direct = try await web.find("Findneedle", configuration: WKFindConfiguration())
+            print("FIND-VISUAL match=\(reader.searchMatch == true) direct=\(direct.matchFound) yellow=\(try await yellowPixels(in: web)) web=\(web.bounds) window=\(window.bounds)")
+        }
         XCTAssertTrue(highlighted, "Establish visible native Find highlights before clearing")
         guard highlighted else { return }
         _ = try await web.evaluateJavaScript("""

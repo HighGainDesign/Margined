@@ -12,7 +12,7 @@ struct MobileDiscussionDraftEditor: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+        let view = DiscussionDraftTextView()
         view.backgroundColor = .clear
         view.adjustsFontForContentSizeCategory = true
         view.textContainerInset = UIEdgeInsets(top: 6, left: 4, bottom: 6, right: 4)
@@ -73,5 +73,17 @@ struct MobileDiscussionDraftEditor: UIViewRepresentable {
             owner.text = view.text
             rememberSelection(view)
         }
+    }
+}
+
+/// Keyboard and Dynamic Type transitions can resize the retained editor after
+/// UIKit's initial selection scroll. Keep the insertion end visible once the
+/// actual viewport has settled without changing the user's selected range.
+private final class DiscussionDraftTextView: UITextView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard isFirstResponder, window != nil, bounds.height > 0,
+              let selection = selectedTextRange else { return }
+        scrollRectToVisible(caretRect(for: selection.start).insetBy(dx: 0, dy: -4), animated: false)
     }
 }

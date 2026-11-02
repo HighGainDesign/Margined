@@ -18,10 +18,10 @@ final class SpeechPlayerIntegrationTests: XCTestCase {
             func walk(_ element: Any) -> AnyObject? {
                 guard let object = element as? NSObject, visited.insert(ObjectIdentifier(object)).inserted else { return nil }
                 let accessible: AnyObject = object
-                if let label = accessible.accessibilityLabel?(), labels.count < 80 { labels.append(label) }
+                let names = [accessible.accessibilityLabel?(), accessible.accessibilityTitle?()].compactMap { $0 }
+                if labels.count < 80 { labels.append(contentsOf: names) }
                 if accessible.accessibilityRole?() == .button,
-                   let label = accessible.accessibilityLabel?(),
-                   ["Read Aloud controls", "Read Aloud", "Pause Reading", "Resume Reading"].contains(label) { return accessible }
+                   names.contains(where: { ["Read Aloud controls", "Read Aloud", "Pause Reading", "Resume Reading"].contains($0) }) { return accessible }
                 let children = accessible.accessibilityChildren?() ?? []
                 for child in children { if let result = walk(child) { return result } }
                 for child in (object as? NSView)?.subviews ?? [] {

@@ -37,6 +37,11 @@ final class DiscussionCaretTests: XCTestCase {
         }
         XCTAssertTrue(panelReady); guard panelReady else { return }
         let history = try XCTUnwrap(self.history(in: host.view))
+        let laidOut = await poll {
+            host.view.layoutSubtreeIfNeeded()
+            return history.bounds.height > 300
+        }
+        XCTAssertTrue(laidOut, "Wait for the selected history's final layout")
         XCTAssertGreaterThan(history.bounds.height, 300, "Selected history fills the focused pane instead of a fixed 240-point nested card")
         let mounted = await poll { self.editor(in: host.view)?.string.contains("Reply line 79.") == true }
         XCTAssertTrue(mounted); guard mounted else { return }

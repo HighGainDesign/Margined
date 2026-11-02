@@ -89,7 +89,8 @@ final class Build12DeliveryTests: XCTestCase {
         func walk(_ item: Any) -> AnyObject? {
             guard let object = item as? NSObject, visited.insert(ObjectIdentifier(object)).inserted else { return nil }
             let element: AnyObject = object
-            if [.button, .link].contains(element.accessibilityRole?() ?? .unknown), element.accessibilityLabel?() == name { return element }
+            if [.button, .link].contains(element.accessibilityRole?() ?? .unknown),
+               element.accessibilityLabel?() == name || element.accessibilityTitle?() == name { return element }
             for child in element.accessibilityChildren?() ?? [] { if let found = walk(child) { return found } }
             for child in (object as? NSView)?.subviews ?? [] { if let found = walk(child) { return found } }
             return nil

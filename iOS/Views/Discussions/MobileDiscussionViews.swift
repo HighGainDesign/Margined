@@ -365,7 +365,8 @@ private struct MobileDiscussionComposerFields: View {
         shortTyping ? AnyLayout(HStackLayout(alignment: .bottom, spacing: 8)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
     }
     private var actionLayout: AnyLayout {
-        shortTyping ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 0)) : AnyLayout(HStackLayout())
+        shortTyping && reader.discussionFocus?.input != .name
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 0)) : AnyLayout(HStackLayout())
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
