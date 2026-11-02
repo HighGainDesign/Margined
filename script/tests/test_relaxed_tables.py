@@ -88,6 +88,16 @@ class RelaxedTableTests(unittest.TestCase):
         self.assertIn("A `command | output`\n", result)
         self.assertIn("| One | Two |", result)
 
+    def test_leading_only_single_cell_header_is_not_replaced(self):
+        source = "| Heading\n| --- |\n| Value |\n"
+        self.assertEqual(self.preprocess(source, headerless=True), source)
+
+    def test_leading_only_single_cell_body_is_a_headerless_table(self):
+        source = "| --- |\n| value\n"
+        result = self.preprocess(source, headerless=True)
+        self.assertNotEqual(result, source)
+        self.assertIn("| value\n", result)
+
     def test_pathological_unmatched_backticks_preserve_source_with_bounded_work(self):
         runs = " ".join("`" * width for width in range(1, 513))
         source = f"- [ ] {runs} | literal\n- [ ] {runs} | literal\n"

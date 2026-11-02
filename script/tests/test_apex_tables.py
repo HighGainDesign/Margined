@@ -100,5 +100,16 @@ class ApexTableTests(unittest.TestCase):
         self.assertEqual(sum(tag == "td" for tag, _ in Tables(html).tags), 4)
         self.assertIn("<code>echo a | cat</code>", html)
 
+    def test_single_cell_leading_only_header_keeps_its_heading(self):
+        html = self.convert("| Heading\n| --- |\n| Value |\n")
+        self.assertEqual(sum(tag == "table" for tag, _ in Tables(html).tags), 1)
+        self.assertRegex(html, r"<th(?:\s[^>]*)?>Heading</th>")
+        self.assertIn("Value", html)
+
+    def test_single_cell_leading_only_body_still_renders_a_table(self):
+        html = self.convert("| --- |\n| value\n")
+        self.assertEqual(sum(tag == "table" for tag, _ in Tables(html).tags), 1)
+        self.assertRegex(html, r"<t[dh](?:\s[^>]*)?>value</t[dh]>")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

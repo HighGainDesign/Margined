@@ -15,6 +15,16 @@ final class RenderingTests: XCTestCase {
         }
     }
 
+    func testSingleCellTablesKeepLeadingOnlyRows() async throws {
+        for source in ["| Heading\n| --- |\n| Value |\n", "| --- |\n| value\n"] {
+            let rendered = try await MarkdownRenderer.shared.render(source)
+            let document = try SwiftSoup.parse(rendered.html)
+            XCTAssertEqual(try document.select("table").size(), 1)
+            XCTAssertEqual(try document.select("tbody td, tbody th").text().lowercased(), "value")
+            if source.contains("Heading") { XCTAssertEqual(try document.select("th").text(), "Heading") }
+        }
+    }
+
     #if DEBUG
     func testTrustedStartupLongerThanTheDiagramBudgetStillRenders() async throws {
         let artifact = await DiagramRenderer.renderForTesting("flowchart LR\nA[Read]-->B[Review]",

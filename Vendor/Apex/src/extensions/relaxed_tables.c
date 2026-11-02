@@ -115,23 +115,14 @@ static size_t skip_code_span(const char *line, size_t len, size_t start,
     return opening_end - 1;
 }
 
-static int count_columns(const char *line, size_t len) {
+static int count_structural_pipes(const char *line, size_t len) {
     if (!line || len == 0) return -1;
 
-    bool has_pipe = false;
     int pipe_count = 0;
-
-    /* Skip leading whitespace */
-    size_t start = 0;
-    while (start < len && (line[start] == ' ' || line[start] == '\t')) {
-        start++;
-    }
-
-    bool starts_with_pipe = (start < len && line[start] == '|');
 
     size_t scan_budget = len <= SIZE_MAX / 4 ? len * 4 : SIZE_MAX;
     /* Count structural pipes, not literal punctuation in inline content. */
-    for (size_t i = start; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
         if (line[i] == '\\' && i + 1 < len) { i++; continue; }
         if (line[i] == '`') {
             bool exhausted = false;
@@ -141,17 +132,19 @@ static int count_columns(const char *line, size_t len) {
         }
         i = skip_wiki_link(line, len, i);
         if (line[i] == '|') {
-            has_pipe = true;
             pipe_count++;
-            if (i == start) {
-                starts_with_pipe = true;
-            }
-            /* Check if this is the last non-whitespace character */
-            /* Note: ends_with_pipe was set but never used, removed to fix warning */
         }
     }
+    return pipe_count;
+}
 
-    if (!has_pipe) return -1;
+static int count_columns(const char *line, size_t len) {
+    int pipe_count = count_structural_pipes(line, len);
+    if (pipe_count <= 0) return -1;
+
+    size_t start = 0;
+    while (start < len && (line[start] == ' ' || line[start] == '\t')) start++;
+    bool starts_with_pipe = (start < len && line[start] == '|');
 
     /* Calculate number of columns:
      * - If line starts with | and ends with |: columns = pipe_count - 1
@@ -368,8 +361,8 @@ static char *generate_separator_row(int num_columns, bool starts_with_pipe) {
 static bool is_table_row(const char *line, size_t len) {
     if (!line || len == 0) return false;
 
-    /* Must contain a pipe */
-    bool has_pipe = count_columns(line, len) > 0;
+    /* Pipe presence is distinct from column count for leading-only rows. */
+    bool has_pipe = count_structural_pipes(line, len) > 0;
     bool has_content = false;
 
     for (size_t i = 0; i < len; i++) {
