@@ -6,6 +6,9 @@ import XCTest
 
 @MainActor
 final class MobileWebViewTests: XCTestCase {
+    // Named content worlds are weakly cached. Keep the probe's world alive
+    // until the coordinator's lazy Find world and its clear operation exist.
+    private static let findProbeWorld = WKContentWorld.world(name: "MarginedMobileFind")
     func testClearingFindRemovesNativeHighlightsAndPreservesAnotherSelection() async throws {
         let reader = MobileReaderState()
         addTeardownBlock { @MainActor in await reader.close() }
@@ -44,6 +47,10 @@ final class MobileWebViewTests: XCTestCase {
             let collapsed = try await web.evaluateJavaScript("getSelection().isCollapsed") as? Bool
             let marks = try await self.findPixels(in: web)
             return reader.searchMatch == nil && collapsed == true && marks < 20
+        }
+        if !firstClear {
+            let state = try await web.callAsyncJavaScript("return JSON.stringify({probe:window.__marginedTestFindClearProbe,scratch:Object.prototype.hasOwnProperty.call(window,'__marginedFindRestore'),selected:getSelection().toString(),collapsed:getSelection().isCollapsed});", arguments: [:], in: nil, contentWorld: WKContentWorld.world(name: "MarginedMobileFind"))
+            print("FIND-CLEAR-STATE \(String(describing: state)) match=\(String(describing:reader.searchMatch)) pixels=\(try await findPixels(in:web))")
         }
         XCTAssertTrue(firstClear, "Clearing Find removes its own selection as well as its yellow overlay")
         reader.searchText = "Findneedle"; reader.find()
@@ -87,7 +94,7 @@ final class MobileWebViewTests: XCTestCase {
         });
         return true;
         """, arguments: ["id": probe], in: nil,
-            contentWorld: WKContentWorld.world(name: "MarginedMobileFind")) as? Bool
+            contentWorld: Self.findProbeWorld) as? Bool
         XCTAssertEqual(installed, true, "The previous Find clear must finish before observing the next one")
         return probe
     }
@@ -98,7 +105,7 @@ final class MobileWebViewTests: XCTestCase {
         return probe?.id===id && probe.started &&
             !Object.prototype.hasOwnProperty.call(window, '__marginedFindRestore');
         """, arguments: ["id": probe], in: nil,
-            contentWorld: WKContentWorld.world(name: "MarginedMobileFind")) as? Bool
+            contentWorld: Self.findProbeWorld) as? Bool
         return finished == true
     }
 

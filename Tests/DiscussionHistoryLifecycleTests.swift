@@ -231,10 +231,10 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         const events=[];
         const record=phase=>{
             const anchor=document.getElementById('tail-anchor');
+            const top=anchor?.getBoundingClientRect().top;
             events.push({phase,time:performance.now(),y:scrollY,width:innerWidth,height:innerHeight,
-                visualHeight:visualViewport?.height,anchor:anchor?.getBoundingClientRect().top,
-                expanded:document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded'),
-                saved:window.marginedHistoryDisclosure?.capture()?.candidates?.[0]?.id});
+                visualHeight:visualViewport?.height,anchor:top,anchorDocumentTop:top+scrollY,
+                expanded:document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')});
             if(events.length>80)events.shift();
         };
         window.disclosureProbe={events,record};
@@ -249,6 +249,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
         let collapsedAnchor = try await web.evaluateJavaScript("document.getElementById('tail-anchor').getBoundingClientRect().top") as? Double
         XCTAssertEqual(collapsedAnchor ?? 0, 24, accuracy: 2, "Collapsing an earlier body keeps the paragraph being read in place")
+        if abs((collapsedAnchor ?? 0) - 24) > 2 { await recordDisclosureFailure(web, phase: "collapsed") }
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
         let expandedAnchor = try await web.evaluateJavaScript("document.getElementById('tail-anchor').getBoundingClientRect().top") as? Double
         XCTAssertEqual(expandedAnchor ?? 0, 24, accuracy: 2, "Expanding inline preserves the shared history scroll anchor")
@@ -265,6 +266,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
             try await web.evaluateJavaScript("window.disclosureDocument===document && document.body.textContent.includes('Updated latest text') && document.body.style.fontSize==='18px' && document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true' && Math.abs(document.getElementById('tail-anchor').getBoundingClientRect().top-24)<2") as? Bool == true
         }
         XCTAssertTrue(retained, "Reconciliation retains stable message disclosure and semantic scroll position")
+        if !retained { await recordDisclosureFailure(web, phase: "reconciled") }
         let probe = try await web.callAsyncJavaScript("window.disclosureProbe.record('reconciled');return JSON.stringify(window.disclosureProbe.events)", arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
         print("DISCLOSURE-TIMELINE \(String(describing: probe))")
         let lease = Mirror(reflecting: coordinator).children.filter { ["ready", "generation", "presentationRestore", "navigation"].contains($0.label ?? "") }.map { "\($0.label ?? "")=\($0.value)" }.joined(separator: ", ")
@@ -411,6 +413,40 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
     private func disclosureHTML() -> String {
         let long = (0..<16).map { "Saved line \($0).<br>" }.joined() + "Tail preserved <a id='hidden-link' href='#latest'>Offscreen saved link</a>"
         return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>html{overflow-anchor:none}body{margin:0;font-size:16px;line-height:24px}main{padding:16px}article{margin-bottom:24px}#tail-anchor{margin-top:32px}.discussion-message-body{line-height:24px}</style></head><body><main id='document'><article id='older' data-message-id='older'><header>Earlier author</header><div class='discussion-message-body' data-margined-speech='saved-body'>" + long + "</div></article><article id='boundary' data-message-id='boundary'><div class='discussion-message-body'>One<br>Two<br>Three<br>Four<br>Five<br>Six<br>Seven<br>Eight</div></article><article id='latest' data-message-id='latest'><header>Latest author</header><div class='discussion-message-body'><a href='#older'>Earlier comment</a><p>Latest text</p>" + long + "</div></article>" + (0..<30).map { "<p id='tail-\($0)'>Following paragraph \($0).</p>" }.joined() + "<p id='tail-anchor'>Retained reading anchor.</p><div style='height:800px'></div></main></body></html>"
+    }
+
+    private func recordDisclosureFailure(_ web: WKWebView, phase: String) async {
+        func native() -> [String: String] {
+            var value = ["bounds": String(describing: web.bounds)]
+            #if os(iOS)
+            value["offset"] = String(describing: web.scrollView.contentOffset)
+            value["contentSize"] = String(describing: web.scrollView.contentSize)
+            value["adjustedInset"] = String(describing: web.scrollView.adjustedContentInset)
+            value["presentationOrigin"] = String(describing: web.scrollView.layer.presentation()?.bounds.origin)
+            #endif
+            return value
+        }
+        let before = native()
+        do {
+            let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+            let image = try await web.takeSnapshot(configuration: configuration)
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "Disclosure \(phase) after screen updates"; attachment.lifetime = .keepAlways
+            add(attachment)
+        } catch { print("DISCLOSURE-SNAPSHOT-ERROR phase=\(phase) code=\((error as NSError).code)") }
+        let after = native()
+        let dom = try? await web.callAsyncJavaScript("""
+        const target=document.getElementById('tail-anchor');
+        return JSON.stringify({sameDocument:window.disclosureDocument===document,
+            updatedText:document.body.textContent.includes('Updated latest text'),font:document.body.style.fontSize,
+            expanded:document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded'),
+            anchor:target?.getBoundingClientRect().top,anchorDocumentTop:target?.getBoundingClientRect().top+scrollY,y:scrollY,width:innerWidth,height:innerHeight,
+            scrollHeight:document.documentElement.scrollHeight,
+            visual:visualViewport?{top:visualViewport.offsetTop,pageTop:visualViewport.pageTop,height:visualViewport.height,scale:visualViewport.scale}:null,
+            hit24:document.elementFromPoint(document.documentElement.clientWidth/2,24)?.closest('p')?.id,
+            olderHeight:document.getElementById('older')?.getBoundingClientRect().height});
+        """, arguments: [:], in: nil, contentWorld: .page)
+        print("DISCLOSURE-PRESENTATION phase=\(phase) before=\(before) after=\(after) dom=\(String(describing: dom))")
     }
 
     private func layoutViewportWidth(_ web: WKWebView) -> CGFloat {

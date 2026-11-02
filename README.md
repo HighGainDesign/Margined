@@ -124,6 +124,9 @@ Remote images are off by default. **Load Remote Images** opts the current docume
 into HTTPS image requests; hosts can see your IP address. Margined sends no document
 referrer. The choice resets when the document closes. Quick Look stays offline.
 
+See the [privacy policy](PRIVACY.md) for file handling, optional connections and
+TestFlight feedback.
+
 Authors can size images using GitHub-style HTML; printing adds no arbitrary cap:
 
 ```html
