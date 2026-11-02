@@ -49,7 +49,7 @@ struct MarkdownTaskProbe {
             }
             print("PASS \(labels.count)/\(rendered.checkboxCount) exact mappings and one-byte edits")
         }
-        if CommandLine.arguments.count == 2 {
+        if CommandLine.arguments.count >= 2 {
             let source = try String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)
             let rendered = try await MarkdownRenderer.shared.render(source, mapTasks: true)
             let discussions = try DiscussionCodec.parse(source)
@@ -60,6 +60,20 @@ struct MarkdownTaskProbe {
                 throw failure("Authoring skill example failed its real codec/task contract")
             }
             print("PASS skill example: 3 mappings, 1 thread, 2 messages, linked reply")
+        }
+        for path in CommandLine.arguments.dropFirst(2) {
+            let source = try String(contentsOfFile: path, encoding: .utf8)
+            let rendered = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+            guard rendered.checkboxCount == 3, rendered.tasks.count == 3 else {
+                throw failure("Build 14 authoring sample must have 3 exact task mappings")
+            }
+            for task in rendered.tasks {
+                let changed = try MarkdownTasks.patch(Data(source.utf8), expectedSource: source, task: task, checked: !task.checked)
+                guard zip(Data(source.utf8), changed).filter({ $0 != $1 }).count == 1 else {
+                    throw failure("Build 14 sample did not preserve a one-byte checkbox edit")
+                }
+            }
+            print("PASS Build 14 authoring sample: 3 mappings and one-byte edits")
         }
     }
 

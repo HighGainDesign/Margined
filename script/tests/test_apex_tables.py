@@ -94,5 +94,11 @@ class ApexTableTests(unittest.TestCase):
         self.assertIn("<code>&lt;&lt;</code>", html)
         self.assertIn("Escape", html)
 
+    def test_escaped_pipelines_preserve_relaxed_table_cells(self):
+        html = self.convert("| Command | Result |\n| `echo a \\| cat` | a |\n")
+        self.assertEqual(sum(tag == "table" for tag, _ in Tables(html).tags), 1)
+        self.assertEqual(sum(tag == "td" for tag, _ in Tables(html).tags), 4)
+        self.assertIn("<code>echo a | cat</code>", html)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
