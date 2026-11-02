@@ -91,7 +91,7 @@
   "src/extensions/quarto_shortcodes.h": "7e7b7bafffd33c0a2c1e919fbeb83355918908c4fdc56e9bbf529d8d0755029a",
   "src/extensions/raw_content.c": "3b7a46dbba686a298279606782245f25c16a127a479d83b40c8391678d39f632",
   "src/extensions/raw_content.h": "2aab890b9759f0e3f690bc20abb3217a4213d2b7619081416e9277d9cb796b01",
-  "src/extensions/relaxed_tables.c": "db042e51ca7bf3a2651b96e89fb0f9f40f36c4fd3b90a40dd3a754c29fd0314d",
+  "src/extensions/relaxed_tables.c": "b0869260214862597e1c3b017669b9f7eae0d324acca7b787fa824662e0d12fd",
   "src/extensions/relaxed_tables.h": "01039a1c94703178829c6c2132596a678f75ffdff99e4a61e5973d8d28072898",
   "src/extensions/special_markers.c": "5fbdb0216ac9f91bb44a0a0bee7d434a73518814d06e93bb88134096360be073",
   "src/extensions/special_markers.h": "e72dd6c0505118c63220375cd8224504fa1995822f7fce34cb1d38bb803fbbf8",

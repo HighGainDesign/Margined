@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <stdint.h>
 
 /* Grow output buffer if needed; returns false on OOM. */
 static bool apex_relaxed_ensure(char **output, char **write, size_t *remaining,
@@ -87,6 +88,33 @@ static size_t skip_wiki_link(const char *line, size_t len, size_t i) {
     return i;
 }
 
+/*
+ * A code span closes only at a backtick run of the same length. Backslashes
+ * inside the span are literal; outside it they escape the next character.
+ * An unmatched opening run stays literal, so later real pipes still count.
+ * Bound lookahead across unmatched runs. On exhaustion the caller declines
+ * relaxed-table rewriting of this line, preserving its original Markdown.
+ */
+static size_t skip_code_span(const char *line, size_t len, size_t start,
+                             size_t *budget, bool *exhausted) {
+    size_t opening_end = start + 1;
+    while (opening_end < len && line[opening_end] == '`') opening_end++;
+    size_t width = opening_end - start;
+    for (size_t next = opening_end; next < len;) {
+        if (*budget == 0) { *exhausted = true; return opening_end - 1; }
+        (*budget)--;
+        if (line[next++] != '`') continue;
+        size_t closing_start = next - 1;
+        while (next < len && line[next] == '`') {
+            if (*budget == 0) { *exhausted = true; return opening_end - 1; }
+            (*budget)--;
+            next++;
+        }
+        if (next - closing_start == width) return next - 1;
+    }
+    return opening_end - 1;
+}
+
 static int count_columns(const char *line, size_t len) {
     if (!line || len == 0) return -1;
 
@@ -101,8 +129,16 @@ static int count_columns(const char *line, size_t len) {
 
     bool starts_with_pipe = (start < len && line[start] == '|');
 
-    /* Count pipes */
+    size_t scan_budget = len <= SIZE_MAX / 4 ? len * 4 : SIZE_MAX;
+    /* Count structural pipes, not literal punctuation in inline content. */
     for (size_t i = start; i < len; i++) {
+        if (line[i] == '\\' && i + 1 < len) { i++; continue; }
+        if (line[i] == '`') {
+            bool exhausted = false;
+            i = skip_code_span(line, len, i, &scan_budget, &exhausted);
+            if (exhausted) return -1;
+            continue;
+        }
         i = skip_wiki_link(line, len, i);
         if (line[i] == '|') {
             has_pipe = true;
@@ -333,7 +369,7 @@ static bool is_table_row(const char *line, size_t len) {
     if (!line || len == 0) return false;
 
     /* Must contain a pipe */
-    bool has_pipe = false;
+    bool has_pipe = count_columns(line, len) > 0;
     bool has_content = false;
 
     for (size_t i = 0; i < len; i++) {
@@ -344,9 +380,7 @@ static bool is_table_row(const char *line, size_t len) {
             continue;
         }
         unsigned char c = (unsigned char)line[i];
-        if (c == '|') {
-            has_pipe = true;
-        } else if (!isspace(c) && c != '-') {
+        if (c != '|' && !isspace(c) && c != '-') {
             /* Has content that's not just dashes */
             has_content = true;
         }
