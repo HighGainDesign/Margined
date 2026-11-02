@@ -50,10 +50,14 @@ enum MarkdownTasks {
                         let state = prefix.utf8.count - 2
                         // The match ends at ], so the state is the penultimate byte.
                         let markerOffset = offset + state
-                        if bytes.indices.contains(markerOffset), let paragraph = cmark_node_first_child(node),
-                           let html = cmark_render_html(paragraph, Int32(CMARK_OPT_UNSAFE), nil) {
+                        if bytes.indices.contains(markerOffset),
+                           let html = cmark_render_html(node, Int32(CMARK_OPT_UNSAFE), nil) {
                             defer { free(html) }
-                            let label = try SwiftSoup.parseBodyFragment(String(cString: html)).text()
+                            let item = try SwiftSoup.parseBodyFragment(String(cString: html))
+                            // Match the whole item's own blocks, including fenced
+                            // commands, but never a nested list's separate tasks.
+                            try item.select("ul, ol").remove()
+                            let label = try item.text()
                             let cleaned = label.hasPrefix("[") && label.dropFirst(2).hasPrefix("]") ? String(label.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines) : ""
                             candidates.append((markerOffset, bytes[markerOffset], cleaned))
                         }
@@ -67,7 +71,7 @@ enum MarkdownTasks {
         guard candidates.count == inputs.count else { return [] }
         var tasks: [MarkdownTask] = []
         for (index, input) in inputs.enumerated() {
-            guard let parent = input.parent() else { return [] }
+            guard let parent = input.parents().array().first(where: { $0.tagName() == "li" }) else { return [] }
             guard let copy = try SwiftSoup.parseBodyFragment(parent.html()).body() else { return [] }
             try copy.select("ul, ol").remove()
             let label = try copy.text()
