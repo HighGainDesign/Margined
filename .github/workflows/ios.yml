@@ -3,7 +3,23 @@ name: iOS validation
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - CHANGELOG.md
+      - README.md
+      - ROADMAP.md
+      - PRIVACY.md
+      - .github/workflows/ci.yml
+      - .github/workflows/tests.yml
+      - .github/workflows/release.yml
   pull_request:
+    paths-ignore:
+      - CHANGELOG.md
+      - README.md
+      - ROADMAP.md
+      - PRIVACY.md
+      - .github/workflows/ci.yml
+      - .github/workflows/tests.yml
+      - .github/workflows/release.yml
   workflow_dispatch:
 
 permissions:
