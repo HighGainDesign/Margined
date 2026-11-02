@@ -57,6 +57,7 @@ DMG_PYTHON="${MARGINED_DMG_PYTHON:-python3}"
 cp "$APP/Contents/Resources/AppIcon.icns" "$STAGE/.VolumeIcon.icns"
 SetFile -a C "$STAGE"
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")
+bash "$ROOT_DIR/script/package-skill.sh" "$VERSION"
 DMG="$ROOT_DIR/dist/Margined-$VERSION.dmg"
 hdiutil create -volname Margined -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 codesign --force --sign "$IDENTITY" --timestamp "$DMG"

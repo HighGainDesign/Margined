@@ -142,6 +142,8 @@ jobs:
           path: |
             dist/Margined-${{ steps.version.outputs.version }}.dmg
             dist/Margined-${{ steps.version.outputs.version }}.dmg.sha256
+            dist/Margined-Markdown-Skill-${{ steps.version.outputs.version }}.zip
+            dist/Margined-Markdown-Skill-${{ steps.version.outputs.version }}.zip.sha256
             dist/release-notes.md
           if-no-files-found: error
           retention-days: 7
@@ -168,7 +170,7 @@ jobs:
           IS_PRERELEASE: ${{ needs.build.outputs.prerelease }}
         run: |
           set -euo pipefail
-          (cd dist; sha256sum -c "Margined-$RELEASE_VERSION.dmg.sha256")
+          (cd dist; sha256sum -c "Margined-$RELEASE_VERSION.dmg.sha256" "Margined-Markdown-Skill-$RELEASE_VERSION.zip.sha256")
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             echo 'This release already exists; refusing to replace published files.' >&2
             exit 1
@@ -181,4 +183,5 @@ jobs:
           fi
           gh release create "$RELEASE_TAG" \
             "dist/Margined-$RELEASE_VERSION.dmg" "dist/Margined-$RELEASE_VERSION.dmg.sha256" \
+            "dist/Margined-Markdown-Skill-$RELEASE_VERSION.zip" "dist/Margined-Markdown-Skill-$RELEASE_VERSION.zip.sha256" \
             --verify-tag --title "Margined ${RELEASE_TAG#v}" --notes-file dist/release-notes.md "${release_flags[@]}"
