@@ -23,3 +23,30 @@ func activateNativeTestApplication() async throws {
     }
     XCTFail("Launch Services did not activate the native test host")
 }
+
+/// AX children are opaque objects; a SwiftUI accessibility proxy need not be an
+/// NSObject subclass. Use selector availability and retain cycle protection.
+@MainActor
+func nativeTestButton(named names: [String], in root: Any, diagnose: Bool = false) -> AnyObject? {
+    var visited: Set<ObjectIdentifier> = []
+    var count = 0
+    func walk(_ item: Any) -> AnyObject? {
+        let element = item as AnyObject
+        guard visited.insert(ObjectIdentifier(element)).inserted else { return nil }
+        let role = element.accessibilityRole?() ?? .unknown
+        let labels = [element.accessibilityLabel?(), element.accessibilityTitle?()].compactMap { $0 }
+        let children = element.accessibilityChildren?() ?? []
+        if diagnose, count < 150 {
+            print("NATIVE-AX type=\(type(of: item)) NSObject=\(item is NSObject) role=\(role) names=\(labels) children=\(children.count) frame=\(String(describing: element.accessibilityFrame?()))")
+            count += 1
+        }
+        if [.button, .link].contains(role), labels.contains(where: names.contains) {
+            if !(item is NSObject) { print("NATIVE-AX-MATCH type=\(type(of: item)) names=\(labels) NSObject=false") }
+            return element
+        }
+        for child in children { if let found = walk(child) { return found } }
+        for child in (item as? NSView)?.subviews ?? [] { if let found = walk(child) { return found } }
+        return nil
+    }
+    return walk(root)
+}

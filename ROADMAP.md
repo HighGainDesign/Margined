@@ -43,10 +43,10 @@ remains limited; use Open With or Share.
 The current [2.0 delivery tracker](https://github.com/HighGainDesign/Margined/issues/24)
 targets these next steps; build numbers may move if additional fixes are needed:
 
-- **Build 14:** checklist correctness first, including inline pipelines and
-  nested commands, then bounded folder/navigation polish. Work is local; Build 13
-  manual testing continues alongside it. Broader menu/navigation changes remain
-  pending feedback and acceptance.
+- **Build 14:** correct checklists containing inline pipelines and nested
+  commands, and suggest the current document's folder for iOS image access.
+  Combined Build 11–14 manual testing continues. Broader menu/navigation changes
+  remain pending feedback and acceptance.
 - **Build 15:** required compact choose-one checkboxes and focused text responses,
   with explicit readable Markdown conventions, safe saves/Undo and a matching
   authoring-skill update. The exact grammar and UX need focused review; these

@@ -12,30 +12,17 @@ final class SpeechPlayerIntegrationTests: XCTestCase {
         try await activateNativeTestApplication()
         fixture.window.makeKeyAndOrderFront(nil)
         fixture.host.view.layoutSubtreeIfNeeded()
-        var labels: [String] = []
-        func readButton(_ element: Any) -> AnyObject? {
-            var visited: Set<ObjectIdentifier> = []
-            func walk(_ element: Any) -> AnyObject? {
-                guard let object = element as? NSObject, visited.insert(ObjectIdentifier(object)).inserted else { return nil }
-                let accessible: AnyObject = object
-                let names = [accessible.accessibilityLabel?(), accessible.accessibilityTitle?()].compactMap { $0 }
-                if labels.count < 80 { labels.append(contentsOf: names) }
-                if accessible.accessibilityRole?() == .button,
-                   names.contains(where: { ["Read Aloud controls", "Read Aloud", "Pause Reading", "Resume Reading"].contains($0) }) { return accessible }
-                let children = accessible.accessibilityChildren?() ?? []
-                for child in children { if let result = walk(child) { return result } }
-                for child in (object as? NSView)?.subviews ?? [] {
-                    if let result = walk(child) { return result }
-                }
-                return nil
-            }
-            return walk(element)
+        func readButton(_ root: Any) -> AnyObject? {
+            nativeTestButton(named: ["Read Aloud controls", "Read Aloud", "Pause Reading", "Resume Reading"], in: root)
         }
         for _ in 0..<100 {
             if readButton(fixture.host.view) != nil { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        let button = try XCTUnwrap(readButton(fixture.host.view), "Find the actual native toolbar action: \(labels)")
+        if readButton(fixture.host.view) == nil {
+            _ = nativeTestButton(named: ["Read Aloud", "Pause Reading", "Resume Reading"], in: fixture.window, diagnose: true)
+        }
+        let button = try XCTUnwrap(readButton(fixture.host.view), "Find the actual native toolbar action")
         XCTAssertTrue(button.accessibilityPerformPress?() == true)
         for _ in 0..<100 where fixture.driver.requests.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(fixture.driver.requests.count, 1, "Read Aloud must start playback on its first activation")

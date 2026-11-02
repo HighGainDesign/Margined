@@ -21,7 +21,10 @@ final class DiscussionCaretTests: XCTestCase {
         let host = NSHostingController(rootView: ReaderView(reader: reader))
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 1120, height: 900)); window.makeKeyAndOrderFront(nil)
+        window.setContentSize(NSSize(width: 1120, height: 900))
+        print("CARET-SIZING beforeShow=\(window.frame) content=\(host.view.bounds) sizing=\(host.sizingOptions)")
+        window.makeKeyAndOrderFront(nil)
+        print("CARET-SIZING afterShow=\(window.frame) content=\(host.view.bounds) screen=\(String(describing: window.screen?.visibleFrame))")
         defer { reader.discussions.discardDrafts(); reader.stop(); window.close(); try? FileManager.default.removeItem(at: file) }
         let rendered = await poll { reader.rendered?.discussions?.threads.count == 1 && !reader.isRendering }
         XCTAssertTrue(rendered); guard rendered else { return }
@@ -40,6 +43,14 @@ final class DiscussionCaretTests: XCTestCase {
         let laidOut = await poll {
             host.view.layoutSubtreeIfNeeded()
             return history.bounds.height > 300
+        }
+        if !laidOut {
+            print("CARET-LAYOUT window=\(window.frame) content=\(String(describing: window.contentView?.bounds)) host=\(host.view.bounds) history=\(history.bounds) attached=\(history.window === window) screen=\(String(describing: window.screen?.visibleFrame))")
+            var ancestor: NSView? = history.superview
+            while let view = ancestor {
+                print("CARET-ANCESTOR type=\(type(of: view)) bounds=\(view.bounds) frame=\(view.frame)")
+                ancestor = view.superview
+            }
         }
         XCTAssertTrue(laidOut, "Wait for the selected history's final layout")
         XCTAssertGreaterThan(history.bounds.height, 300, "Selected history fills the focused pane instead of a fixed 240-point nested card")
