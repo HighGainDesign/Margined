@@ -227,6 +227,23 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         coordinator.update(html: disclosureHTML(), fontSize: 16, imageGeneration: 0)
         let ready = await poll { try await web.evaluateJavaScript("!!document.querySelector('[data-message-id=older] button')") as? Bool == true }
         XCTAssertTrue(ready); guard ready else { return }
+        _ = try await web.callAsyncJavaScript("""
+        const events=[];
+        const record=phase=>{
+            const anchor=document.getElementById('tail-anchor');
+            events.push({phase,time:performance.now(),y:scrollY,width:innerWidth,height:innerHeight,
+                visualHeight:visualViewport?.height,anchor:anchor?.getBoundingClientRect().top,
+                expanded:document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded'),
+                saved:window.marginedHistoryDisclosure?.capture()?.candidates?.[0]?.id});
+            if(events.length>80)events.shift();
+        };
+        window.disclosureProbe={events,record};
+        const originalScrollTo=window.scrollTo.bind(window);
+        window.scrollTo=(...args)=>{record('scrollTo-before:'+JSON.stringify(args));originalScrollTo(...args);record('scrollTo-after')};
+        for(const type of ['scroll','resize'])window.addEventListener(type,()=>record(type));
+        document.addEventListener('click',()=>{record('click-before');queueMicrotask(()=>record('click-after'));requestAnimationFrame(()=>record('click-frame'))},true);
+        record('initial');return true;
+        """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
         try await reveal("tail-anchor", in: web)
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
@@ -248,6 +265,8 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
             try await web.evaluateJavaScript("window.disclosureDocument===document && document.body.textContent.includes('Updated latest text') && document.body.style.fontSize==='18px' && document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true' && Math.abs(document.getElementById('tail-anchor').getBoundingClientRect().top-24)<2") as? Bool == true
         }
         XCTAssertTrue(retained, "Reconciliation retains stable message disclosure and semantic scroll position")
+        let probe = try await web.callAsyncJavaScript("window.disclosureProbe.record('reconciled');return JSON.stringify(window.disclosureProbe.events)", arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
+        print("DISCLOSURE-TIMELINE \(String(describing: probe))")
         let lease = Mirror(reflecting: coordinator).children.filter { ["ready", "generation", "presentationRestore", "navigation"].contains($0.label ?? "") }.map { "\($0.label ?? "")=\($0.value)" }.joined(separator: ", ")
         coordinator.invalidate()
         let cached = await state.restorePosition()

@@ -7,6 +7,29 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    func testReplyOCRFindsOnlyTheWordBoundsInsideAMergedRow() throws {
+        let image = replyOCRFixture("Reader • Reply")
+        let bounds = try XCTUnwrap(recognizedBounds("Reply", in: XCTUnwrap(image.cgImage), size: image.size))
+        XCTAssertGreaterThan(bounds.minX, 80, "Measure Reply rather than the neighboring Reader text")
+        XCTAssertLessThan(bounds.width, 80, "Return the word's glyph bounds rather than the entire merged row")
+        XCTAssertLessThanOrEqual(bounds.maxY, image.size.height)
+    }
+
+    func testReplyOCRRejectsMissingOrSimilarWords() throws {
+        for row in ["Reader • Post", "Reader • Replying", "Reader • PreReply"] {
+            let image = replyOCRFixture(row)
+            XCTAssertNil(try recognizedBounds("Reply", in: XCTUnwrap(image.cgImage), size: image.size), row)
+        }
+    }
+
+    private func replyOCRFixture(_ row: String) -> UIImage {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 3; format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: 320, height: 70), format: format).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 70))
+            (row as NSString).draw(at: CGPoint(x: 16, y: 16), withAttributes: [.font: UIFont.systemFont(ofSize: 24), .foregroundColor: UIColor.black])
+        }
+    }
+
     func testMountingANativeDraftEditorRestoresTheRetainedCaretBeforeObservingSelection() async throws {
         let f = try await fixture(withThread: true)
         let key = DiscussionSession.DraftKey.thread("t-mobile")
@@ -927,12 +950,26 @@ import XCTest
         let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+        return try recognizedBounds(text, in: XCTUnwrap(image.cgImage), size: window.bounds.size)
+    }
+
+    private func recognizedBounds(_ text: String, in image: CGImage, size: CGSize) throws -> CGRect? {
         let request = VNRecognizeTextRequest(); request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
-        try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage)).perform([request])
-        guard let found = request.results?.first(where: { $0.topCandidates(1).first?.string == text }) else { return nil }
-        let box = found.boundingBox
-        return CGRect(x: box.minX * window.bounds.width, y: (1 - box.maxY) * window.bounds.height,
-            width: box.width * window.bounds.width, height: box.height * window.bounds.height)
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        for observation in request.results ?? [] {
+            guard let candidate = observation.topCandidates(1).first else { continue }
+            // Vision may group neighboring controls in one text row. Match an
+            // exact word and retain its glyph bounds for the clipping checks.
+            var wordRange: Range<String.Index>?
+            candidate.string.enumerateSubstrings(in: candidate.string.startIndex..<candidate.string.endIndex, options: .byWords) { word, range, _, stop in
+                if word == text { wordRange = range; stop = true }
+            }
+            guard let wordRange, let box = try candidate.boundingBox(for: wordRange)?.boundingBox else { continue }
+            return CGRect(x: box.minX * size.width, y: (1 - box.maxY) * size.height,
+                width: box.width * size.width, height: box.height * size.height)
+        }
+        print("WORD-BOUNDS-OCR-MISS target=\(String(reflecting: text)) observations=\((request.results ?? []).compactMap { $0.topCandidates(1).first?.string })")
+        return nil
     }
 
     private func recognizedText(in window: UIWindow) throws -> String {
