@@ -19,7 +19,7 @@ final class DiscussionCaretTests: XCTestCase {
         try bytes.write(to: file)
         let reader = ReaderState(); reader.fileURL = file; reader.source = try MarkdownSource.decode(bytes); reader.render()
         let host = NSHostingController(rootView: ReaderView(reader: reader))
-        let window = NSWindow(contentViewController: host)
+        let window = NativeLayoutTestWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 1120, height: 900))
         print("CARET-SIZING beforeShow=\(window.frame) content=\(host.view.bounds) sizing=\(host.sizingOptions)")

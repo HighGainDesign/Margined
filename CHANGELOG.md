@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0-beta.3 — 2026-11-01
+## 2.0-beta.3 — 2026-11-02
 
 - Keep checklists usable with adjacent inline shell pipelines and fenced commands inside tasks.
 - Suggest the open document's folder when choosing iOS image-folder access.

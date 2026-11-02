@@ -200,7 +200,19 @@ import XCTest
             try await recordDuoGeometry(f, keyboard: keyboard, phase: "no-software-keyboard-typing-\(Int(size.width))x\(Int(size.height))")
             XCTAssertGreaterThanOrEqual(historyFrame.minY, content.minY, "Typing history cannot cover the native title")
             XCTAssertLessThanOrEqual(nameFrame.maxY, content.maxY + 1)
-            let reply = try XCTUnwrap(recognizedBounds("Reply", in: f.window), "Reply remains visible without a software keyboard")
+            // Native geometry can settle before SwiftUI has painted the new
+            // action layout. Await the actual visible label, not just bounds.
+            var paintedReply: CGRect?
+            for _ in 0..<30 {
+                paintedReply = try recognizedBounds("Reply", in: f.window)
+                if paintedReply != nil { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            if paintedReply == nil {
+                recordSheetEvidence(f, name: "Before-Reply-OCR-no-software-keyboard-\(Int(size.width))x\(Int(size.height))")
+                print("SHORT-REPLY-OCR size=\(size) text=\(try recognizedText(in: f.window))")
+            }
+            let reply = try XCTUnwrap(paintedReply, "Reply remains visible without a software keyboard")
             XCTAssertLessThanOrEqual(reply.maxY, content.maxY + 1)
             recordSheetEvidence(f, name: "Sheet-no-software-keyboard-\(Int(size.width))x\(Int(size.height))")
         }

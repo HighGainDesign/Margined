@@ -25,27 +25,36 @@ final class MobileWebViewTests: XCTestCase {
         reader.searchText = "Findneedle"; reader.find()
         let found = try await eventually { reader.searchMatch == true }
         XCTAssertTrue(found)
-        let highlighted = try await eventually { try await self.yellowPixels(in: web) > 80 }
-        if !highlighted {
-            let snapshot = try await web.takeSnapshot(configuration: nil)
-            let native = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-            }
-            for (name, image) in [("Find-WebKit-snapshot", snapshot), ("Find-native-window", native)] {
-                let attachment = XCTAttachment(image: image)
-                attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-            }
-            let direct = try await web.find("Findneedle", configuration: WKFindConfiguration())
-            print("FIND-VISUAL match=\(reader.searchMatch == true) direct=\(direct.matchFound) yellow=\(try await yellowPixels(in: web)) web=\(web.bounds) window=\(window.bounds)")
+        // iOS 26 paints a blue native text selection; iOS 27 paints yellow
+        // Find marks. Require an actual painted match in either presentation.
+        func paintedMatch() async throws -> Bool {
+            if try await self.findPixels(in: web) > 80 { return true }
+            let selected = try await web.evaluateJavaScript("getSelection().toString()") as? String
+            let bluePixels = try await self.findPixels(in: web, blue: true)
+            return selected == "Findneedle" && bluePixels > 80
         }
-        XCTAssertTrue(highlighted, "Establish visible native Find highlights before clearing")
+        let highlighted = try await eventually { try await paintedMatch() }
+        XCTAssertTrue(highlighted, "Establish a painted native Find match before clearing")
         guard highlighted else { return }
+        reader.searchText = ""; reader.find()
+        let firstClear = try await eventually {
+            let collapsed = try await web.evaluateJavaScript("getSelection().isCollapsed") as? Bool
+            let marks = try await self.findPixels(in: web)
+            return reader.searchMatch == nil && collapsed == true && marks < 20
+        }
+        XCTAssertTrue(firstClear, "Clearing Find removes its own selection as well as its yellow overlay")
+        reader.searchText = "Findneedle"; reader.find()
+        let foundAgain = try await eventually {
+            guard reader.searchMatch == true else { return false }
+            return try await paintedMatch()
+        }
+        XCTAssertTrue(foundAgain)
         _ = try await web.evaluateJavaScript("""
         const p=document.querySelector('main p:last-of-type'), r=document.createRange();
         r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);true;
         """)
         reader.searchText = ""; reader.find()
-        let cleared = try await eventually { try await self.yellowPixels(in: web) < 20 }
+        let cleared = try await eventually { try await self.findPixels(in: web) < 20 }
         XCTAssertTrue(cleared, "An empty query must clear WebKit's actual Find overlay")
         let selection = try await web.evaluateJavaScript("getSelection().toString()") as? String
         XCTAssertEqual(selection, "A different passage to discuss.")
@@ -53,7 +62,7 @@ final class MobileWebViewTests: XCTestCase {
         await reader.close()
     }
 
-    private func yellowPixels(in web: WKWebView) async throws -> Int {
+    private func findPixels(in web: WKWebView, blue: Bool = false) async throws -> Int {
         let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
         let image = try await web.takeSnapshot(configuration: configuration)
         let cg = try XCTUnwrap(image.cgImage)
@@ -64,7 +73,10 @@ final class MobileWebViewTests: XCTestCase {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
         return stride(from: 0, to: bytes.count, by: 4).reduce(0) { count, i in
-            count + (bytes[i] > 170 && bytes[i + 1] > 130 && bytes[i + 2] < 120 ? 1 : 0)
+            let red = Int(bytes[i]), green = Int(bytes[i + 1]), value = Int(bytes[i + 2])
+            let matched = blue ? value > 170 && value > red + 25 && value > green + 15
+                : red > 170 && green > 130 && value < 120
+            return count + (matched ? 1 : 0)
         }
     }
 

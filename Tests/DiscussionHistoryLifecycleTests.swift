@@ -235,10 +235,17 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
         let expandedAnchor = try await web.evaluateJavaScript("document.getElementById('tail-anchor').getBoundingClientRect().top") as? Double
         XCTAssertEqual(expandedAnchor ?? 0, 24, accuracy: 2, "Expanding inline preserves the shared history scroll anchor")
+        let captured = try await web.callAsyncJavaScript("""
+        const saved=window.marginedHistoryDisclosure.capture();
+        const rect=id=>{const r=document.getElementById(id).getBoundingClientRect();return {top:r.top,bottom:r.bottom}};
+        return {id:saved.candidates?.[0]?.id,top:saved.top,anchor:rect('tail-anchor'),previous:rect('tail-29')};
+        """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory")) as? [String: Any]
+        print("DISCLOSURE-ANCHOR-CAPTURE \(String(describing: captured))")
+        XCTAssertEqual(captured?["id"] as? String, "tail-anchor", "The fixture must identify the paragraph whose position it asserts")
         _ = try await web.evaluateJavaScript("window.disclosureDocument=document;true")
         coordinator.update(html: disclosureHTML().replacingOccurrences(of: "Latest text", with: "Updated latest text"), fontSize: 18, imageGeneration: 0)
         let retained = await poll {
-            try await web.evaluateJavaScript("window.disclosureDocument===document && document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true' && Math.abs(document.getElementById('tail-anchor').getBoundingClientRect().top-24)<2") as? Bool == true
+            try await web.evaluateJavaScript("window.disclosureDocument===document && document.body.textContent.includes('Updated latest text') && document.body.style.fontSize==='18px' && document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true' && Math.abs(document.getElementById('tail-anchor').getBoundingClientRect().top-24)<2") as? Bool == true
         }
         XCTAssertTrue(retained, "Reconciliation retains stable message disclosure and semantic scroll position")
         let lease = Mirror(reflecting: coordinator).children.filter { ["ready", "generation", "presentationRestore", "navigation"].contains($0.label ?? "") }.map { "\($0.label ?? "")=\($0.value)" }.joined(separator: ", ")
@@ -384,7 +391,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
 
     private func disclosureHTML() -> String {
         let long = (0..<16).map { "Saved line \($0).<br>" }.joined() + "Tail preserved <a id='hidden-link' href='#latest'>Offscreen saved link</a>"
-        return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>html{overflow-anchor:none}body{margin:0;font-size:16px;line-height:24px}main{padding:16px}article{margin-bottom:24px}.discussion-message-body{line-height:24px}</style></head><body><main id='document'><article id='older' data-message-id='older'><header>Earlier author</header><div class='discussion-message-body' data-margined-speech='saved-body'>" + long + "</div></article><article id='boundary' data-message-id='boundary'><div class='discussion-message-body'>One<br>Two<br>Three<br>Four<br>Five<br>Six<br>Seven<br>Eight</div></article><article id='latest' data-message-id='latest'><header>Latest author</header><div class='discussion-message-body'><a href='#older'>Earlier comment</a><p>Latest text</p>" + long + "</div></article>" + (0..<30).map { "<p id='tail-\($0)'>Following paragraph \($0).</p>" }.joined() + "<p id='tail-anchor'>Retained reading anchor.</p><div style='height:800px'></div></main></body></html>"
+        return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>html{overflow-anchor:none}body{margin:0;font-size:16px;line-height:24px}main{padding:16px}article{margin-bottom:24px}#tail-anchor{margin-top:32px}.discussion-message-body{line-height:24px}</style></head><body><main id='document'><article id='older' data-message-id='older'><header>Earlier author</header><div class='discussion-message-body' data-margined-speech='saved-body'>" + long + "</div></article><article id='boundary' data-message-id='boundary'><div class='discussion-message-body'>One<br>Two<br>Three<br>Four<br>Five<br>Six<br>Seven<br>Eight</div></article><article id='latest' data-message-id='latest'><header>Latest author</header><div class='discussion-message-body'><a href='#older'>Earlier comment</a><p>Latest text</p>" + long + "</div></article>" + (0..<30).map { "<p id='tail-\($0)'>Following paragraph \($0).</p>" }.joined() + "<p id='tail-anchor'>Retained reading anchor.</p><div style='height:800px'></div></main></body></html>"
     }
 
     private func layoutViewportWidth(_ web: WKWebView) -> CGFloat {
