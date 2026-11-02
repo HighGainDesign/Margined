@@ -25,9 +25,9 @@ actor DiagramRenderer {
     func render(_ source: String) async -> DiagramArtifact? {
         guard !Task.isCancelled, source.utf8.count <= 20_000 else { return nil }
         let key = SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined()
-        if let cached = cache[key] { trace("cache-hit"); return cached }
+        if let cached = cache[key] { return cached }
         // Do not queue unlimited private documents behind a slow graph.
-        guard active < 2 else { trace("capacity-rejected"); return nil }
+        guard active < 2 else { return nil }
         active += 1
         defer { active -= 1 }
         guard let artifact = await DiagramWorker.render(source) else { return nil }
@@ -39,12 +39,6 @@ actor DiagramRenderer {
             }
         }
         return artifact
-    }
-
-    private func trace(_ event: StaticString) {
-        #if DEBUG
-        print("DIAGRAM-RENDERER event=\(event) active=\(active) cache_entries=\(cache.count)")
-        #endif
     }
 }
 
@@ -59,10 +53,6 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
     private var executionTimer: Task<Void, Never>?
     #endif
     private let source: String
-    #if DEBUG
-    private let diagnosticID = UUID()
-    private let diagnosticStarted = DispatchTime.now().uptimeNanoseconds
-    #endif
     #if DEBUG && os(iOS)
     private var minimumStartupDuration = Duration.zero
     private var budgetStarted = ContinuousClock.now
@@ -93,13 +83,12 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         return await withTaskCancellationHandler {
             await worker.start()
         } onCancel: {
-            Task { @MainActor in worker.trace("cancel"); worker.finish(nil) }
+            Task { @MainActor in worker.finish(nil) }
         }
     }
 
     private func start() async -> DiagramArtifact? {
-        trace("start")
-        guard !Task.isCancelled else { trace("cancel-before-start"); return nil }
+        guard !Task.isCancelled else { return nil }
         return await withCheckedContinuation { completion in
             self.completion = completion
             let config = WKWebViewConfiguration()
@@ -118,7 +107,7 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
                 #else
                 try? await Task.sleep(for: .seconds(3))
                 #endif
-                if !Task.isCancelled { self?.trace("deadline", status: "overall"); self?.finish(nil) }
+                if !Task.isCancelled { self?.finish(nil) }
             }
             web.loadHTMLString("""
             <!doctype html><html><head><meta charset="utf-8">
@@ -130,7 +119,6 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
 
     private func finish(_ result: DiagramArtifact?) {
         guard let completion else { return }
-        trace("finish", status: result == nil ? "nil" : "artifact")
         self.completion = nil
         timer?.cancel(); timer = nil
         #if os(iOS)
@@ -143,43 +131,17 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         completion.resume(returning: result)
     }
 
-    /// Temporary diagnostics never include author content or arbitrary error metadata.
-    private func trace(_ phase: StaticString, status: StaticString? = nil, error: (any Error)? = nil) {
-        #if DEBUG
-        let elapsed = (DispatchTime.now().uptimeNanoseconds - diagnosticStarted) / 1_000_000
-        var detail = status.map { " status=\($0)" } ?? ""
-        if let error {
-            let nativeError = error as NSError
-            let domain = ["WKErrorDomain", NSURLErrorDomain, NSCocoaErrorDomain, NSPOSIXErrorDomain].contains(nativeError.domain) ? nativeError.domain : "other"
-            detail += " error_domain=\(domain) error_code=\(nativeError.code)"
-        }
-        print("DIAGRAM-WORKER id=\(diagnosticID) elapsed_ms=\(elapsed) phase=\(phase)\(detail)")
-        #endif
-    }
-
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         navigationAction.request.url?.absoluteString == "about:blank" ? .allow : .cancel
     }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-        trace("navigation-fail", error: error); finish(nil)
-    }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
-        trace("navigation-provisional-fail", error: error); finish(nil)
-    }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        trace("process-termination"); finish(nil)
-    }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { finish(nil) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { finish(nil) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { finish(nil) }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        trace("navigation-finish")
-        guard let script = Self.script else { trace("library-unavailable"); finish(nil); return }
-        trace("library-injection-start")
+        guard let script = Self.script else { finish(nil); return }
         webView.evaluateJavaScript(script, in: nil, in: Self.world) { [weak self, weak webView] result in
             guard let self, let webView, self.completion != nil else { return }
-            switch result {
-            case .success: self.trace("library-injection-end", status: "success")
-            case .failure(let error): self.trace("library-injection-end", status: "failure", error: error)
-            }
             guard case .success = result else { self.finish(nil); return }
             #if os(iOS)
             self.initializeLibrary(in: webView)
@@ -200,14 +162,9 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
 
     #if os(iOS)
     private func initializeLibrary(in webView: WKWebView) {
-        trace("initialize-start")
         // Author source is first passed to WebKit only after trusted setup.
         webView.callAsyncJavaScript(Self.initializationScript, arguments: [:], in: nil, in: Self.world) { [weak self, weak webView] result in
             guard let self, let webView, completion != nil else { return }
-            switch result {
-            case .success: trace("initialize-end", status: "success")
-            case .failure(let error): trace("initialize-end", status: "failure", error: error)
-            }
             guard case .success = result else { finish(nil); return }
             #if DEBUG
             startupTask = Task { [weak self, weak webView] in
@@ -226,16 +183,13 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         guard completion != nil else { return }
         executionTimer = Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
-            if !Task.isCancelled { self?.trace("deadline", status: "execution"); self?.finish(nil) }
+            if !Task.isCancelled { self?.finish(nil) }
         }
         renderDiagram(in: webView, initialize: false)
     }
     #endif
 
     private func renderDiagram(in webView: WKWebView, initialize: Bool = true) {
-        // macOS retains its existing combined call; these spans deliberately overlap.
-        if initialize { trace("initialize-start", status: "combined-with-execution") }
-        trace("execution-start", status: initialize ? "includes-initialization" : "initialized")
         let script = (initialize ? Self.initializationScript : "const m = globalThis.marginedMermaid;") + """
             const {svg} = await m.render('marginedDiagram', source);
             // Mermaid includes animation @keyframes even for static diagrams.
@@ -259,19 +213,8 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
             """
         webView.callAsyncJavaScript(script, arguments: ["source": source], in: nil, in: Self.world) { [weak self] result in
             guard let self else { return }
-            switch result {
-            case .success:
-                if initialize { self.trace("initialize-end", status: "combined-with-execution") }
-                self.trace("execution-end", status: "success")
-            case .failure(let error):
-                if initialize { self.trace("initialize-end", status: "combined-with-execution", error: error) }
-                self.trace("execution-end", status: "failure", error: error)
-            }
-            if case .success(let svg as String) = result {
-                let artifact = Self.sanitize(svg)
-                self.trace("sanitize", status: artifact == nil ? "rejected" : "accepted")
-                self.finish(artifact)
-            } else { self.finish(nil) }
+            if case .success(let svg as String) = result { self.finish(Self.sanitize(svg)) }
+            else { self.finish(nil) }
         }
     }
 

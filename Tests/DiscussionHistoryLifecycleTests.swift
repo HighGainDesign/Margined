@@ -20,6 +20,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         try mount(web)
         let first = "<html><body><main id='document'><p>First saved message.</p></main></body></html>"
         coordinator.update(html: first, fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let loaded = await contains("First saved message.", in: web)
         XCTAssertTrue(loaded, "Establish a committed history before changing its presentation")
         guard loaded else { return }
@@ -42,6 +43,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         let web = coordinator.makeWebView()
         try mount(web)
         coordinator.update(html: "<html><body><main id='document'>Original message.</main></body></html>", fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let loaded = await contains("Original message.", in: web)
         XCTAssertTrue(loaded)
         coordinator.invalidate()
@@ -69,6 +71,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         web.navigationDelegate = navigation
         try mount(web)
         coordinator.update(html: first, fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let initial = await poll { navigation.completions == 1 }
         XCTAssertTrue(initial); guard initial else { gate.release(); return }
         _ = try await web.evaluateJavaScript("window.originalHistoryDocument=document;true")
@@ -89,6 +92,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         defer { successor.invalidate() }
         try mount(restored)
         successor.update(html: latest, fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(restored)
         let retained = await poll {
             try await restored.evaluateJavaScript("document.body.style.fontSize==='16px' && Math.abs(document.getElementById('history-p23').getBoundingClientRect().top-24)<2") as? Bool == true
         }
@@ -111,6 +115,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         try mount(web)
         let first = historyHTML()
         coordinator.update(html: first, fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let ready = await poll {
             try await web.evaluateJavaScript("document.body.style.fontSize==='16px'") as? Bool == true
         }
@@ -162,6 +167,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         try mount(web)
         let html = disclosureHTML()
         coordinator.update(html: html, fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let ready = await poll {
             try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='false'") as? Bool == true
         }
@@ -232,25 +238,9 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         defer { coordinator.invalidate() }
         try mount(web)
         coordinator.update(html: disclosureHTML(), fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let ready = await poll { try await web.evaluateJavaScript("!!document.querySelector('[data-message-id=older] button')") as? Bool == true }
         XCTAssertTrue(ready); guard ready else { return }
-        _ = try await web.callAsyncJavaScript("""
-        const events=[];
-        const record=phase=>{
-            const anchor=document.getElementById('tail-anchor');
-            const top=anchor?.getBoundingClientRect().top;
-            events.push({phase,time:performance.now(),y:scrollY,width:innerWidth,height:innerHeight,
-                visualHeight:visualViewport?.height,anchor:top,anchorDocumentTop:top+scrollY,
-                expanded:document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')});
-            if(events.length>80)events.shift();
-        };
-        window.disclosureProbe={events,record};
-        const originalScrollTo=window.scrollTo.bind(window);
-        window.scrollTo=(...args)=>{record('scrollTo-before:'+JSON.stringify(args));originalScrollTo(...args);record('scrollTo-after')};
-        for(const type of ['scroll','resize'])window.addEventListener(type,()=>record(type));
-        document.addEventListener('click',()=>{record('click-before');queueMicrotask(()=>record('click-after'));requestAnimationFrame(()=>record('click-frame'))},true);
-        record('initial');return true;
-        """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
         try await reveal("tail-anchor", in: web)
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click()")
@@ -277,8 +267,6 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         }
         XCTAssertTrue(retained, "Reconciliation retains stable message disclosure and semantic scroll position")
         if !retained { await recordDisclosureFailure(web, phase: "reconciled") }
-        let probe = try await web.callAsyncJavaScript("window.disclosureProbe.record('reconciled');return JSON.stringify(window.disclosureProbe.events)", arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
-        print("DISCLOSURE-TIMELINE \(String(describing: probe))")
         let lease = Mirror(reflecting: coordinator).children.filter { ["ready", "generation", "presentationRestore", "navigation"].contains($0.label ?? "") }.map { "\($0.label ?? "")=\($0.value)" }.joined(separator: ", ")
         coordinator.invalidate()
         let cached = await state.restorePosition()
@@ -287,6 +275,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         defer { successor.invalidate() }
         try mount(restored)
         successor.update(html: disclosureHTML(), fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(restored)
         let restoredExpansion = await poll {
             try await restored.evaluateJavaScript("document.querySelector('[data-message-id=older] button')?.getAttribute('aria-expanded')==='true'") as? Bool == true
         }
@@ -301,6 +290,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         try mount(web)
         let first = disclosureHTML()
         coordinator.update(html: first, fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let ready = await poll { try await web.evaluateJavaScript("!!document.querySelector('[data-message-id=older] button')") as? Bool == true }
         XCTAssertTrue(ready); guard ready else { return }
         _ = try await web.evaluateJavaScript("document.querySelector('[data-message-id=older] button').click();window.appendHistoryDocument=document;true")
@@ -343,6 +333,7 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         defer { coordinator.invalidate() }
         try mount(web)
         coordinator.update(html: rendered.html, fontSize: 16, imageGeneration: 0)
+        try await waitForNavigation(web)
         let ready = await poll {
             try await web.evaluateJavaScript("document.querySelector('[data-message-id=m-real-older] button')?.getAttribute('aria-expanded')==='false'") as? Bool == true
         }
@@ -536,6 +527,12 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(20))
         }
         return false
+    }
+
+    private func waitForNavigation(_ web: WKWebView) async throws {
+        let committed = await WebKitTestReadiness.navigation { web }
+        XCTAssertNotNil(committed, "Finish native history navigation before inspecting its content or restore")
+        guard committed != nil else { throw URLError(.timedOut) }
     }
 
     private func mount(_ web: WKWebView) throws {

@@ -89,86 +89,17 @@ private final class DiscussionDraftTextView: UITextView {
         let focused: Bool
     }
     private var lastLayout: Layout?
-    #if DEBUG
-    private let diagnosticID = UUID()
-    private var diagnosticEvents = 0
-    private struct DiagnosticSnapshot {
-        let size: CGSize
-        let offset: CGPoint
-        let insets: UIEdgeInsets
-        let fontSize: CGFloat?
-        let selection: NSRange
-        let focused: Bool
-        let mounted: Bool
-        var description: String {
-            "size=\(size) offset=\(offset) insets=\(insets) fontSize=\(fontSize.map(String.init(describing:)) ?? "none") selection=\(selection) focused=\(focused) mounted=\(mounted)"
-        }
-    }
-    private func diagnosticSnapshot() -> DiagnosticSnapshot {
-        .init(size: bounds.size, offset: contentOffset, insets: adjustedContentInset,
-              fontSize: font?.pointSize, selection: selectedRange,
-              focused: isFirstResponder, mounted: window != nil)
-    }
-    private func diagnosticReason(previous: Layout?, current: Layout) -> String {
-        guard let previous else { return "first-focused-layout" }
-        var reasons: [String] = []
-        if previous.size != current.size { reasons.append("size") }
-        if previous.insets != current.insets { reasons.append("insets") }
-        if previous.font != current.font { reasons.append("font") }
-        if previous.selection != current.selection { reasons.append("selection") }
-        if previous.focused != current.focused { reasons.append("focus") }
-        return reasons.isEmpty ? "unchanged-key" : reasons.joined(separator: ",")
-    }
-    private func diagnosticLayout(_ layout: Layout?) -> String {
-        guard let layout else { return "none" }
-        return "size=\(layout.size) insets=\(layout.insets) fontSize=\(layout.font.map { String(describing: $0.pointSize) } ?? "none") selection=\(layout.selection) focused=\(layout.focused)"
-    }
-    private func traceLayout(phase: String, reason: String, before: DiagnosticSnapshot,
-                             after: DiagnosticSnapshot, keyChanged: Bool,
-                             previous: Layout?, current: Layout?) {
-        guard diagnosticEvents < 80, keyChanged || before.offset != after.offset else { return }
-        diagnosticEvents += 1
-        let message = "DRAFT-LAYOUT id=\(diagnosticID.uuidString) view=\(ObjectIdentifier(self)) event=\(diagnosticEvents) phase=\(phase) reason=\(reason) before={\(before.description)} after={\(after.description)} previousKey={\(diagnosticLayout(previous))} currentKey={\(diagnosticLayout(current))}\n"
-        FileHandle.standardError.write(Data(message.utf8))
-    }
-    #endif
     override func layoutSubviews() {
-        #if DEBUG
-        let beforeSuper = diagnosticSnapshot()
-        #endif
         super.layoutSubviews()
-        #if DEBUG
-        let afterSuper = diagnosticSnapshot()
-        let previousLayout = lastLayout
-        #endif
         guard isFirstResponder, window != nil, bounds.height > 0,
-              let selection = selectedTextRange else {
-            lastLayout = nil
-            #if DEBUG
-            traceLayout(phase: "super", reason: "inactive-reset", before: beforeSuper, after: afterSuper,
-                        keyChanged: previousLayout != nil, previous: previousLayout, current: nil)
-            #endif
-            return
-        }
+              let selection = selectedTextRange else { lastLayout = nil; return }
         let layout = Layout(size: bounds.size, insets: adjustedContentInset,
                             font: font, selection: selectedRange, focused: isFirstResponder)
         let changed = lastLayout != layout
         lastLayout = layout
-        #if DEBUG
-        let reason = diagnosticReason(previous: previousLayout, current: layout)
-        traceLayout(phase: "super", reason: reason, before: beforeSuper, after: afterSuper,
-                    keyChanged: changed, previous: previousLayout, current: layout)
-        #endif
         // A scroll changes bounds.origin, but does not change this key. Let the
         // user browse a long draft without an unrelated layout moving it back.
         guard changed else { return }
-        #if DEBUG
-        let beforeReveal = diagnosticSnapshot()
-        #endif
         scrollRectToVisible(caretRect(for: selection.start).insetBy(dx: 0, dy: -4), animated: false)
-        #if DEBUG
-        traceLayout(phase: "reveal-caret", reason: reason, before: beforeReveal, after: diagnosticSnapshot(),
-                    keyChanged: changed, previous: previousLayout, current: layout)
-        #endif
     }
 }

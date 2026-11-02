@@ -32,15 +32,9 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         editor.selectedRange = NSRange(location: 0, length: 0)
         editor.setNeedsLayout(); editor.layoutIfNeeded()
         let target = CGPoint(x: 0, y: 500)
-        #if DEBUG
-        trace(editor, phase: "before-deliberate-scroll")
-        #endif
         editor.setContentOffset(target, animated: false)
         editor.setNeedsLayout(); editor.layoutIfNeeded()
         for _ in 0..<10 { try await Task.sleep(for: .milliseconds(20)) }
-        #if DEBUG
-        trace(editor, phase: "after-deliberate-scroll-settle")
-        #endif
         XCTAssertEqual(editor.contentOffset.y, target.y, accuracy: 1,
                        "Unrelated layout must not pull a deliberately scrolled draft back to its caret")
         XCTAssertEqual(editor.selectedRange, NSRange(location: 0, length: 0))
@@ -54,14 +48,6 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         XCTAssertTrue(revealed, "A changed viewport must reveal the retained caret")
         XCTAssertEqual(reader.discussions.drafts[key]?.body, text)
     }
-
-    #if DEBUG
-    private func trace(_ editor: UITextView, phase: String) {
-        let fontSize = editor.font.map { String(describing: $0.pointSize) } ?? "none"
-        let message = "DRAFT-SCROLL-TEST view=\(ObjectIdentifier(editor)) phase=\(phase) size=\(editor.bounds.size) offset=\(editor.contentOffset) insets=\(editor.adjustedContentInset) fontSize=\(fontSize) selection=\(editor.selectedRange) focused=\(editor.isFirstResponder) mounted=\(editor.window != nil)\n"
-        FileHandle.standardError.write(Data(message.utf8))
-    }
-    #endif
 
     private func findEditor(_ view: UIView) -> UITextView? {
         if let editor = view as? UITextView { return editor }

@@ -452,6 +452,11 @@ final class MobileWebViewTests: XCTestCase {
     }
 
     private func waitForToken(_ web: WKWebView, excluding previous: String? = nil) async throws {
+        if previous == nil {
+            let committed = await WebKitTestReadiness.navigation { web }
+            XCTAssertNotNil(committed, "Finish initial native navigation before inspecting the current token")
+            guard committed != nil else { throw URLError(.timedOut) }
+        }
         for _ in 0..<200 {
             if !web.isLoading,
                let token = try? await web.callAsyncJavaScript("return document.documentElement.getAttribute('data-margined-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String,

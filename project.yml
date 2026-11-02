@@ -301,6 +301,7 @@ targets:
       - Tests/DiscussionWebTests.swift
       - Tests/DiscussionRenderingTests.swift
       - Tests/DiscussionHistoryLifecycleTests.swift
+      - Tests/WebKitTestReadiness.swift
     dependencies:
       - target: MarginediOS
     settings:

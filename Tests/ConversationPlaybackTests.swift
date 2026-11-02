@@ -380,9 +380,11 @@ final class ConversationPlaybackTests: XCTestCase {
         window.setContentSize(NSSize(width: 1_200, height: 900)); window.makeKeyAndOrderFront(nil)
         addTeardownBlock { @MainActor in window.orderOut(nil); window.contentViewController = nil; window.close() }
         #endif
-        let mounted = await poll { self.webViews(in: host.view).first?.estimatedProgress == 1 }
+        let committed = await WebKitTestReadiness.navigation({ self.webViews(in: host.view).first },
+            expectedURL: f.file.deletingLastPathComponent())
+        let mounted = committed != nil
         XCTAssertTrue(mounted, "A real committed prose page is the positive control")
-        guard mounted, let prose = webViews(in: host.view).first else { return }
+        guard let prose = committed else { return }
         let proseReady = await pollScript(prose, "document.querySelector('main')?.textContent.includes('A document paragraph.')===true")
         XCTAssertTrue(proseReady); guard proseReady else { return }
         f.startProse()
@@ -390,9 +392,11 @@ final class ConversationPlaybackTests: XCTestCase {
         XCTAssertTrue(proseHighlight, "Document playback must visibly highlight before testing conversation isolation")
         guard proseHighlight else { return }
         f.reader.openDiscussion(f.thread.id)
-        let historyMounted = await poll { self.webViews(in: host.view).contains { $0 !== prose && $0.estimatedProgress == 1 } }
+        let committedHistory = await WebKitTestReadiness.navigation({ self.webViews(in: host.view).first { $0 !== prose } },
+            expectedURL: f.file.deletingLastPathComponent())
+        let historyMounted = committedHistory != nil
         XCTAssertTrue(historyMounted, "The existing native history must be mounted")
-        guard historyMounted, let history = webViews(in: host.view).first(where: { $0 !== prose }) else { return }
+        guard let history = committedHistory else { return }
         let historyReady = await pollScript(history, "document.querySelector('article')?.textContent.includes('Saved first reply.')===true")
         XCTAssertTrue(historyReady); guard historyReady else { return }
         let speech = try await transcript(f.thread)

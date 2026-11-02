@@ -2511,7 +2511,9 @@ import XCTest
             window.isHidden = true; window.rootViewController = nil
             try? FileManager.default.removeItem(at: file)
         }
-        let mounted = await poll { self.webView(in: host.view)?.estimatedProgress == 1 && self.webView(in: host.view)?.isLoading == false }
+        let committed = await WebKitTestReadiness.navigation({ self.webView(in: host.view) },
+            expectedURL: file.deletingLastPathComponent())
+        let mounted = committed != nil
         if !mounted {
             // Observe only after the original wait fails; never issue pre-commit JavaScript.
             let web = webView(in: host.view)
@@ -2531,51 +2533,10 @@ import XCTest
                 "otherSceneCount": UIApplication.shared.connectedScenes.count - 1]
             if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
                let text = String(data: data, encoding: .utf8) { print("MARGINED-MOUNT-FAIL " + text) }
-            #if DEBUG
-            // Diagnose only after the original wait has failed. A late success
-            // never changes `mounted`, its assertion, or the fixture's throw.
-            let diagnosisStarted = ContinuousClock.now
-            let diagnosisDeadline = diagnosisStarted.advanced(by: .seconds(20))
-            var lateWeb: WKWebView?
-            while ContinuousClock.now < diagnosisDeadline, !Task.isCancelled {
-                if let candidate = webView(in: host.view), candidate.estimatedProgress == 1,
-                   !candidate.isLoading, candidate.url?.scheme == "file" {
-                    lateWeb = candidate; break
-                }
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-            let lateElapsed = diagnosisStarted.duration(to: .now).components
-            var late: [String: Any] = [
-                "originalMountFailed": true, "lateNativeCompletion": lateWeb != nil,
-                "elapsedMS": Double(lateElapsed.seconds) * 1_000 + Double(lateElapsed.attoseconds) / 1e15,
-                "progress": webView(in: host.view)?.estimatedProgress ?? -1,
-                "loading": webView(in: host.view)?.isLoading ?? false,
-                "urlScheme": webView(in: host.view)?.url?.scheme ?? "none",
-                "attached": webView(in: host.view)?.window === window,
-                "queriedCommittedDOM": lateWeb != nil]
-            if let lateWeb {
-                do {
-                    let values = try await lateWeb.evaluateJavaScript("""
-                    (()=>({formattedProse:document.querySelector('main')?.textContent.normalize('NFC').includes('Café bold passage.')===true,
-                        complete:document.readyState==='complete',token:document.documentElement.getAttribute('data-margined-mobile-token')}))()
-                    """) as? [String: Any]
-                    let token = values?["token"] as? String
-                    late["formattedProseReady"] = values?["formattedProse"] as? Bool ?? false
-                    late["domComplete"] = values?["complete"] as? Bool ?? false
-                    late["currentTokenValid"] = token.flatMap(UUID.init(uuidString:)) != nil
-                    late["token"] = token.flatMap(UUID.init(uuidString:))?.uuidString ?? "none"
-                } catch {
-                    let native = error as NSError
-                    late["errorDomain"] = native.domain; late["errorCode"] = native.code
-                }
-            }
-            if let data = try? JSONSerialization.data(withJSONObject: late, options: [.sortedKeys]),
-               let text = String(data: data, encoding: .utf8) { print("MARGINED-LATE-MOUNT " + text) }
-            #endif
         }
         XCTAssertTrue(mounted, "Wait for a committed navigation before querying WebKit")
         guard mounted else { throw FixtureFailure.documentDidNotLoad }
-        let web = try XCTUnwrap(webView(in: host.view))
+        let web = try XCTUnwrap(committed)
         let ready = await pollAsync { try await web.evaluateJavaScript("document.querySelector('main')?.textContent.normalize('NFC').includes('Café bold passage.')===true") as? Bool == true }
         XCTAssertTrue(ready, "The actual formatted fixture must be loaded before exercising discussion actions")
         guard ready else { throw FixtureFailure.documentDidNotLoad }
