@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0-beta.4 — 2026-11-02
+
+- Verify the Build 14 runtime for public Mac, iPhone and iPad beta distribution.
+- Make native validation wait for completed navigation, painted history and Find clearing.
+- Preserve exact Reply glyph checks when text recognition groups neighboring labels.
+- Publish the privacy policy for local files, optional connections and TestFlight feedback.
+
 ## 2.0-beta.3 — 2026-11-02
 
 - Keep checklists usable with adjacent inline shell pipelines and fenced commands inside tasks.

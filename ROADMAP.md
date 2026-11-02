@@ -34,8 +34,10 @@ established cold-launch target or a measured Margined result.
 
 ### Delivery
 
-The Mac beta is available on GitHub and public TestFlight; iPhone/iPad testing
-remains invitation-only. Native Files browsing and the replayable practice tour
+The Mac beta is available on GitHub and public TestFlight. iPhone/iPad beta
+availability and public TestFlight distribution are recorded in the
+[delivery tracker](https://github.com/HighGainDesign/Margined/issues/24).
+Native Files browsing and the replayable practice tour
 are implemented. Manual acceptance testing continues, including File Providers,
 background audio, accessibility and file handoff. iOS 27 Quick Look dispatch
 remains limited; use Open With or Share.
