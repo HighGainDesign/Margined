@@ -198,6 +198,12 @@ and the [rendering sample](Fixtures/Rendering.md).
 - Limits: 200 math expressions and 20 diagrams, 16 KB per expression and 20 KB per diagram. Invalid or oversized content retains readable source. Full GitHub/MathJax parity is not claimed.
 - JSON/YAML viewing and syntax coloring are future work. Performance targets and timing boundaries are in [Benchmarks](Benchmarks/README.md); no completed 2.0 speed claim yet.
 
+## For coding agents
+
+Install the [Margined Markdown skill](skills/README.md) to create portable
+checklists, passage discussions and replies. It includes format guidance,
+compatibility notes and a complete example; no Margined account is required.
+
 ## Build, contribute and license
 
 See [Contributing](CONTRIBUTING.md) for Mac/iOS builds, tests, signing and packaging,
@@ -208,3 +214,4 @@ reports. Apex, libyaml, SwiftSoup, KaTeX and Mermaid use MIT licenses; cmark-gfm
 includes BSD-2-Clause and component notices. Dependency licenses are bundled.
 The icon incorporates the public-domain [Markdown Mark](https://github.com/dcurtis/markdown-mark);
 its editable Icon Composer source is `App/AppIcon.icon`.
+
