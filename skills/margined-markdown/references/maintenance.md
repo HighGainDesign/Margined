@@ -22,6 +22,19 @@ Use the source checkout for the version/build being documented; record its revis
 | Regression examples | `Tests/DiscussionCodecTests.swift`, `Tests/DiscussionAnchorTests.swift` |
 | Platform permissions/renderer limits | Current `README.md` plus owning implementation/tests |
 
+## Each release
+
+Before tagging a stable or beta release, check this skill against that release's
+formats, behavior and limits; update guidance, compatibility notes and examples
+in the same source commit as needed. Record the verified app build/revision/date.
+Keep the full skill in the release tag so users can install a fixed snapshot.
+
+The release packager creates a skill ZIP and SHA-256 checksum from the committed
+source alongside the DMG. Verify both files are attached to the same GitHub
+release. For manual releases, run `bash script/package-skill.sh VERSION TAG` from
+the release checkout and upload both skill files as well. Never package a
+machine-local installation or silently replace a previous release's snapshot.
+
 ## Verification
 
 1. Read the changed contract and its regression tests. Do not turn a proposed feature into authoring guidance before it exists.

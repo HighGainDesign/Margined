@@ -23,6 +23,22 @@ For manual installation, download or clone this repository and copy the entire
 `skills/margined-markdown` folder to `~/.agents/skills/margined-markdown/`.
 Keep `SKILL.md`, `agents/`, `references/`, `assets/` and `LICENSE` together.
 
+## Release snapshots
+
+Starting with the next release, each GitHub release includes
+`Margined-Markdown-Skill-VERSION.zip` and its SHA-256 checksum. The ZIP contains
+the complete skill from the same tagged commit as the app. Extract it and install
+the `margined-markdown` folder in your harness's skills directory.
+
+For a version-matched Codex install, replace `RELEASE_TAG` with that release's tag:
+
+```text
+$skill-installer Install the skill from https://github.com/HighGainDesign/Margined/tree/RELEASE_TAG/skills/margined-markdown
+```
+
+Existing releases and tags are unchanged. The `main` link above follows current
+guidance; a release tag keeps a fixed snapshot for that app version.
+
 ## Other agents and updates
 
 Install the same folder in your harness's supported Agent Skills location, or

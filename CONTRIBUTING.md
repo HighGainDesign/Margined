@@ -128,4 +128,13 @@ notarization are verified before publishing the DMG and checksum. Contributors
 need no release credentials. Internal TestFlight delivery is separate from public
 GitHub or App Store publication.
 
+Before each stable or beta release, update the [authoring skill](skills/README.md)
+for the release's verified formats and usage. `release.sh` also creates
+`Margined-Markdown-Skill-VERSION.zip` and its checksum from the committed skill;
+the GitHub workflow publishes both alongside the DMG. For manual GitHub or
+TestFlight-associated releases, package the same tagged commit with
+`bash script/package-skill.sh VERSION TAG` and include both skill files in the
+corresponding GitHub release. Keep release tags fixed so installs can match the
+app version. Do not package a machine-local skill copy.
+
 Contributions use the repository’s MIT license. Retain third-party notices.
