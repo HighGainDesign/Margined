@@ -1,8 +1,10 @@
 # Changelog
 
-## 2.0-beta.4 — 2026-11-02
+## 2.0-beta.4 — 2026-11-03
 
-- Verify the Build 14 runtime for public Mac, iPhone and iPad beta distribution.
+- Retain the reading passage when a native window resize reports stale WebKit dimensions.
+- Refresh discussion markers after a resize even when scrolling overlaps the update.
+- Prepare native Build 15 for public Mac, iPhone and iPad beta distribution.
 - Make native validation wait for completed navigation, painted history and Find clearing.
 - Preserve exact Reply glyph checks when text recognition groups neighboring labels.
 - Publish the privacy policy for local files, optional connections and TestFlight feedback.

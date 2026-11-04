@@ -96,15 +96,20 @@ if (operation === 'observeResize') {
     const tokenAttribute = typeof documentTokenAttribute === 'undefined' ? 'data-margined-mobile-token' : documentTokenAttribute;
     if (tokenAttribute !== 'data-margined-mobile-token' && tokenAttribute !== 'data-margined-history-token') return false;
     const controller = new AbortController();
-    let width = innerWidth, height = innerHeight, pending = 0;
+    // client dimensions describe committed layout even when resize dispatch
+    // precedes WebKit's update of the window's innerWidth/innerHeight values.
+    const viewport = document.compatMode === 'BackCompat' ? document.body : document.documentElement;
+    let width = viewport.clientWidth, height = viewport.clientHeight, pending = 0;
+    let resizeObserver;
     function sample() {
         const box = main?.getBoundingClientRect();
-        const x = box ? Math.max(1, Math.min(innerWidth - 1, box.left + box.width / 2)) : innerWidth / 2;
+        const viewWidth = viewport.clientWidth, viewHeight = viewport.clientHeight;
+        const x = box ? Math.max(1, Math.min(viewWidth - 1, box.left + box.width / 2)) : viewWidth / 2;
         // Point queries avoid scanning the whole document on each scroll.
         // Margins and unusual layouts fall back to the semantic block search.
         let node;
         for (const y of [24, 64, 128]) {
-            if (y >= innerHeight) break;
+            if (y >= viewHeight) break;
             const candidate = document.elementFromPoint(x, y)?.closest(selector);
             if (candidate && main?.contains(candidate)) { node = candidate; break; }
         }
@@ -114,6 +119,7 @@ if (operation === 'observeResize') {
     }
     function stop() {
         controller.abort();
+        resizeObserver?.disconnect();
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
     }
@@ -125,23 +131,36 @@ if (operation === 'observeResize') {
     const options = {passive:true, signal:controller.signal};
     window.addEventListener('scroll', () => {
         if (!current()) { stop(); return; }
+        // Retain a user scroll before its pending frame can be overtaken by a
+        // layout commit. Never sample a reflowed page against old dimensions.
+        if (viewport.clientWidth === width && viewport.clientHeight === height) saved = sample();
         if (pending) cancelAnimationFrame(pending);
         pending = requestAnimationFrame(() => {
             pending = 0;
             if (!current()) { stop(); return; }
             // A scroll event can precede the resize event for the same layout.
-            if (innerWidth === width && innerHeight === height) saved = sample();
+            if (viewport.clientWidth === width && viewport.clientHeight === height) saved = sample();
         });
     }, options);
-    window.addEventListener('resize', () => {
+    function commitResize() {
         if (!current()) { stop(); return; }
-        if (innerWidth === width && innerHeight === height) return;
+        const nextWidth = viewport.clientWidth, nextHeight = viewport.clientHeight;
+        // Hidden/detached layouts cannot replace a valid reading snapshot.
+        if (nextWidth <= 0 || nextHeight <= 0) return;
+        if (nextWidth === width && nextHeight === height) return;
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
         restore(saved);
-        width = innerWidth; height = innerHeight;
+        width = nextWidth; height = nextHeight;
         saved = sample();
-    }, options);
+    }
+    window.addEventListener('resize', commitResize, options);
+    // A native resize can dispatch before layout commits, with no later
+    // window event. Observe committed root layout without polling or timers.
+    if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(commitResize);
+        resizeObserver.observe(document.documentElement);
+    }
     window.marginedReadingResize = {stop};
     return true;
 }

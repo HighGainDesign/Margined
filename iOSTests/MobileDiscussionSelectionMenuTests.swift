@@ -75,6 +75,9 @@ final class MobileDiscussionSelectionMenuTests: XCTestCase {
             reader.discussions.discardDrafts(); await reader.close(); window.isHidden = true
             window.rootViewController = nil; try? FileManager.default.removeItem(at: file)
         }
+        let committed = await WebKitTestReadiness.navigation({ self.find(host.view) },
+            expectedURL: file.deletingLastPathComponent())
+        _ = try XCTUnwrap(committed, "Finish initial native navigation before checking the discussion bridge")
         let ready = await poll {
             guard let web = self.find(host.view), web.url != nil, !web.isLoading else { return false }
             return try await web.callAsyncJavaScript("return !!window.__marginedDiscussions;", arguments: [:], in: nil,

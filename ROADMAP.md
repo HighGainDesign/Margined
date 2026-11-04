@@ -49,11 +49,14 @@ targets these next steps; build numbers may move if additional fixes are needed:
   commands, and suggest the current document's folder for iOS image access.
   Combined Build 11–14 manual testing continues. Broader menu/navigation changes
   remain pending feedback and acceptance.
-- **Build 15:** required compact choose-one checkboxes and focused text responses,
+- **Build 15:** repair reading-position restoration and discussion-marker refresh
+  during native resizing, and validate public Mac, iPhone and iPad distribution.
+  Combined Build 11–14 manual acceptance remains open.
+- **Build 16:** required compact choose-one checkboxes and focused text responses,
   with explicit readable Markdown conventions, safe saves/Undo and a matching
   authoring-skill update. The exact grammar and UX need focused review; these
   controls are not implemented yet.
-- **Build 16:** release candidate, remaining accessibility/performance and manual
+- **Build 17:** release candidate, remaining accessibility/performance and manual
   acceptance checks, documentation and verified distribution.
 
 Keep the maintained Markdown authoring skill aligned with each release's actual

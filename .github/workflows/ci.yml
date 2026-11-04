@@ -39,6 +39,8 @@ jobs:
           python3 -m unittest discover -s script/tests -p test_release_version.py
           python3 script/verify-vendor.py
           python3 script/validate-localizations.py
+          node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
+          node --test script/tests/test_discussion_layout.cjs
           python3 -m unittest discover -s script/tests -p 'test_benchmark*.py'
           xcodegen generate
       - name: Run isolated macOS tests

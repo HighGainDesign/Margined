@@ -43,7 +43,7 @@ final class DiscussionWebTests: XCTestCase {
         let css = try String(contentsOf: cssURL, encoding: .utf8)
         traceDiscussionTestWebView(view, phase: "before-load")
         view.loadHTMLString("<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'\"><style>" + css + "</style></head><body><main id='document'>" + body + "</main></body></html>", baseURL: nil)
-        await fulfillment(of: [ready], timeout: 10)
+        await fulfillment(of: [ready], timeout: WebKitTestReadiness.navigationTimeout)
         traceDiscussionTestWebView(view, phase: "after-navigation-wait")
         withExtendedLifetime(navigation) {}
         try await present(view)

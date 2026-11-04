@@ -162,7 +162,7 @@ final class MobileWebViewTests: XCTestCase {
         let navigation = TestWebNavigation(finished: finished)
         web.navigationDelegate = navigation
         web.loadHTMLString(output.html, baseURL: nil)
-        await fulfillment(of: [finished], timeout: 10)
+        await fulfillment(of: [finished], timeout: WebKitTestReadiness.navigationTimeout)
         XCTAssertNil(navigation.error)
         let count = try await web.callAsyncJavaScript("return document.querySelectorAll('table').length;",
             arguments: [:], in: nil, contentWorld: .defaultClient) as? Int
@@ -493,6 +493,9 @@ final class MobileWebViewTests: XCTestCase {
     }
 
     private func waitForDocument(_ web: WKWebView) async throws {
+        let committed = await WebKitTestReadiness.navigation { web }
+        XCTAssertNotNil(committed, "Finish initial native navigation before inspecting the typography fixture")
+        guard committed != nil else { throw URLError(.timedOut) }
         for _ in 0..<200 {
             if !web.isLoading, (try? await web.callAsyncJavaScript("return !!document.getElementById('line-35');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool) == true { return }
             try await Task.sleep(for: .milliseconds(25))
