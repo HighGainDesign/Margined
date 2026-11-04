@@ -362,6 +362,46 @@ import XCTest
 
     func testDiscussionHistoryRetainsItsSemanticPositionAcrossHideAndWidthChanges() async throws {
         let f = try await fixture(withThread: true)
+        // BEGIN PASSIVE-NATIVE-PRECONDITIONS history-buffer
+        var nativePreconditions: [[String: Any]] = []
+        func observeHistoryNative(_ phase: String, outcome: Bool, width: CGFloat, web: WKWebView?) -> [String: Any] {
+            let epoch = Date().timeIntervalSince1970
+            let uptime = ProcessInfo.processInfo.systemUptime
+            var value: [String: Any] = ["phase": phase, "originalPollOutcome": outcome,
+                "requestedWidth": Double(width), "epoch": epoch, "uptime": uptime,
+                "webPresent": web != nil]
+            guard let web else { return value }
+            let scroll = web.scrollView
+            let bounds = web.bounds, offset = scroll.contentOffset, content = scroll.contentSize
+            let inset = scroll.contentInset, adjusted = scroll.adjustedContentInset
+            let window = web.window
+            value["webIdentity"] = String(describing: ObjectIdentifier(web))
+            value["bounds"] = [Double(bounds.origin.x), Double(bounds.origin.y), Double(bounds.width), Double(bounds.height)]
+            value["contentOffset"] = ["x": Double(offset.x), "y": Double(offset.y)]
+            value["contentSize"] = ["width": Double(content.width), "height": Double(content.height)]
+            value["contentInset"] = ["top": Double(inset.top), "left": Double(inset.left), "bottom": Double(inset.bottom), "right": Double(inset.right)]
+            value["adjustedContentInset"] = ["top": Double(adjusted.top), "left": Double(adjusted.left), "bottom": Double(adjusted.bottom), "right": Double(adjusted.right)]
+            value["attachedToWindow"] = window != nil
+            value["attachedToFixtureWindow"] = window === f.window
+            value["webHidden"] = web.isHidden
+            value["webAlpha"] = Double(web.alpha)
+            value["presentationBounds"] = String(describing: web.layer.presentation()?.bounds)
+            value["scrollPresentationBounds"] = String(describing: scroll.layer.presentation()?.bounds)
+            if let window {
+                value["windowIdentity"] = String(describing: ObjectIdentifier(window))
+                value["windowKey"] = window.isKeyWindow
+                value["windowHidden"] = window.isHidden
+                value["windowBounds"] = String(describing: window.bounds)
+            }
+            return value
+        }
+        defer {
+            let report: [String: Any] = ["test": self.name, "observations": nativePreconditions]
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+                print("IOS-HISTORY-NATIVE-PRECONDITIONS " + String(decoding: data, as: UTF8.self))
+            }
+        }
+        // END PASSIVE-NATIVE-PRECONDITIONS history-buffer
         let paragraphs = (0..<45).map { "History paragraph \($0) stays readable." }.joined(separator: "\n\n")
         _ = try appendHistoryReply(paragraphs, id: "m-sheet-history", file: f.file, threadID: "t-mobile")
         await f.reader.refresh(); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
@@ -376,6 +416,12 @@ import XCTest
         let initialPosition = await pollAsync {
             try await initial.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return scrollY>300 && Math.abs(p.getBoundingClientRect().top)<2;})()") as? Bool == true
         }
+        // BEGIN PASSIVE-NATIVE-PRECONDITIONS history-initial-return
+        if initialPosition {
+            nativePreconditions.append(observeHistoryNative("initialPosition-return", outcome: initialPosition,
+                width: f.window.bounds.width, web: initial))
+        }
+        // END PASSIVE-NATIVE-PRECONDITIONS history-initial-return
         XCTAssertTrue(initialPosition)
         for width in [CGFloat(390), CGFloat(1120), CGFloat(390)] {
             f.reader.hideDiscussions()
@@ -388,6 +434,10 @@ import XCTest
                 guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
                 return try await history.evaluateJavaScript("(()=>{const r=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '))?.getBoundingClientRect();return !!r && r.top>=-2 && r.top<90;})()") as? Bool == true
             }
+        // BEGIN PASSIVE-NATIVE-PRECONDITIONS history-restored-return
+            nativePreconditions.append(observeHistoryNative("restored-return", outcome: restored,
+                width: width, web: self.history(in: f.host.view, excluding: f.web)))
+        // END PASSIVE-NATIVE-PRECONDITIONS history-restored-return
             if !restored, let history = self.history(in: f.host.view, excluding: f.web) {
                 // Freeze trace/native evidence before the existing failure-only DOM geometry read.
                 var report = await freezeResizeFailureEvidence(f, web: history,
