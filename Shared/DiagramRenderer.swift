@@ -27,7 +27,12 @@ actor DiagramRenderer {
         let key = SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined()
         if let cached = cache[key] { return cached }
         // Do not queue unlimited private documents behind a slow graph.
-        guard active < 2 else { return nil }
+        guard active < 2 else {
+            #if MARGINED_DIAGRAM_DIAGNOSTIC
+            print("DIAGRAM-DIAGNOSTIC actor-capacity active=\(active) sourceBytes=\(source.utf8.count)")
+            #endif
+            return nil
+        }
         active += 1
         defer { active -= 1 }
         guard let artifact = await DiagramWorker.render(source) else { return nil }
@@ -46,6 +51,26 @@ actor DiagramRenderer {
 /// bundled renderer executes, in its own world, with a no-network CSP.
 @MainActor
 private final class DiagramWorker: NSObject, WKNavigationDelegate {
+    #if MARGINED_DIAGRAM_DIAGNOSTIC
+    private let diagnosticID = UUID().uuidString
+    private let diagnosticStart = ContinuousClock.now
+    private var diagnosticMarks: [String: Double] = [:]
+    private var diagnosticReason = "unspecified"
+    private var diagnosticError: [String: String] = [:]
+
+    private func diagnosticMark(_ name: String) {
+        let elapsed = diagnosticStart.duration(to: .now).components
+        diagnosticMarks[name] = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+    }
+
+    private func diagnosticFailure(_ reason: String, error: (any Error)? = nil) {
+        diagnosticReason = reason
+        diagnosticMark(reason)
+        if let error = error as NSError? {
+            diagnosticError = ["domain": error.domain, "code": String(error.code)]
+        }
+    }
+    #endif
     private var web: WKWebView?
     private var completion: CheckedContinuation<DiagramArtifact?, Never>?
     private var timer: Task<Void, Never>?
@@ -83,7 +108,12 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         return await withTaskCancellationHandler {
             await worker.start()
         } onCancel: {
-            Task { @MainActor in worker.finish(nil) }
+            Task { @MainActor in
+                #if MARGINED_DIAGRAM_DIAGNOSTIC
+                worker.diagnosticFailure("cancelled")
+                #endif
+                worker.finish(nil)
+            }
         }
     }
 
@@ -91,6 +121,9 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         guard !Task.isCancelled else { return nil }
         return await withCheckedContinuation { completion in
             self.completion = completion
+            #if MARGINED_DIAGRAM_DIAGNOSTIC
+            diagnosticMark("start")
+            #endif
             let config = WKWebViewConfiguration()
             config.websiteDataStore = .nonPersistent()
             config.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -107,7 +140,12 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
                 #else
                 try? await Task.sleep(for: .seconds(3))
                 #endif
-                if !Task.isCancelled { self?.finish(nil) }
+                if !Task.isCancelled {
+                    #if MARGINED_DIAGRAM_DIAGNOSTIC
+                    self?.diagnosticFailure("total-deadline")
+                    #endif
+                    self?.finish(nil)
+                }
             }
             web.loadHTMLString("""
             <!doctype html><html><head><meta charset="utf-8">
@@ -119,6 +157,14 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
 
     private func finish(_ result: DiagramArtifact?) {
         guard let completion else { return }
+        #if MARGINED_DIAGRAM_DIAGNOSTIC
+        diagnosticMark("finish")
+        let report: [String: Any] = ["id": diagnosticID, "sourceBytes": source.utf8.count,
+            "success": result != nil, "reason": result == nil ? diagnosticReason : "success",
+            "marks": diagnosticMarks, "error": diagnosticError]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) { print("DIAGRAM-DIAGNOSTIC \(json)") }
+        #endif
         self.completion = nil
         timer?.cancel(); timer = nil
         #if os(iOS)
@@ -134,15 +180,46 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         navigationAction.request.url?.absoluteString == "about:blank" ? .allow : .cancel
     }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { finish(nil) }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { finish(nil) }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { finish(nil) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        #if MARGINED_DIAGRAM_DIAGNOSTIC
+        diagnosticFailure("navigation-failed", error: error)
+        #endif
+        finish(nil)
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        #if MARGINED_DIAGRAM_DIAGNOSTIC
+        diagnosticFailure("provisional-navigation-failed", error: error)
+        #endif
+        finish(nil)
+    }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        #if MARGINED_DIAGRAM_DIAGNOSTIC
+        diagnosticFailure("web-content-terminated")
+        #endif
+        finish(nil)
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard let script = Self.script else { finish(nil); return }
+        #if MARGINED_DIAGRAM_DIAGNOSTIC
+        diagnosticMark("navigation-finished")
+        #endif
+        guard let script = Self.script else {
+            #if MARGINED_DIAGRAM_DIAGNOSTIC
+            diagnosticFailure("missing-library")
+            #endif
+            finish(nil); return
+        }
         webView.evaluateJavaScript(script, in: nil, in: Self.world) { [weak self, weak webView] result in
             guard let self, let webView, self.completion != nil else { return }
-            guard case .success = result else { self.finish(nil); return }
+            guard case .success = result else {
+                #if MARGINED_DIAGRAM_DIAGNOSTIC
+                if case .failure(let error) = result { self.diagnosticFailure("library-failed", error: error) }
+                #endif
+                self.finish(nil); return
+            }
+            #if MARGINED_DIAGRAM_DIAGNOSTIC
+            self.diagnosticMark("library-evaluated")
+            #endif
             #if os(iOS)
             self.initializeLibrary(in: webView)
             #else
@@ -165,7 +242,15 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
         // Author source is first passed to WebKit only after trusted setup.
         webView.callAsyncJavaScript(Self.initializationScript, arguments: [:], in: nil, in: Self.world) { [weak self, weak webView] result in
             guard let self, let webView, completion != nil else { return }
-            guard case .success = result else { finish(nil); return }
+            guard case .success = result else {
+                #if MARGINED_DIAGRAM_DIAGNOSTIC
+                if case .failure(let error) = result { diagnosticFailure("initialization-failed", error: error) }
+                #endif
+                finish(nil); return
+            }
+            #if MARGINED_DIAGRAM_DIAGNOSTIC
+            diagnosticMark("library-initialized")
+            #endif
             #if DEBUG
             startupTask = Task { [weak self, weak webView] in
                 guard let self else { return }
@@ -181,9 +266,17 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
 
     private func beginExecution(in webView: WKWebView) {
         guard completion != nil else { return }
+        #if MARGINED_DIAGRAM_DIAGNOSTIC
+        diagnosticMark("execution-started")
+        #endif
         executionTimer = Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
-            if !Task.isCancelled { self?.finish(nil) }
+            if !Task.isCancelled {
+                #if MARGINED_DIAGRAM_DIAGNOSTIC
+                self?.diagnosticFailure("execution-deadline")
+                #endif
+                self?.finish(nil)
+            }
         }
         renderDiagram(in: webView, initialize: false)
     }
@@ -213,8 +306,22 @@ private final class DiagramWorker: NSObject, WKNavigationDelegate {
             """
         webView.callAsyncJavaScript(script, arguments: ["source": source], in: nil, in: Self.world) { [weak self] result in
             guard let self else { return }
-            if case .success(let svg as String) = result { self.finish(Self.sanitize(svg)) }
-            else { self.finish(nil) }
+            if case .success(let svg as String) = result {
+                #if MARGINED_DIAGRAM_DIAGNOSTIC
+                self.diagnosticMark("javascript-rendered")
+                #endif
+                let artifact = Self.sanitize(svg)
+                #if MARGINED_DIAGRAM_DIAGNOSTIC
+                if artifact == nil { self.diagnosticFailure("sanitation-failed") }
+                #endif
+                self.finish(artifact)
+            } else {
+                #if MARGINED_DIAGRAM_DIAGNOSTIC
+                if case .failure(let error) = result { self.diagnosticFailure("render-failed", error: error) }
+                else { self.diagnosticFailure("render-invalid-result") }
+                #endif
+                self.finish(nil)
+            }
         }
     }
 

@@ -1,44 +1,25 @@
-name: iOS validation
+name: iOS diagram phase diagnostic
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - CHANGELOG.md
-      - README.md
-      - ROADMAP.md
-      - PRIVACY.md
-      - .github/workflows/ci.yml
-      - .github/workflows/tests.yml
-      - .github/workflows/release.yml
-  pull_request:
-    paths-ignore:
-      - CHANGELOG.md
-      - README.md
-      - ROADMAP.md
-      - PRIVACY.md
-      - .github/workflows/ci.yml
-      - .github/workflows/tests.yml
-      - .github/workflows/release.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  group: ios-diagram-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  test:
+  diagnostic:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
-      - name: Check out source
+      - name: Check out diagnostic source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Prepare project
+      - name: Prepare unchanged test selections and record provenance
         run: |
           brew install xcodegen
           python3 script/verify-vendor.py
@@ -46,27 +27,42 @@ jobs:
           node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
           node --test script/tests/test_discussion_layout.cjs
           xcodegen generate
-      - name: Test on iPhone
+          mkdir -p "$RUNNER_TEMP/diagram-diagnostic"
+          git rev-parse HEAD > "$RUNNER_TEMP/diagram-diagnostic/source.txt"
+          shasum -a 256 Shared/DiagramRenderer.swift App/Resources/reader-document.js iOSTests/RenderingTests.swift >> "$RUNNER_TEMP/diagram-diagnostic/source.txt"
+          xcodebuild -version > "$RUNNER_TEMP/diagram-diagnostic/toolchain.txt"
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/diagram-diagnostic/devices.json"
+      - name: Run full suite followed by a fresh rendering-only process
         run: |
-          device_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if "iPhone" in d["name"]))')
-          xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
-            -destination "platform=iOS Simulator,id=$device_id" \
-            -derivedDataPath "$RUNNER_TEMP/Margined-ios" CODE_SIGNING_ALLOWED=NO \
-            -parallel-testing-enabled NO \
-            test > "$RUNNER_TEMP/ios-tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-tests.log"; exit 1; }
-          tail -20 "$RUNNER_TEMP/ios-tests.log"
-      - name: Build for iPad and iPhone devices
-        run: |
-          xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
-            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/Margined-device" \
-            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/ios-device.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-device.log"; exit 1; }
-      - name: Preserve validation details including all test attempts
+          device_id=$(python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/diagram-diagnostic/devices.json")); print(next(x["udid"] for g in d["devices"].values() for x in g if "iPhone" in x["name"]))')
+          printf '%s\n' "$device_id" > "$RUNNER_TEMP/diagram-diagnostic/selected-device.txt"
+          failed=0
+          for selection in full rendering; do
+            selection_args=()
+            if [[ "$selection" == rendering ]]; then
+              selection_args=(-only-testing:MarginediOSTests/RenderingTests)
+            fi
+            if xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
+              -destination "platform=iOS Simulator,id=$device_id" \
+              -derivedDataPath "$RUNNER_TEMP/Margined-diagram-diagnostic" \
+              -resultBundlePath "$RUNNER_TEMP/diagram-diagnostic/$selection.xcresult" \
+              CODE_SIGNING_ALLOWED=NO \
+              SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG MARGINED_DIAGRAM_DIAGNOSTIC' \
+              -parallel-testing-enabled NO "${selection_args[@]}" \
+              test > "$RUNNER_TEMP/diagram-diagnostic/$selection.log" 2>&1; then
+              status=0
+            else
+              status=$?
+              failed=1
+            fi
+            printf '%s\n' "$status" > "$RUNNER_TEMP/diagram-diagnostic/$selection-exit.txt"
+            tail -30 "$RUNNER_TEMP/diagram-diagnostic/$selection.log"
+          done
+          exit "$failed"
+      - name: Preserve every diagnostic result
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ios-validation-details
-          path: |
-            ${{ runner.temp }}/ios-tests.log
-            ${{ runner.temp }}/ios-device.log
-            ${{ runner.temp }}/Margined-ios/Logs/Test
+          name: ios-diagram-phase-details
+          path: ${{ runner.temp }}/diagram-diagnostic
           retention-days: 7
