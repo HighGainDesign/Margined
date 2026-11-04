@@ -135,6 +135,12 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        #if DEBUG && os(iOS)
+        // TEMPORARY: enable the existing bounded, passive history trace in iOS diagnostics.
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: "window.marginedResizeDiagnostics={events:[],dropped:0,phase:'ios-history-startup',captureToNative:true};",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Self.world))
+        #endif
         configuration.setURLSchemeHandler(images, forURLScheme: "margined-resource")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
@@ -249,8 +255,9 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
                 if updated == true { ready = true; navigation = nil; speechKey = nil; synchronizeSpeech(); return }
             }
             if webView.url != nil {
-                position = try? await webView.callAsyncJavaScript(Self.captureScript,
+                let captured = try? await webView.callAsyncJavaScript(Self.captureScript,
                     arguments: ["documentToken": previousToken], in: nil, contentWorld: Self.world) as? [String: Any]
+                position = Self.positionFromDiagnosticCapture(captured)
             }
             guard valid(expected) else { return }
             var tagged = page
@@ -301,9 +308,28 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
               !invalidated, let webView, let state = scope.presentationState else { return }
         let token = token
         state.capture(owner: presentationOwner) {
-            try? await webView.callAsyncJavaScript(Self.captureScript,
+            let captured = try? await webView.callAsyncJavaScript(Self.captureScript,
                 arguments: ["documentToken": token], in: nil, contentWorld: Self.world) as? [String: Any]
+            return Self.positionFromDiagnosticCapture(captured)
         }
+    }
+
+    private static func positionFromDiagnosticCapture(_ captured: [String: Any]?) -> [String: Any]? {
+        guard var position = captured else { return nil }
+        // Strip temporary evidence before the original position reaches retained state.
+        if let trace = position.removeValue(forKey: "__marginedResizeCaptureDiagnostics") {
+            let candidates = position["candidates"] as? [[String: Any]] ?? []
+            let first = candidates.first
+            let summary: [String: Any] = ["x":position["x"] ?? NSNull(), "y":position["y"] ?? NSNull(),
+                "top":position["top"] ?? NSNull(), "count":candidates.count,
+                "firstID":first?["id"] ?? NSNull(), "firstTag":first?["tag"] ?? NSNull(),
+                "firstLength":first?["length"] ?? NSNull()]
+            let report: [String: Any] = ["afterExistingCaptureAwait":true, "capturedPosition":summary, "trace":trace]
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+                print("IOS-HISTORY-CAPTURE-TRACE " + String(decoding:data,as:UTF8.self))
+            }
+        }
+        return position
     }
 
     func webView(_ view: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
@@ -516,6 +542,16 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
     }
     const saved = window.marginedHistoryDisclosure?.capture() ?? capture();
     if (saved) saved.disclosure = window.marginedHistoryDisclosure?.expanded ?? {};
+    const diagnostics = window.marginedResizeDiagnostics;
+    if (saved && diagnostics?.captureToNative) {
+        // Reuse this capture's position and existing IPC response; no extra DOM reads.
+        const first=saved.candidates?.[0];
+        diagnostics.events.push({event:'presentation-capture',operation:'captureScript',time:performance.now(),phase:diagnostics.phase,
+            saved:{x:saved.x,y:saved.y,top:saved.top,count:saved.candidates?.length ?? 0,
+                first:first ? {id:first.id,tag:first.tag,length:first.length} : null}});
+        if(diagnostics.events.length>100){diagnostics.events.splice(20,1);diagnostics.dropped++;}
+        saved.__marginedResizeCaptureDiagnostics=JSON.parse(JSON.stringify(diagnostics));
+    }
     return saved;
     """
     private static let reconcileScript = """

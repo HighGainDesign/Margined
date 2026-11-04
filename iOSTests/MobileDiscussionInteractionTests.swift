@@ -389,9 +389,16 @@ import XCTest
                 return try await history.evaluateJavaScript("(()=>{const r=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '))?.getBoundingClientRect();return !!r && r.top>=-2 && r.top<90;})()") as? Bool == true
             }
             if !restored, let history = self.history(in: f.host.view, excluding: f.web) {
+                // Freeze trace/native evidence before the existing failure-only DOM geometry read.
+                var report = await freezeResizeFailureEvidence(f, web: history,
+                    world: .world(name: "MarginedDiscussionHistory"))
                 let values = try await history.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return {y:scrollY,height:innerHeight,top:p?.getBoundingClientRect().top,font:document.body.style.fontSize};})()")
                 let saved = await f.reader.discussionHistoryPosition(for: "t-mobile").restorePosition()
                 print("SHEET-HISTORY width=\(width) metrics=\(String(describing: values)) saved=\(String(describing: saved))")
+                report["requestedWidth"] = Double(width)
+                report["existingFailureMetrics"] = values ?? NSNull()
+                report["existingSavedState"] = saved as Any? ?? NSNull()
+                printResizeFailureReport("IOS-HISTORY-REOPEN-FAIL", report)
             }
             XCTAssertTrue(restored, "Reopening at width \(width) must restore the paragraph being read")
         }
@@ -1183,7 +1190,7 @@ import XCTest
         let f = try await fixture(withThread: true, tail: "\n\n" + paragraphs)
         let context = f.reader.documentGeneration
         let observing = await pollAsync {
-            try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
+            try await f.web.callAsyncJavaScript("window.marginedResizeDiagnostics ??= {events:[],dropped:0,phase:'ios-live-window'};return typeof window.marginedReadingResize?.stop==='function';",
                 arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool == true
         }
         XCTAssertTrue(observing, "Install the app observer before establishing its reading position")
@@ -1240,6 +1247,14 @@ import XCTest
                     abs(y - Double(f.web.scrollView.contentOffset.y)) <= 1
             }
             XCTAssertTrue(passageSettled, "The reading passage must be visible before the next intentional resize or hide")
+            if !passageSettled {
+                var report = await freezeResizeFailureEvidence(f, web: f.web,
+                    world: MobileWebView.Coordinator.contentWorld)
+                report["requestedSize"] = String(describing: size)
+                report["originalStage"] = stage
+                report["expectedWidth"] = requestedReadingWidth(f) as Any? ?? NSNull()
+                printResizeFailureReport("IOS-LIVE-RESIZE-STAGE-FAIL", report)
+            }
             beforeHide = ["window": String(describing: size), "dom": stage,
                 "readerBounds": String(describing: f.web.bounds), "nativeOffset": String(describing: f.web.scrollView.contentOffset),
                 "nativePresentation": String(describing: f.web.scrollView.layer.presentation()?.bounds),
@@ -1703,6 +1718,47 @@ import XCTest
         guard readingWidthMatchesRequested(fixture) else { return false }
         let width = try await fixture.web.evaluateJavaScript("innerWidth") as? Double
         return width.map { readingWidthMatchesRequested(fixture, cssWidth: $0) } == true
+    }
+
+    // TEMPORARY: invoked only after an original poll has returned false.
+    private func freezeResizeFailureEvidence(_ fixture: Fixture, web: WKWebView,
+        world: WKContentWorld) async -> [String: Any] {
+        let window = fixture.window, host = fixture.host.view!, scroll = web.scrollView
+        // Freeze native positions before the first failure-only JS evaluation.
+        let native: [String: Any] = ["webID":String(describing:ObjectIdentifier(web)),
+            "webIsMainReader":web === fixture.web, "webOwnedWindow":web.window === window,
+            "webHidden":web.isHidden, "webFrame":String(describing:web.frame),
+            "webBounds":String(describing:web.bounds), "webSafe":String(describing:web.safeAreaInsets),
+            "webInHost":String(describing:web.convert(web.bounds,to:host)),
+            "webInWindow":String(describing:web.convert(web.bounds,to:window)),
+            "webPresentation":String(describing:web.layer.presentation()?.bounds),
+            "scrollBounds":String(describing:scroll.bounds), "scrollOffset":String(describing:scroll.contentOffset),
+            "scrollContentSize":String(describing:scroll.contentSize), "scrollInset":String(describing:scroll.contentInset),
+            "scrollAdjustedInset":String(describing:scroll.adjustedContentInset),
+            "scrollPresentation":String(describing:scroll.layer.presentation()?.bounds),
+            "scrollTracking":scroll.isTracking, "scrollDragging":scroll.isDragging, "scrollDecelerating":scroll.isDecelerating,
+            "windowBounds":String(describing:window.bounds), "windowSafe":String(describing:window.safeAreaInsets),
+            "windowKey":window.isKeyWindow, "windowHidden":window.isHidden,
+            "hostBounds":String(describing:host.bounds), "hostSafe":String(describing:host.safeAreaInsets),
+            "windowKeyboardGuide":String(describing:window.keyboardLayoutGuide.layoutFrame),
+            "hostKeyboardGuide":String(describing:host.convert(host.keyboardLayoutGuide.layoutFrame,to:window)),
+            "mainReaderBounds":String(describing:fixture.web.bounds),
+            "mainReaderOffset":String(describing:fixture.web.scrollView.contentOffset),
+            "discussionFocus":String(describing:fixture.reader.discussionFocus),
+            "discussionExpanded":fixture.reader.discussionSheetExpanded,
+            "documentGeneration":String(describing:fixture.reader.documentGeneration),
+            "presentationGeneration":String(describing:fixture.reader.discussionPresentationGeneration),
+            "layoutGeneration":String(describing:fixture.reader.discussionLayoutGeneration)]
+        let trace = try? await web.callAsyncJavaScript(
+            "return JSON.parse(JSON.stringify(window.marginedResizeDiagnostics ?? null));",
+            arguments: [:], in: nil, contentWorld: world)
+        return ["afterFailedOriginalPoll":true, "nativeAtFailedPoll":native, "trace":trace ?? NSNull()]
+    }
+
+    private func printResizeFailureReport(_ name: String, _ report: [String: Any]) {
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+            print(name + " " + String(decoding:data,as:UTF8.self))
+        }
     }
 
     private func resizeReadingMetrics(_ web: WKWebView) async throws -> [String: Any] {
