@@ -35,7 +35,14 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         editor.setContentOffset(target, animated: false)
         editor.setNeedsLayout(); editor.layoutIfNeeded()
         for _ in 0..<10 { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(editor.contentOffset.y, target.y, accuracy: 1,
+        let actualOffset = editor.contentOffset.y
+        #if MARGINED_DRAFT_LAYOUT_DIAGNOSTIC
+        if abs(actualOffset-target.y) > 1,
+           let diagnostic = editor as? any DiscussionDraftLayoutDiagnostics {
+            print("DRAFT-LAYOUT-DIAGNOSTIC \(diagnostic.draftLayoutDiagnosticReport())")
+        }
+        #endif
+        XCTAssertEqual(actualOffset, target.y, accuracy: 1,
                        "Unrelated layout must not pull a deliberately scrolled draft back to its caret")
         XCTAssertEqual(editor.selectedRange, NSRange(location: 0, length: 0))
         XCTAssertTrue(editor.isFirstResponder)
