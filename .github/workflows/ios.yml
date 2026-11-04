@@ -1,4 +1,4 @@
-name: iOS full history diagnosis
+name: iOS native resize restoration experiment
 
 on:
   push:
@@ -21,12 +21,18 @@ on:
       - .github/workflows/tests.yml
       - .github/workflows/release.yml
   workflow_dispatch:
+    inputs:
+      restoration_mode:
+        description: Resize scroll owner for this diagnostic build
+        type: choice
+        options: [javascript, native]
+        default: javascript
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.ref }}-${{ inputs.restoration_mode || 'javascript' }}
   cancel-in-progress: true
 
 jobs:
@@ -46,18 +52,34 @@ jobs:
           node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
           node --test script/tests/test_discussion_layout.cjs
           xcodegen generate
-      - name: Trace the full suite in two fresh processes
+      - name: Compare native resize restoration in two fresh processes
+        env:
+          MARGINED_RESIZE_MODE: ${{ inputs.restoration_mode || 'javascript' }}
         run: |
           device_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if "iPhone" in d["name"]))')
+          experiment_flags=DEBUG
+          if [[ "$MARGINED_RESIZE_MODE" == native ]]; then experiment_flags='DEBUG MARGINED_NATIVE_RESIZE_EXPERIMENT'; fi
           git rev-parse HEAD > "$RUNNER_TEMP/ios-diagnostic-source.txt"
           xcodebuild -version >> "$RUNNER_TEMP/ios-diagnostic-source.txt"
           xcrun simctl list devices available --json > "$RUNNER_TEMP/ios-diagnostic-devices.json"
           echo "$device_id" >> "$RUNNER_TEMP/ios-diagnostic-source.txt"
+          echo "restoration=$MARGINED_RESIZE_MODE flags=$experiment_flags" >> "$RUNNER_TEMP/ios-diagnostic-source.txt"
           shasum -a 256 App/Resources/reader-document.js iOSTests/MobileNativeViewportEvidence.swift >> "$RUNNER_TEMP/ios-diagnostic-source.txt"
           xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
             -destination "platform=iOS Simulator,id=$device_id" \
             -derivedDataPath "$RUNNER_TEMP/Margined-ios" CODE_SIGNING_ALLOWED=NO \
+            "SWIFT_ACTIVE_COMPILATION_CONDITIONS=$experiment_flags" \
             -parallel-testing-enabled NO \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testLiveWindowResizingKeepsTheOpenReplyAndDocumentIdentity \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testReadingResizeRetainsPassageWhenWindowDimensionsLagTheLayout \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testWindowResizingPreservesTheReadersVisiblePassage \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testNativeWidthTracksParentResizeWhenContentKeepsItsSize \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testBackAndWidthChangesRetainReplyAndTheMountedReadingPage \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testOldResizeObserverCannotScrollANewerDocumentVersion \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testDiscussionHistoryRetainsItsSemanticPositionAcrossHideAndWidthChanges \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testNativeHistoryRefreshKeepsItsPageReadingPositionAndFocusedDraft \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testCompactTypingExpandsAboveTheActualKeyboardAndGoToPassageRetainsCaret \
+            -only-testing:MarginediOSTests/MobileDiscussionDraftScrollingTests \
             -test-iterations 2 -test-repetition-relaunch-enabled YES \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 180 \
             test > "$RUNNER_TEMP/ios-tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-tests.log"; exit 1; }

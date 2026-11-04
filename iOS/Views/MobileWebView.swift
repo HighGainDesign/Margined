@@ -379,10 +379,16 @@ struct MobileWebView: UIViewRepresentable {
         private func observeReadingPositionDuringResize() {
             guard contentReady, let webView else { return }
             let expectedGeneration = generation, documentToken = token
+            #if MARGINED_NATIVE_RESIZE_EXPERIMENT
+            let nativeResizeRestoration = true
+            #else
+            let nativeResizeRestoration = false
+            #endif
             Task { [weak self] in
                 guard let self, valid(expectedGeneration), token == documentToken else { return }
                 _ = try? await webView.callAsyncJavaScript(Self.guarded(MobileWebScripts.document),
-                    arguments: ["operation": "observeResize", "restoreFocus": false, "documentToken": documentToken],
+                    arguments: ["operation": "observeResize", "restoreFocus": false, "documentToken": documentToken,
+                                "nativeResizeRestoration": nativeResizeRestoration],
                     in: nil, contentWorld: Self.contentWorld)
             }
         }

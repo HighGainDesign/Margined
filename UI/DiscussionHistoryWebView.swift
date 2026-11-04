@@ -248,6 +248,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
                 let updated = try? await webView.callAsyncJavaScript(Self.reconcileScript,
                     arguments: ["html": page, "restoreFocus": Self.hasFocus(webView),
                         "expectedToken": previousToken, "nextToken": nextToken, "fontSize": fontSize,
+                        "nativeResizeRestoration": Self.nativeResizeRestoration,
                         "previewLines": previewLines, "targetedMessageID": targetedMessageID ?? "",
                         "showFull": String(localized: "Show full comment"), "showLess": String(localized: "Show less")],
                     in: nil, contentWorld: Self.world) as? Bool
@@ -295,8 +296,17 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
 
     private func finishArguments(position: [String: Any]?) -> [String: Any] {
         ["documentToken": token, "fontSize": fontSize, "position": position as Any? ?? NSNull(),
+         "nativeResizeRestoration": Self.nativeResizeRestoration,
          "previewLines": previewLines, "targetedMessageID": targetedMessageID ?? "",
          "showFull": String(localized: "Show full comment"), "showLess": String(localized: "Show less")]
+    }
+
+    private static var nativeResizeRestoration: Bool {
+        #if os(iOS) && MARGINED_NATIVE_RESIZE_EXPERIMENT
+        true
+        #else
+        false
+        #endif
     }
 
     private func capturePresentationPosition() {

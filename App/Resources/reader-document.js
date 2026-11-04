@@ -191,7 +191,10 @@ if (operation === 'observeResize') {
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
         resizeDiagnostic('commit-before-restore', {source,width,height,nextWidth,nextHeight}, saved);
-        restore(saved);
+        // TEMPORARY A/B: retain observation and explicit navigation/capture,
+        // but let native WebKit alone perform resize scroll restoration on iOS.
+        if (typeof nativeResizeRestoration === 'undefined' || !nativeResizeRestoration) restore(saved);
+        else resizeDiagnostic('native-resize-restoration', {source,width,height,nextWidth,nextHeight}, saved);
         width = nextWidth; height = nextHeight;
         saved = sample('after-resize-restore');
         resizeDiagnostic('commit-after-restore', {source,width,height}, saved);
