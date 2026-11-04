@@ -56,7 +56,16 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         XCTAssertEqual(reader.discussions.drafts[key]?.body, text)
         #if MARGINED_DRAFT_LAYOUT_DIAGNOSTIC
         if let diagnostic = editor as? any DiscussionDraftLayoutDiagnostics {
-            print("DRAFT-LIGHT-LAYOUT-DIAGNOSTIC time=\(observationTime) observedOffset=\(actualOffset) \(diagnostic.draftLayoutDiagnosticReport())")
+            let report = UUID().uuidString
+            // Keep each write short so system log output cannot split a large
+            // JSON array halfway through a record. Formatting remains after
+            // the original assertions and the frozen observation boundary.
+            let entries = diagnostic.draftLayoutDiagnosticReport()
+            print("DRAFT-LIGHT-LAYOUT-BEGIN report=\(report) count=\(entries.count) time=\(observationTime) observedOffset=\(actualOffset)")
+            for (index, entry) in entries.enumerated() {
+                print("DRAFT-LIGHT-LAYOUT-ENTRY report=\(report) index=\(index) \(entry)")
+            }
+            print("DRAFT-LIGHT-LAYOUT-END report=\(report) count=\(entries.count)")
         }
         #endif
     }

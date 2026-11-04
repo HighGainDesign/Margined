@@ -5,7 +5,7 @@ import UIKit
 @MainActor
 protocol DiscussionDraftLayoutDiagnostics: AnyObject {
     func freezeDraftLayoutDiagnostics()
-    func draftLayoutDiagnosticReport() -> String
+    func draftLayoutDiagnosticReport() -> [String]
 }
 #endif
 
@@ -129,7 +129,7 @@ private final class DiscussionDraftTextView: UITextView {
 
     func freezeDraftLayoutDiagnostics() { diagnosticFrozen = diagnosticEntries }
 
-    func draftLayoutDiagnosticReport() -> String {
+    func draftLayoutDiagnosticReport() -> [String] {
         let records: [[String: Any]] = (diagnosticFrozen ?? diagnosticEntries).map { entry in
             var result: [String: Any] = ["sequence": entry.sequence, "phase": entry.phase,
                 "time": entry.time, "offset": String(describing: entry.offset),
@@ -145,9 +145,13 @@ private final class DiscussionDraftTextView: UITextView {
             if let changed = entry.changed { result["changed"] = changed }
             return result
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: records, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else { return "[]" }
-        return json
+        return records.map { record in
+            guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
+                  let json = String(data: data, encoding: .utf8) else {
+                return "{\"diagnosticSerializationFailure\":true}"
+            }
+            return json
+        }
     }
     #endif
     override func layoutSubviews() {

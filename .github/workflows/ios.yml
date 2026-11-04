@@ -1,4 +1,4 @@
-name: iOS focused draft timing comparison
+name: iOS full-suite draft layout diagnostic
 
 on:
   workflow_dispatch:
@@ -7,19 +7,19 @@ on:
         description: Plain production subclass or value-only layout trace
         type: choice
         options: [plain, light]
-        default: plain
+        default: light
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-draft-light-${{ github.ref }}-${{ inputs.trace_mode }}
+  group: ios-draft-full-light-${{ github.ref }}-${{ inputs.trace_mode }}
   cancel-in-progress: false
 
 jobs:
   diagnostic:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - name: Check out matched diagnostic source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -33,7 +33,7 @@ jobs:
           node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
           node --test script/tests/test_discussion_layout.cjs
           xcodegen generate
-      - name: Repeat the unchanged draft case in twenty fresh processes
+      - name: Run the full unchanged suite in three fresh processes
         env:
           MARGINED_DRAFT_TRACE_MODE: ${{ inputs.trace_mode }}
         run: |
@@ -53,14 +53,13 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/Margined-draft-light-diagnostic" \
             -resultBundlePath "$RUNNER_TEMP/draft-light-diagnostic/draft.xcresult" \
             CODE_SIGNING_ALLOWED=NO "SWIFT_ACTIVE_COMPILATION_CONDITIONS=$draft_flags" \
-            -only-testing:MarginediOSTests/MobileDiscussionDraftScrollingTests \
-            -parallel-testing-enabled NO -test-iterations 20 -test-repetition-relaunch-enabled YES \
+            -parallel-testing-enabled NO -test-iterations 3 -test-repetition-relaunch-enabled YES \
             test > "$RUNNER_TEMP/draft-light-diagnostic/draft.log" 2>&1 || { tail -80 "$RUNNER_TEMP/draft-light-diagnostic/draft.log"; exit 1; }
           tail -25 "$RUNNER_TEMP/draft-light-diagnostic/draft.log"
       - name: Preserve every attempt
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ios-draft-light-${{ inputs.trace_mode }}
+          name: ios-draft-full-light-${{ inputs.trace_mode }}
           path: ${{ runner.temp }}/draft-light-diagnostic
           retention-days: 7
