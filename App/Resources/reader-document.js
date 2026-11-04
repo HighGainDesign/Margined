@@ -115,6 +115,17 @@ if (operation === 'observeResize') {
     // full committed dimensions when a content scrollbar appears or disappears.
     // Unlike innerWidth/innerHeight, this box participates in committed layout.
     let width = measurement.clientWidth, height = measurement.clientHeight, pending = 0;
+    // Temporary iOS timing experiment; absent outside its diagnostic build.
+    const geometryGate = window.webkit?.messageHandlers?.readingResizeGeometry;
+    const geometryLease = (window.marginedResizeGeometryLease ?? 0) + 1;
+    window.marginedResizeGeometryLease = geometryLease;
+    let geometryRevision = 0, geometryRequest = null;
+    function cancelGeometry() {
+        if (!geometryRequest) return;
+        geometryRequest = null;
+        Promise.resolve(geometryGate.postMessage({kind:'cancel',token:documentToken,
+            lease:geometryLease,revision:++geometryRevision})).catch(() => {});
+    }
     function hasUsableViewport() { return viewport.clientWidth > 0 && viewport.clientHeight > 0; }
     let resizeObserver;
     function sample() {
@@ -134,6 +145,7 @@ if (operation === 'observeResize') {
             focus:null, candidates:node ? [descriptor(node)] : []};
     }
     function stop() {
+        cancelGeometry();
         controller.abort();
         resizeObserver?.disconnect();
         if (pending) cancelAnimationFrame(pending);
@@ -150,14 +162,14 @@ if (operation === 'observeResize') {
         if (!current()) { stop(); return; }
         // Retain a user scroll before its pending frame can be overtaken by a
         // layout commit. Never sample a reflowed or hidden page against old dimensions.
-        if (!hasUsableViewport()) return;
+        if (!hasUsableViewport() || geometryRequest) return;
         if (measurement.clientWidth === width && measurement.clientHeight === height) saved = sample();
         if (pending) cancelAnimationFrame(pending);
         pending = requestAnimationFrame(() => {
             pending = 0;
             if (!current()) { stop(); return; }
             // A scroll event can precede the resize event for the same layout.
-            if (!hasUsableViewport()) return;
+            if (!hasUsableViewport() || geometryRequest) return;
             if (measurement.clientWidth === width && measurement.clientHeight === height) saved = sample();
         });
     }, options);
@@ -166,11 +178,42 @@ if (operation === 'observeResize') {
         const nextWidth = measurement.clientWidth, nextHeight = measurement.clientHeight;
         // Viewport-unit boxes can retain dimensions while the usable page is
         // hidden. Neither kind of zero-sized layout may erase a valid snapshot.
-        if (!hasUsableViewport() || nextWidth <= 0 || nextHeight <= 0) return;
+        if (!hasUsableViewport() || nextWidth <= 0 || nextHeight <= 0) { cancelGeometry(); return; }
         if (!saved) { width = nextWidth; height = nextHeight; saved = sample(); return; }
-        if (nextWidth === width && nextHeight === height) return;
+        if (nextWidth === width && nextHeight === height && !geometryRequest) return;
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
+        if (geometryGate) {
+            const contentWidth = document.documentElement.scrollWidth;
+            const contentHeight = document.documentElement.scrollHeight;
+            const key = `${nextWidth}:${nextHeight}:${contentWidth}:${contentHeight}`;
+            if (geometryRequest?.key === key) return;
+            const request = {key,position:saved,revision:++geometryRevision};
+            geometryRequest = request;
+            Promise.resolve(geometryGate.postMessage({kind:'wait',token:documentToken,
+                lease:geometryLease,revision:request.revision,width:nextWidth,height:nextHeight,contentWidth,contentHeight}))
+                .then(result => {
+                    if (geometryRequest !== request) return;
+                    if (!current()) { stop(); return; }
+                    if (!hasUsableViewport()) { cancelGeometry(); return; }
+                    if (measurement.clientWidth !== nextWidth ||
+                        measurement.clientHeight !== nextHeight || document.documentElement.scrollWidth !== contentWidth ||
+                        document.documentElement.scrollHeight !== contentHeight) {
+                        // Retain ownership while reconciling a newer layout,
+                        // including A→B→A before the queued RO callback arrives.
+                        commitResize();
+                        return;
+                    }
+                    geometryRequest = null;
+                    if (!result?.ready) return;
+                    restore(request.position);
+                    width = nextWidth; height = nextHeight;
+                    saved = sample();
+                    Promise.resolve(geometryGate.postMessage({kind:'restored',token:documentToken,
+                        lease:geometryLease,revision:request.revision,x:saved.x,y:saved.y})).catch(() => {});
+                }).catch(() => { if (geometryRequest === request) geometryRequest = null; });
+            return;
+        }
         restore(saved);
         width = nextWidth; height = nextHeight;
         saved = sample();

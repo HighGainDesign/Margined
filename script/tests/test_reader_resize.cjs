@@ -15,10 +15,10 @@ const script = new vm.Script(`(function () {\n${source}\n})()`, {filename: sourc
 const tests = [];
 const test = (name, run) => tests.push({name, run});
 
-function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, compatMode = 'CSS1Compat'} = {}) {
+function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, compatMode = 'CSS1Compat', geometryGate} = {}) {
     const state = {
         innerWidth: 550, innerHeight: 446, rootWidth: 550, rootHeight: 446,
-        layoutWidth: 550, layoutHeight: 446, createdElements: [],
+        layoutWidth: 550, layoutHeight: 446, contentHeight: 9000, createdElements: [],
         x: 0, y: 3538, targetTop: 3541.1875, frames: new Map(), nextFrame: 1,
         scrollWrites: [], observers: [], listeners: new Map(), focusWrites: 0,
         attributes: new Map([[attribute, 'lease-A']])
@@ -46,6 +46,8 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         appendChild(node) { node.parentNode = this; this.children.push(node); return node; },
         get clientWidth() { return compatMode === 'BackCompat' ? 1200 : state.rootWidth; },
         get clientHeight() { return compatMode === 'BackCompat' ? 9000 : state.rootHeight; },
+        get scrollWidth() { return state.layoutWidth; },
+        get scrollHeight() { return state.contentHeight; },
         getAttribute(key) { return state.attributes.get(key) ?? null; }
     };
     const document = {
@@ -123,6 +125,7 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         } : undefined
     });
     context.window = context;
+    if (geometryGate) context.webkit = {messageHandlers: {readingResizeGeometry: geometryGate}};
     context.addEventListener = addEventListener;
     context.scrollTo = (x, y) => {
         state.x = x; state.y = Math.floor(y);
@@ -365,6 +368,8 @@ test('expired-lease-removes-the-owned-host-and-rejects-late-measurement', () => 
     assert.equal(r.root.children.length, 1); assert.equal(r.root.children[0], r.authoredNode);
 });
 
+module.exports = {rig};
+if (require.main === module) {
 let failures = 0, count = 0;
 for (const {name, run} of tests) {
     if (process.argv[3] && !name.includes(process.argv[3])) continue;
@@ -375,3 +380,4 @@ for (const {name, run} of tests) {
 if (!count) throw new Error('No matching tests');
 console.log(`${path.basename(sourcePath)}: ${count - failures}/${count} passed`);
 process.exitCode = failures ? 1 : 0;
+}

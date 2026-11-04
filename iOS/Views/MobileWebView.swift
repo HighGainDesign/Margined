@@ -122,6 +122,9 @@ struct MobileWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = .clear
         webView.accessibilityLabel = String(localized: "Markdown document")
         coordinator.webView = webView
+        #if MARGINED_RESIZE_GEOMETRY_EXPERIMENT
+        coordinator.installResizeGeometryExperiment(webView)
+        #endif
         return webView
     }
 
@@ -143,6 +146,9 @@ struct MobileWebView: UIViewRepresentable {
         (webView as? MobileDocumentWebView)?.canDiscussSelection = { false }
         (webView as? MobileDocumentWebView)?.onDiscussSelection = nil
         coordinator.invalidate()
+        #if MARGINED_RESIZE_GEOMETRY_EXPERIMENT
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "readingResizeGeometry", contentWorld: Coordinator.contentWorld)
+        #endif
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "taskToggle", contentWorld: Coordinator.contentWorld)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "discussion", contentWorld: Coordinator.discussionWorld)
         webView.navigationDelegate = nil
@@ -226,6 +232,18 @@ struct MobileWebView: UIViewRepresentable {
         private var passageInFlight: UUID?
         private var loadingTask: Task<Void, Never>?
         private var isInvalidated = false
+        #if MARGINED_RESIZE_GEOMETRY_EXPERIMENT
+        private var resizeGeometryExperiment: MobileResizeGeometryExperiment?
+        func installResizeGeometryExperiment(_ web: WKWebView) {
+            let gate = MobileResizeGeometryExperiment(web: web) { [weak self] expectedToken in
+                guard let self else { return false }
+                return !isInvalidated && contentReady && token == expectedToken &&
+                    documentGeneration == reader.documentGeneration
+            }
+            resizeGeometryExperiment = gate
+            web.configuration.userContentController.addScriptMessageHandler(gate, contentWorld: Self.contentWorld, name: "readingResizeGeometry")
+        }
+        #endif
 
         init(reader: MobileReaderState) {
             self.reader = reader
@@ -237,6 +255,9 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         func invalidate() {
+            #if MARGINED_RESIZE_GEOMETRY_EXPERIMENT
+            resizeGeometryExperiment?.invalidate()
+            #endif
             nativeSelection = nil
             images.cancelPendingLoads()
             isInvalidated = true
