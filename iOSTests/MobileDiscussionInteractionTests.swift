@@ -1203,9 +1203,14 @@ import XCTest
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         try await settleMobileResizeObserver(f.web)
-        let seed = try await resizeReadingMetrics(f.web)
+        var seed: [String: Any] = [:], seedEvidence: [String: Any] = [:]
+        let seedReady = await pollAsync {
+            try await self.resizeSeedHasCommitted(f, metrics: &seed, evidence: &seedEvidence)
+        }
+        XCTAssertTrue(seedReady, "Establish the native reading position before opening its conversation: \(seedEvidence)")
         XCTAssertEqual(seed["visible"] as? Bool, true, "Establish the actual passage before opening its conversation")
         XCTAssertGreaterThan(seed["scroll"] as? Double ?? 0, 0)
+        guard seedReady else { return }
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("An unfinished reply across both displays.", for: .thread("t-mobile"))
         let initial = await poll { self.visibleEditor(in: f.host.view)?.text == "An unfinished reply across both displays." }
@@ -1330,9 +1335,13 @@ import XCTest
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         try await settleMobileResizeObserver(f.web)
-        let initialReading = try await resizeReadingMetrics(f.web)
+        var initialReading: [String: Any] = [:], seedEvidence: [String: Any] = [:]
+        let seedReady = await pollAsync {
+            try await self.resizeSeedHasCommitted(f, metrics: &initialReading, evidence: &seedEvidence)
+        }
+        XCTAssertTrue(seedReady, "Establish the native reading position before changing its allocation: \(seedEvidence)")
         XCTAssertEqual(initialReading["visible"] as? Bool, true)
-        guard initialReading["visible"] as? Bool == true else { return }
+        guard seedReady, initialReading["visible"] as? Bool == true else { return }
         // Reproduce the captured WKWebView ordering: the resize event retains
         // the previous window dimensions while the actual layout widens. Only
         // the app's isolated world sees these stale values; layout stays real.
@@ -1466,10 +1475,15 @@ import XCTest
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         try await settleMobileResizeObserver(f.web)
-        let initial = try await resizeReadingMetrics(f.web)
+        var initial: [String: Any] = [:], seedEvidence: [String: Any] = [:]
+        let seedReady = await pollAsync {
+            try await self.resizeSeedHasCommitted(f, metrics: &initial, evidence: &seedEvidence)
+        }
+        XCTAssertTrue(seedReady, "Establish the native reading position before the first resize: \(seedEvidence)")
         XCTAssertGreaterThan(try XCTUnwrap(initial["scroll"] as? Double), 0,
                              "The fixture must actually be partway through its rendered document")
         XCTAssertEqual(initial["visible"] as? Bool, true)
+        guard seedReady else { return }
         for size in [CGSize(width: 890, height: 626), CGSize(width: 626, height: 890), CGSize(width: 466, height: 678)] {
             f.window.frame.size = size
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
@@ -1734,12 +1748,30 @@ import XCTest
         let value = try await web.callAsyncJavaScript("""
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
         const box=document.getElementById('resize-reading-passage').getBoundingClientRect();
-        return {samePage:window.mobileResizePage===document,scroll:scrollY,
+        const visible=box.bottom>0&&box.top<innerHeight;
+        return {samePage:window.mobileResizePage===document,scroll:scrollY,x:scrollX,y:scrollY,
             top:box.top,bottom:box.bottom,width:innerWidth,height:innerHeight,
-            visible:box.bottom>0&&box.top<innerHeight,
+            visible,semanticVisible:visible,
+            contentWidth:document.documentElement.scrollWidth,
+            contentHeight:document.documentElement.scrollHeight,
             overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         return try XCTUnwrap(value as? [String: Any])
+    }
+
+    private func resizeSeedHasCommitted(_ fixture: Fixture, metrics: inout [String: Any],
+        evidence: inout [String: Any]) async throws -> Bool {
+        // This reads the result of the original single jump. It never scrolls
+        // again or changes the cadence of the later live-resize sequence.
+        metrics = [:]
+        evidence = ["reason": "awaiting initial resize DOM metrics"]
+        do { metrics = try await resizeReadingMetrics(fixture.web) }
+        catch {
+            evidence = ["reason": "initial resize DOM evaluation failed", "error": String(describing: error)]
+            throw error
+        }
+        return NativeReadingPositionReadiness.matches(metrics, web: fixture.web,
+            window: fixture.window, evidence: &evidence)
     }
 
     func testFirstPostKeepsTheSavedConversationOpenAndCanReply() async throws {
