@@ -373,10 +373,12 @@ import XCTest
         XCTAssertTrue(ready); guard ready else { return }
         let initial = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
         _ = try await initial.evaluateJavaScript("Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 ')).scrollIntoView({block:'start',behavior:'instant'});true")
+        var lastHistoryReadiness: [String: Any] = [:]
         let initialPosition = await pollAsync {
-            try await initial.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return scrollY>300 && Math.abs(p.getBoundingClientRect().top)<2;})()") as? Bool == true
+            try await self.historyReadingPositionHasCommitted(initial, in: f, initial: true, evidence: &lastHistoryReadiness)
         }
-        XCTAssertTrue(initialPosition)
+        XCTAssertTrue(initialPosition, "Establish the paragraph in both DOM and native viewports before hiding history: \(lastHistoryReadiness)")
+        guard initialPosition else { return }
         for width in [CGFloat(390), CGFloat(1120), CGFloat(390)] {
             f.reader.hideDiscussions()
             let hidden = await poll { self.history(in: f.host.view, excluding: f.web) == nil }
@@ -384,14 +386,18 @@ import XCTest
             f.window.frame.size.width = width
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
             f.reader.openDiscussion("t-mobile")
+            lastHistoryReadiness = ["reason": "awaiting history viewport", "requestedWidth": width]
             let restored = await pollAsync {
-                guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
-                return try await history.evaluateJavaScript("(()=>{const r=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '))?.getBoundingClientRect();return !!r && r.top>=-2 && r.top<90;})()") as? Bool == true
+                guard let history = self.history(in: f.host.view, excluding: f.web) else {
+                    lastHistoryReadiness = ["reason": "history view is not mounted", "requestedWidth": width]
+                    return false
+                }
+                return try await self.historyReadingPositionHasCommitted(history, in: f, initial: false, evidence: &lastHistoryReadiness)
             }
             if !restored, let history = self.history(in: f.host.view, excluding: f.web) {
                 let values = try await history.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return {y:scrollY,height:innerHeight,top:p?.getBoundingClientRect().top,font:document.body.style.fontSize};})()")
                 let saved = await f.reader.discussionHistoryPosition(for: "t-mobile").restorePosition()
-                print("SHEET-HISTORY width=\(width) metrics=\(String(describing: values)) saved=\(String(describing: saved))")
+                print("SHEET-HISTORY width=\(width) metrics=\(String(describing: values)) saved=\(String(describing: saved)) readiness=\(lastHistoryReadiness)")
             }
             XCTAssertTrue(restored, "Reopening at width \(width) must restore the paragraph being read")
         }
@@ -2650,6 +2656,31 @@ import XCTest
         let host: UIHostingController<MobileDocumentWorkspace>
         let web: WKWebView
     }
+    private func historyReadingPositionHasCommitted(_ history: WKWebView, in fixture: Fixture,
+        initial: Bool, evidence: inout [String: Any]) async throws -> Bool {
+        let condition = initial ? "y>300 && Math.abs(r.top)<2" : "r.top>=-2 && r.top<90"
+        evidence = ["reason": "awaiting history DOM metrics", "initial": initial]
+        let value: [String: Any]?
+        do {
+            value = try await history.evaluateJavaScript("""
+        (()=>{
+            const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));
+            if(!p)return null;
+            const r=p.getBoundingClientRect(),y=scrollY,height=innerHeight;
+            return {semanticVisible:(\(condition))&&r.bottom>0&&r.top<height,
+                x:scrollX,y,top:r.top,bottom:r.bottom,width:innerWidth,height,
+                contentWidth:document.documentElement.scrollWidth,
+                contentHeight:document.documentElement.scrollHeight};
+        })()
+        """) as? [String: Any]
+        } catch {
+            evidence = ["reason": "history DOM evaluation failed", "error": String(describing: error), "initial": initial]
+            throw error
+        }
+        guard let value else { evidence = ["reason": "missing history DOM metrics"]; return false }
+        return NativeReadingPositionReadiness.matches(value, web: history, window: fixture.window, evidence: &evidence)
+    }
+
     private func waitForInitialHistory(_ fixture: Fixture) async throws {
         let committed = await WebKitTestReadiness.navigation({ self.history(in: fixture.host.view, excluding: fixture.web) },
             expectedURL: fixture.file.deletingLastPathComponent())
