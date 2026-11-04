@@ -1513,9 +1513,11 @@ import XCTest
         // the observer acts while current, then require silence after supersession.
         _ = try await f.web.callAsyncJavaScript("""
         window.resizeScrollCalls=0;
+        window.resizeScrollTokens=[];
         const original=window.scrollTo;
         window.scrollTo=function(...args) {
             window.resizeScrollCalls++;
+            window.resizeScrollTokens.push(document.documentElement.getAttribute('data-margined-mobile-token'));
             return Reflect.apply(original,this,args);
         };
         return true;
@@ -1524,10 +1526,22 @@ import XCTest
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         _ = try await f.web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;",
             arguments: [:], in: nil, contentWorld: .defaultClient)
-        let active = try await f.web.callAsyncJavaScript("const count=window.resizeScrollCalls;window.resizeScrollCalls=0;return count;",
+        _ = await pollAsync {
+            try await f.web.callAsyncJavaScript("return window.resizeScrollCalls>0;",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool == true
+        }
+        let active = try await f.web.callAsyncJavaScript("return window.resizeScrollCalls;",
             arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Int
         XCTAssertGreaterThan(try XCTUnwrap(active), 0, "The native resize must exercise a live observer, not a vacuous spy")
-        _ = try await f.web.evaluateJavaScript("document.documentElement.setAttribute('data-margined-mobile-token','superseded-page-version');true")
+        guard let active, active > 0 else { return }
+        // Establish one JS-task boundary. An authorized restore between a
+        // separate counter reset and token mutation would be miscounted as stale.
+        _ = try await f.web.callAsyncJavaScript("""
+        window.resizeScrollCalls=0;
+        window.resizeScrollTokens=[];
+        document.documentElement.setAttribute('data-margined-mobile-token','superseded-page-version');
+        return true;
+        """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
         f.window.frame.size = CGSize(width: 890, height: 626)
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         let committed = await pollAsync {
@@ -1541,6 +1555,11 @@ import XCTest
         """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
         XCTAssertEqual(try XCTUnwrap(callsValue as? Int), 0,
                        "A superseded observer must leave scrolling to the new document version")
+        if (callsValue as? Int) != 0 {
+            let tokens = try? await f.web.callAsyncJavaScript("return window.resizeScrollTokens;",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+            print("STALE-RESIZE-WRITE-TOKENS \(String(describing: tokens))")
+        }
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
