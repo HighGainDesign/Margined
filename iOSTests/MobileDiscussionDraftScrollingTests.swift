@@ -35,8 +35,13 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         editor.setContentOffset(target, animated: false)
         editor.setNeedsLayout(); editor.layoutIfNeeded()
         for _ in 0..<10 { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(editor.contentOffset.y, target.y, accuracy: 1,
+        let actualOffset = editor.contentOffset.y
+        XCTAssertEqual(actualOffset, target.y, accuracy: 1,
                        "Unrelated layout must not pull a deliberately scrolled draft back to its caret")
+        #if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+        let observationTime = CACurrentMediaTime()
+        (editor as? any DiscussionDraftRevealDiagnostics)?.freezeDraftRevealDiagnostics()
+        #endif
         XCTAssertEqual(editor.selectedRange, NSRange(location: 0, length: 0))
         XCTAssertTrue(editor.isFirstResponder)
         window.frame.size.height = 200
@@ -47,6 +52,16 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         }
         XCTAssertTrue(revealed, "A changed viewport must reveal the retained caret")
         XCTAssertEqual(reader.discussions.drafts[key]?.body, text)
+        #if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+        if let diagnostic = editor as? any DiscussionDraftRevealDiagnostics {
+            let entries = diagnostic.draftRevealDiagnosticReport(), report = UUID().uuidString
+            print("DRAFT-REVEAL-BEGIN report=\(report) count=\(entries.count) time=\(observationTime) offset=\(actualOffset)")
+            for (index, entry) in entries.enumerated() {
+                print("DRAFT-REVEAL-ENTRY report=\(report) index=\(index) \(entry)")
+            }
+            print("DRAFT-REVEAL-END report=\(report) count=\(entries.count)")
+        }
+        #endif
     }
 
     private func findEditor(_ view: UIView) -> UITextView? {

@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+#if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+@MainActor
+protocol DiscussionDraftRevealDiagnostics: AnyObject {
+    func freezeDraftRevealDiagnostics()
+    func draftRevealDiagnosticReport() -> [String]
+}
+#endif
+
 /// The composer alone owns this editor. Its selection is session state, never
 /// Markdown metadata, and old delegates cannot write into a replacement file.
 struct MobileDiscussionDraftEditor: UIViewRepresentable {
@@ -89,17 +97,79 @@ private final class DiscussionDraftTextView: UITextView {
         let focused: Bool
     }
     private var lastLayout: Layout?
+    #if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+    private struct Reveal {
+        let sequence: Int
+        let time: CFTimeInterval
+        let previousSize: CGSize?
+        let size: CGSize
+        let previousSelection: NSRange?
+        let selection: NSRange
+        let fontChanged: Bool
+        let insetsChanged: Bool
+        let resets: Int
+        let before: CGPoint
+        let after: CGPoint
+    }
+    private var revealEntries: [Reveal] = []
+    private var frozenReveals: [Reveal]?
+    private var revealSequence = 0
+    private var resetCount = 0
+
+    func freezeDraftRevealDiagnostics() { frozenReveals = revealEntries }
+    func draftRevealDiagnosticReport() -> [String] {
+        (frozenReveals ?? revealEntries).map { entry in
+            let record: [String: Any] = ["sequence": entry.sequence, "time": entry.time,
+                "previousSize": String(describing: entry.previousSize), "size": String(describing: entry.size),
+                "previousSelection": String(describing: entry.previousSelection), "selection": String(describing: entry.selection),
+                "fontChanged": entry.fontChanged, "insetsChanged": entry.insetsChanged, "resets": entry.resets,
+                "before": String(describing: entry.before), "after": String(describing: entry.after)]
+            guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
+                  let json = String(data: data, encoding: .utf8) else { return "{\"serializationFailure\":true}" }
+            return json
+        }
+    }
+    #endif
     override func layoutSubviews() {
         super.layoutSubviews()
         guard isFirstResponder, window != nil, bounds.height > 0,
-              let selection = selectedTextRange else { lastLayout = nil; return }
+              let selection = selectedTextRange else {
+            #if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+            resetCount += 1
+            #endif
+            lastLayout = nil; return
+        }
         let layout = Layout(size: bounds.size, insets: adjustedContentInset,
                             font: font, selection: selectedRange, focused: isFirstResponder)
         let changed = lastLayout != layout
+        #if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+        // No extra text/container metrics, pre-super reads or retained UIFonts.
+        let previousSize = changed ? lastLayout?.size : nil
+        let previousSelection = changed ? lastLayout?.selection : nil
+        let fontChanged = changed && lastLayout?.font != layout.font
+        let insetsChanged = changed && lastLayout?.insets != layout.insets
+        #endif
         lastLayout = layout
         // A scroll changes bounds.origin, but does not change this key. Let the
         // user browse a long draft without an unrelated layout moving it back.
         guard changed else { return }
+        #if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+        let beforeReveal = contentOffset
+        let revealTime = CACurrentMediaTime()
+        #endif
         scrollRectToVisible(caretRect(for: selection.start).insetBy(dx: 0, dy: -4), animated: false)
+        #if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+        revealSequence += 1
+        let entry = Reveal(sequence: revealSequence, time: revealTime,
+            previousSize: previousSize, size: layout.size,
+            previousSelection: previousSelection, selection: layout.selection,
+            fontChanged: fontChanged, insetsChanged: insetsChanged, resets: resetCount,
+            before: beforeReveal, after: contentOffset)
+        if revealEntries.count == 64 { revealEntries.removeFirst() }
+        revealEntries.append(entry)
+        #endif
     }
 }
+#if MARGINED_DRAFT_REVEAL_DIAGNOSTIC
+extension DiscussionDraftTextView: DiscussionDraftRevealDiagnostics {}
+#endif
