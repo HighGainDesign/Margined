@@ -331,10 +331,6 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         let scope = DiscussionHistoryScope(fileURL: nil, isCurrent: { true }, imageFailed: { _ in }, openFile: { _ in })
         let coordinator = DiscussionHistoryCoordinator(scope: scope), web = coordinator.makeWebView()
         defer { coordinator.invalidate() }
-        web.configuration.userContentController.addUserScript(WKUserScript(
-            source: "window.marginedResizeDiagnostics={events:[],dropped:0,phase:'startup'};",
-            injectionTime: .atDocumentStart, forMainFrameOnly: true,
-            in: .world(name: "MarginedDiscussionHistory")))
         try mount(web)
         coordinator.update(html: rendered.html, fontSize: 16, imageGeneration: 0)
         try await waitForNavigation(web)
@@ -374,7 +370,6 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         XCTAssertEqual(expanded["controlObstructsVisibleText"] as? Bool, false)
         XCTAssertEqual(expanded["completeLines"] as? Int, expanded["totalLines"] as? Int)
         _ = try await web.callAsyncJavaScript("""
-        if(window.marginedResizeDiagnostics)window.marginedResizeDiagnostics.phase='explicit-ending-jump';
         document.querySelector('[data-message-id=m-real-older] .discussion-message-body a').scrollIntoView({block:'end',behavior:'instant'});
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
         return true;
@@ -382,55 +377,25 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         let ending = try await realMarkdownGeometry(in: web)
         XCTAssertGreaterThan(ending["visibleEndingRects"] as? Int ?? 0, 0, "The actual trailing link must be visible for native hit testing")
         XCTAssertEqual(ending["endingHitsLink"] as? Bool, true, "The visible ending must hit its link rather than the disclosure: \(ending)")
-        if (ending["visibleEndingRects"] as? Int ?? 0) == 0 || ending["endingHitsLink"] as? Bool != true {
-            await recordRealMarkdownEndingFailure(web, expanded: expanded, ending: ending)
-        }
-        XCTAssertEqual(thread.messages.first?.body, body)
-    }
-
-    private func recordRealMarkdownEndingFailure(_ web: WKWebView, expanded: [String: Any], ending: [String: Any]) async {
-        // Called only after the original ending sample and assertions have completed.
-        // Freeze the existing app trace before any failure-only geometry reads.
-        let evidence = try? await web.callAsyncJavaScript("""
-        const trace=JSON.parse(JSON.stringify(window.marginedResizeDiagnostics ?? null));
-        const article=document.querySelector('[data-message-id=m-real-older]'),body=article?.querySelector('.discussion-message-body'),button=article?.querySelector('button[data-history-disclosure]'),link=body?.querySelector('a');
-        const rect=r=>r ? {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height} : null;
-        const range=document.createRange();if(link)range.selectNodeContents(link);
-        const endingRects=link ? Array.from(range.getClientRects()).map(rect) : [];
-        const root=document.documentElement;
-        return {trace,afterFailedOriginalSample:true,geometry:{x:scrollX,y:scrollY,innerWidth,innerHeight,
-            clientWidth:root.clientWidth,clientHeight:root.clientHeight,scrollWidth:root.scrollWidth,scrollHeight:root.scrollHeight,
-            expanded:button?.getAttribute('aria-expanded'),bodyOverflow:body?.style.overflow,bodyMaxHeight:body?.style.maxHeight,
-            article:rect(article?.getBoundingClientRect()),body:rect(body?.getBoundingClientRect()),control:rect(button?.getBoundingClientRect()),link:rect(link?.getBoundingClientRect()),endingRects,
-            visual:visualViewport ? {width:visualViewport.width,height:visualViewport.height,offsetTop:visualViewport.offsetTop,pageTop:visualViewport.pageTop,scale:visualViewport.scale} : null}};
+        // Removing resize observation must not change the document's usable
+        // width, scroll extent, reading offset or content geometry. Measure
+        // only after the original ending visibility and hit checks above.
+        let footprint = try await web.callAsyncJavaScript("""
+        const root=document.documentElement,main=document.getElementById('document');
+        function geometry(){const box=main.getBoundingClientRect();return {
+            overflow:root.scrollWidth-root.clientWidth,scrollHeight:root.scrollHeight,
+            clientWidth:root.clientWidth,clientHeight:root.clientHeight,
+            y:scrollY,top:box.top,height:box.height};}
+        const before=geometry();window.marginedReadingResize?.stop();
+        return {before,after:geometry()};
         """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
-        var native = ["webFrame":String(describing:web.frame),"webBounds":String(describing:web.bounds)]
-        #if os(iOS)
-        native["offset"] = String(describing:web.scrollView.contentOffset)
-        native["contentSize"] = String(describing:web.scrollView.contentSize)
-        native["adjustedInset"] = String(describing:web.scrollView.adjustedContentInset)
-        native["presentationBounds"] = String(describing:web.scrollView.layer.presentation()?.bounds)
-        #else
-        native["windowFrame"] = String(describing:web.window?.frame)
-        native["windowContentBounds"] = String(describing:web.window?.contentView?.bounds)
-        func findScroll(_ view: NSView) -> NSScrollView? {
-            if let scroll = view as? NSScrollView { return scroll }
-            return view.subviews.lazy.compactMap { findScroll($0) }.first
-        }
-        if let scroll = web.enclosingScrollView ?? findScroll(web) {
-            native["scrollFrame"] = String(describing:scroll.frame)
-            native["scrollBounds"] = String(describing:scroll.bounds)
-            native["clipBounds"] = String(describing:scroll.contentView.bounds)
-            native["documentFrame"] = String(describing:scroll.documentView?.frame)
-            native["scrollerStyle"] = String(describing:scroll.scrollerStyle)
-            native["hasVerticalScroller"] = String(describing:scroll.hasVerticalScroller)
-            native["hasHorizontalScroller"] = String(describing:scroll.hasHorizontalScroller)
-        }
-        #endif
-        let report: [String: Any] = ["expandedOriginal":expanded,"endingOriginal":ending,"nativeAfterFailure":native,"evidence":evidence ?? NSNull()]
-        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
-            print("HISTORY-ENDING-FAIL " + String(decoding:data,as:UTF8.self))
-        }
+        let geometry = try XCTUnwrap(footprint as? [String: Any])
+        let before = try XCTUnwrap(geometry["before"] as? [String: Double])
+        let after = try XCTUnwrap(geometry["after"] as? [String: Double])
+        XCTAssertLessThanOrEqual(try XCTUnwrap(before["overflow"]), 1,
+                                 "Resize observation must not add horizontal document overflow")
+        XCTAssertEqual(before, after, "Resize observation must leave the rendered document geometry untouched")
+        XCTAssertEqual(thread.messages.first?.body, body)
     }
 
     private func realMarkdownGeometry(in web: WKWebView) async throws -> [String: Any] {

@@ -121,22 +121,18 @@ targets:
             QLSupportedContentTypes: [net.daringfireball.markdown]
             QLSupportsSearchableItems: false
             QLIsDataBasedPreview: true
-    entitlements:
-      path: QuickLook/QuickLook.entitlements
-      properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.files.user-selected.read-only: true
-        com.apple.security.temporary-exception.files.absolute-path.read-only: ['/']
-        com.apple.security.network.client: true
-        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.margined]
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLook.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.quicklook
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
         ENABLE_HARDENED_RUNTIME: YES
       configs:
+        AppStoreDebug:
+          CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLookAppStore.entitlements
         AppStoreRelease:
+          CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLookAppStore.entitlements
           PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_MAC_QUICKLOOK_PROFILE)
     dependencies:
       - package: Apex

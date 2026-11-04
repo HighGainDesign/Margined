@@ -1,4 +1,4 @@
-name: macOS disclosure diagnosis
+name: macOS tests
 
 on:
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
           brew install xcodegen
           xcodebuild -version
 
-      - name: Run history lifecycle tests in three fresh processes
+      - name: Run all tests
         run: |
           set -euo pipefail
           python3 script/validate-localizations.py
@@ -37,9 +37,6 @@ jobs:
           xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
             -resultBundlePath "$RUNNER_TEMP/Margined-tests.xcresult" \
-            -only-testing:MarginedTests/DiscussionHistoryLifecycleTests \
-            -test-iterations 3 -test-repetition-relaunch-enabled YES \
-            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 90 \
             CODE_SIGN_IDENTITY=- MARGINED_CI_HEADLESS=1 test > "$RUNNER_TEMP/tests.log" 2>&1 || {
               python3 - <<'PY'
           import os
@@ -52,6 +49,13 @@ jobs:
               exit 1
             }
           tail -20 "$RUNNER_TEMP/tests.log"
+
+      - name: Check each interface language in a fresh process
+        run: |
+          xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \
+            CODE_SIGN_IDENTITY=- build-for-testing > "$RUNNER_TEMP/locale-build.log" 2>&1 || { tail -60 "$RUNNER_TEMP/locale-build.log"; exit 1; }
+          python3 script/test-localizations.py "$RUNNER_TEMP/Margined-tests"
 
       - name: Preserve test diagnostics
         if: always()

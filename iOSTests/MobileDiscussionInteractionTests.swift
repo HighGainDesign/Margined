@@ -387,6 +387,7 @@ import XCTest
             value["webAlpha"] = Double(web.alpha)
             value["presentationBounds"] = String(describing: web.layer.presentation()?.bounds)
             value["scrollPresentationBounds"] = String(describing: scroll.layer.presentation()?.bounds)
+            value["viewportGeometry"] = MobileNativeViewportEvidence.capture(scroll)
             if let window {
                 value["windowIdentity"] = String(describing: ObjectIdentifier(window))
                 value["windowKey"] = window.isKeyWindow
@@ -1246,6 +1247,23 @@ import XCTest
             MainActor.assumeIsolated { nativeOffsetProbe.record(scroll, change: change) }
         }
         defer { nativeOffsetObservation.invalidate() }
+        // TEMPORARY: retain the content mapping even when bounds change without
+        // an offset setter. No waits, actions or readiness predicates are added.
+        let nativeBoundsObservation = f.web.observe(\.bounds, options: [.old, .new]) { web, change in
+            MainActor.assumeIsolated {
+                if change.oldValue?.size != change.newValue?.size {
+                    nativeOffsetProbe.recordGeometry(web.scrollView, reason: "web-bounds-size")
+                }
+            }
+        }
+        let nativeZoomObservation = f.web.scrollView.observe(\.zoomScale, options: [.old, .new]) { scroll, change in
+            MainActor.assumeIsolated {
+                if change.oldValue != change.newValue {
+                    nativeOffsetProbe.recordGeometry(scroll, reason: "zoom-scale")
+                }
+            }
+        }
+        defer { nativeBoundsObservation.invalidate(); nativeZoomObservation.invalidate() }
         let context = f.reader.documentGeneration
         let observing = await pollAsync {
             try await f.web.callAsyncJavaScript("window.marginedResizeDiagnostics ??= {events:[],dropped:0,phase:'ios-live-window'};return typeof window.marginedReadingResize?.stop==='function';",
@@ -1791,6 +1809,8 @@ import XCTest
         private var changes = 0
         private var first: [[String: Any]] = []
         private var latest: [[String: Any]] = []
+        private var geometry: [[String: Any]] = []
+        private var geometryCount = 0
 
         init(scroll: UIScrollView) {
             scrollID = String(describing: ObjectIdentifier(scroll))
@@ -1811,6 +1831,7 @@ import XCTest
                 "bounds": ["x": Double(scroll.bounds.origin.x), "y": Double(scroll.bounds.origin.y),
                     "width": Double(scroll.bounds.width), "height": Double(scroll.bounds.height)],
                 "contentSize": ["width": Double(scroll.contentSize.width), "height": Double(scroll.contentSize.height)],
+                "viewportGeometry": MobileNativeViewportEvidence.capture(scroll),
                 "tracking": scroll.isTracking, "dragging": scroll.isDragging,
                 "decelerating": scroll.isDecelerating,
                 "callStackSymbols": Array(Thread.callStackSymbols.prefix(20))]
@@ -1819,6 +1840,14 @@ import XCTest
                 latest.append(record)
                 if latest.count > 80 { latest.removeFirst() }
             }
+        }
+
+        func recordGeometry(_ scroll: UIScrollView, reason: String) {
+            geometryCount += 1
+            geometry.append(["reason": reason, "epochSeconds": Date().timeIntervalSince1970,
+                "systemUptimeSeconds": ProcessInfo.processInfo.systemUptime,
+                "viewportGeometry": MobileNativeViewportEvidence.capture(scroll)])
+            if geometry.count > 200 { geometry.remove(at: 20) }
         }
 
         func frozenReport() -> [String: Any] {
@@ -1832,6 +1861,8 @@ import XCTest
                 "callbackCount": callbacks, "changeCount": changes,
                 "dropped": changes - first.count - latest.count,
                 "retainedFirstLimit": 20, "retainedLatestLimit": 80, "stackFrameLimit": 20,
+                "geometryCount": geometryCount, "geometryDropped": geometryCount - geometry.count,
+                "geometryRecords": geometry,
                 "records": first + latest]
         }
 
@@ -1855,6 +1886,7 @@ import XCTest
             "webPresentation":String(describing:web.layer.presentation()?.bounds),
             "scrollBounds":String(describing:scroll.bounds), "scrollOffset":String(describing:scroll.contentOffset),
             "scrollContentSize":String(describing:scroll.contentSize), "scrollInset":String(describing:scroll.contentInset),
+            "viewportGeometry":MobileNativeViewportEvidence.capture(scroll),
             "scrollAdjustedInset":String(describing:scroll.adjustedContentInset),
             "scrollPresentation":String(describing:scroll.layer.presentation()?.bounds),
             "scrollTracking":scroll.isTracking, "scrollDragging":scroll.isDragging, "scrollDecelerating":scroll.isDecelerating,

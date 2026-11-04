@@ -142,6 +142,10 @@ it from **Settings → Open Extension Settings… → Quick Look**. Finder previ
 selected Markdown file with Space. macOS may choose another enabled Markdown
 extension; disable competitors if you want Margined’s preview.
 
+The Mac TestFlight extension relies on macOS file access. Images beside a document
+may be unavailable in Quick Look and retain their alternative text. Folder access
+granted in Margined applies to the app; open the document there to load its images.
+
 On iOS 27 and some earlier versions, Files currently shows standard Markdown as
 plain text instead of dispatching to Margined’s extension. Use **Open With** or
 **Share → Margined** for formatted reading. The app’s guide explains this limitation.

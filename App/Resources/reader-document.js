@@ -9,7 +9,7 @@ function resizeDiagnostic(event, values = {}, position = null) {
     trace.events.push({event, time:performance.now(), operation, phase:trace.phase, ...values,
         ...(position ? {saved:{x:position.x,y:position.y,top:position.top,count:position.candidates?.length ?? 0,
             first:first ? {id:first.id,tag:first.tag,length:first.length} : null}} : {})});
-    if (trace.events.length > 100) { trace.events.splice(20,1); trace.dropped++; }
+    if (trace.events.length > 500) { trace.events.splice(20,1); trace.dropped++; }
 }
 function visibleAnchor() {
     if (!main) return null;
@@ -36,8 +36,8 @@ function snapshot() {
         candidates:anchor ? anchor.candidates.slice(0,128).map(descriptor) : []};
 }
 function scrollInstant(x,y) {
-    const previous = document.documentElement.style.scrollBehavior;
     resizeDiagnostic('scrollInstant', {x,y});
+    const previous = document.documentElement.style.scrollBehavior;
     document.documentElement.style.scrollBehavior = 'auto';
     window.scrollTo(x,y);
     document.documentElement.style.scrollBehavior = previous;
@@ -50,13 +50,13 @@ function locate(candidate, blocks) {
 }
 function restore(position) {
     if (!position) return;
-    let target, matched;
+    let target;
     const blocks = Array.from(document.querySelectorAll(selector));
     for (const candidate of position.candidates ?? []) {
         target = locate(candidate,blocks);
-        if (target) { matched = candidate; break; }
+        if (target) break;
     }
-    resizeDiagnostic('restore', {found:!!target, matched:matched ? {id:matched.id,tag:matched.tag,length:matched.length} : null}, position);
+    resizeDiagnostic('restore', {found:!!target}, position);
     if (restoreFocus && position.focus) {
         const active = locate(position.focus,Array.from(main?.querySelectorAll('*') ?? []));
         if (active && !active.disabled) {
@@ -107,11 +107,26 @@ if (operation === 'observeResize') {
     const tokenAttribute = typeof documentTokenAttribute === 'undefined' ? 'data-margined-mobile-token' : documentTokenAttribute;
     if (tokenAttribute !== 'data-margined-mobile-token' && tokenAttribute !== 'data-margined-history-token') return false;
     const controller = new AbortController();
-    // client dimensions describe committed layout even when resize dispatch
-    // precedes WebKit's update of the window's innerWidth/innerHeight values.
-    const compatMode = document.compatMode;
-    const viewport = compatMode === 'BackCompat' ? document.body : document.documentElement;
-    let width = viewport.clientWidth, height = viewport.clientHeight, pending = 0;
+    // Use the usable viewport for hit testing and hidden-layout guards. Its
+    // classic scrollbar gutter is not a change to the native reading viewport.
+    const viewport = document.compatMode === 'BackCompat' ? document.body : document.documentElement;
+    const measurementHost = document.createElement('div');
+    measurementHost.setAttribute('aria-hidden','true');
+    Object.assign(measurementHost.style,{position:'fixed',left:'0px',top:'0px',
+        width:'0px',height:'0px',margin:'0px',padding:'0px',border:'0px',
+        display:'block',minWidth:'0px',maxWidth:'none',minHeight:'0px',maxHeight:'none',
+        boxSizing:'content-box',overflow:'hidden',contain:'strict',visibility:'hidden',pointerEvents:'none'});
+    const measurement = document.createElement('div');
+    Object.assign(measurement.style,{display:'block',width:'100vw',height:'100vh',
+        minWidth:'0px',maxWidth:'none',minHeight:'0px',maxHeight:'none',
+        margin:'0px',padding:'0px',border:'0px',boxSizing:'content-box'});
+    measurementHost.appendChild(measurement);
+    document.documentElement.appendChild(measurementHost);
+    // Under the reader's default root overflow:auto, viewport units retain
+    // full committed dimensions when a content scrollbar appears or disappears.
+    // Unlike innerWidth/innerHeight, this box participates in committed layout.
+    let width = measurement.clientWidth, height = measurement.clientHeight, pending = 0;
+    function hasUsableViewport() { return viewport.clientWidth > 0 && viewport.clientHeight > 0; }
     let resizeObserver;
     function sample(reason) {
         const box = main?.getBoundingClientRect();
@@ -131,56 +146,48 @@ if (operation === 'observeResize') {
         resizeDiagnostic('sample', {reason,width,height,viewWidth,viewHeight,pending}, sampled);
         return sampled;
     }
-    function stop(reason = 'external') {
-        resizeDiagnostic('stop', {reason,width,height,pending,expectedToken:documentToken}, saved);
+    function stop() {
+        resizeDiagnostic('stop', {width,height,pending}, saved);
         controller.abort();
         resizeObserver?.disconnect();
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
+        measurementHost.remove();
     }
     function current() {
-        if (controller.signal.aborted) {
-            resizeDiagnostic('current-rejected', {reason:'aborted',width,height,pending,expectedToken:documentToken});
-            return false;
-        }
-        const actualToken = document.documentElement.getAttribute(tokenAttribute);
-        const authorized = actualToken === documentToken;
-        if (!authorized) resizeDiagnostic('current-rejected', {reason:'token',width,height,pending,expectedToken:documentToken,actualToken});
-        return authorized;
+        return !controller.signal.aborted &&
+            document.documentElement.getAttribute(tokenAttribute) === documentToken;
     }
-    function unchangedDimensions(reason) {
-        // Preserve the original && short circuit: height is not read when width differs.
-        const observedWidth = viewport.clientWidth;
-        const observedHeight = observedWidth === width ? viewport.clientHeight : null;
-        const unchanged = observedWidth === width && observedHeight === height;
-        resizeDiagnostic(reason, {width,height,observedWidth,observedHeight,pending,unchanged}, saved);
-        return unchanged;
-    }
-    let saved = sample('install');
+    let saved = hasUsableViewport() ? sample('install') : null;
     const options = {passive:true, signal:controller.signal};
     window.addEventListener('scroll', () => {
-        if (!current()) { stop('scroll-current'); return; }
+        resizeDiagnostic('scroll-event', {width,height,pending}, saved);
+        if (!current()) { stop(); return; }
         // Retain a user scroll before its pending frame can be overtaken by a
-        // layout commit. Never sample a reflowed page against old dimensions.
-        if (unchangedDimensions('scroll-event')) saved = sample('scroll-event');
+        // layout commit. Never sample a reflowed or hidden page against old dimensions.
+        if (!hasUsableViewport()) return;
+        if (measurement.clientWidth === width && measurement.clientHeight === height) saved = sample('scroll-event');
         if (pending) cancelAnimationFrame(pending);
         pending = requestAnimationFrame(() => {
             pending = 0;
-            if (!current()) { stop('scroll-frame-current'); return; }
+            if (!current()) { stop(); return; }
             // A scroll event can precede the resize event for the same layout.
-            if (unchangedDimensions('scroll-frame')) saved = sample('scroll-frame');
+            if (!hasUsableViewport()) return;
+            if (measurement.clientWidth === width && measurement.clientHeight === height) saved = sample('scroll-frame');
         });
     }, options);
     function commitResize(input) {
+        if (!current()) { stop(); return; }
+        const nextWidth = measurement.clientWidth, nextHeight = measurement.clientHeight;
         const source = Array.isArray(input) ? 'resize-observer' : input?.type ?? 'direct';
-        if (!current()) { stop(source + '-current'); return; }
-        const nextWidth = viewport.clientWidth, nextHeight = viewport.clientHeight;
         const box = Array.isArray(input) ? input[0]?.contentRect : null;
         resizeDiagnostic('commit-event', {source,width,height,nextWidth,nextHeight,pending,
             observerBox:box ? {width:box.width,height:box.height} : null}, saved);
-        // Hidden/detached layouts cannot replace a valid reading snapshot.
-        if (nextWidth <= 0 || nextHeight <= 0) { resizeDiagnostic('commit-skipped-zero', {source,width,height,nextWidth,nextHeight}, saved); return; }
-        if (nextWidth === width && nextHeight === height) { resizeDiagnostic('commit-skipped-unchanged', {source,width,height}, saved); return; }
+        // Viewport-unit boxes can retain dimensions while the usable page is
+        // hidden. Neither kind of zero-sized layout may erase a valid snapshot.
+        if (!hasUsableViewport() || nextWidth <= 0 || nextHeight <= 0) return;
+        if (!saved) { width = nextWidth; height = nextHeight; saved = sample('first-usable'); return; }
+        if (nextWidth === width && nextHeight === height) return;
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
         resizeDiagnostic('commit-before-restore', {source,width,height,nextWidth,nextHeight}, saved);
@@ -191,13 +198,13 @@ if (operation === 'observeResize') {
     }
     window.addEventListener('resize', commitResize, options);
     // A native resize can dispatch before layout commits, with no later
-    // window event. Observe committed root layout without polling or timers.
+    // window event. Observe the committed full-viewport box without polling.
     if (typeof ResizeObserver !== 'undefined') {
         resizeObserver = new ResizeObserver(commitResize);
-        resizeObserver.observe(document.documentElement);
+        resizeObserver.observe(measurement);
     }
     window.marginedReadingResize = {stop};
-    resizeDiagnostic('installed', {width,height,pending,compatMode,expectedToken:documentToken,tokenAttribute}, saved);
+    resizeDiagnostic('installed', {width,height,pending,expectedToken:documentToken,tokenAttribute}, saved);
     return true;
 }
 if (operation === 'capture') return snapshot();

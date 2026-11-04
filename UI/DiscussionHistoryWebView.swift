@@ -549,7 +549,7 @@ final class DiscussionHistoryCoordinator: NSObject, WKNavigationDelegate {
         diagnostics.events.push({event:'presentation-capture',operation:'captureScript',time:performance.now(),phase:diagnostics.phase,
             saved:{x:saved.x,y:saved.y,top:saved.top,count:saved.candidates?.length ?? 0,
                 first:first ? {id:first.id,tag:first.tag,length:first.length} : null}});
-        if(diagnostics.events.length>100){diagnostics.events.splice(20,1);diagnostics.dropped++;}
+        if(diagnostics.events.length>500){diagnostics.events.splice(20,1);diagnostics.dropped++;}
         saved.__marginedResizeCaptureDiagnostics=JSON.parse(JSON.stringify(diagnostics));
     }
     return saved;
