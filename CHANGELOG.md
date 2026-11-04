@@ -4,6 +4,7 @@
 
 - Retain the reading passage when a native window resize reports stale WebKit dimensions.
 - Refresh discussion markers after a resize even when scrolling overlaps the update.
+- Remove the filesystem exception from Mac TestFlight Quick Look; unavailable images retain alternative text.
 - Prepare native Build 15 for public Mac, iPhone and iPad beta distribution.
 - Make native validation wait for completed navigation, painted history and Find clearing.
 - Preserve exact Reply glyph checks when text recognition groups neighboring labels.
