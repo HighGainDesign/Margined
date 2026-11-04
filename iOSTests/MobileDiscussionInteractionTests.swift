@@ -1188,6 +1188,14 @@ import XCTest
     func testLiveWindowResizingKeepsTheOpenReplyAndDocumentIdentity() async throws {
         let paragraphs = (0..<100).map { "Paragraph \($0) keeps the document long enough to test its reading position while an unfinished reply moves between compact navigation and the margin." }.joined(separator: "\n\n")
         let f = try await fixture(withThread: true, tail: "\n\n" + paragraphs)
+        // TEMPORARY: observe the actual retained native reader before its first jump.
+        // Keep KVO synchronous and passive; never replace WebKit's scroll delegate.
+        let nativeOffsetProbe = NativeReadingOffsetProbe(scroll: f.web.scrollView)
+        let nativeOffsetObservation: NSKeyValueObservation = f.web.scrollView.observe(\.contentOffset,
+            options: [.old, .new]) { scroll, change in
+            MainActor.assumeIsolated { nativeOffsetProbe.record(scroll, change: change) }
+        }
+        defer { nativeOffsetObservation.invalidate() }
         let context = f.reader.documentGeneration
         let observing = await pollAsync {
             try await f.web.callAsyncJavaScript("window.marginedResizeDiagnostics ??= {events:[],dropped:0,phase:'ios-live-window'};return typeof window.marginedReadingResize?.stop==='function';",
@@ -1248,8 +1256,11 @@ import XCTest
             }
             XCTAssertTrue(passageSettled, "The reading passage must be visible before the next intentional resize or hide")
             if !passageSettled {
+                // Freeze the KVO buffer before the existing failure-only JS await.
+                let nativeOffsetsAtFailedPoll = nativeOffsetProbe.frozenReport()
                 var report = await freezeResizeFailureEvidence(f, web: f.web,
                     world: MobileWebView.Coordinator.contentWorld)
+                report["nativeOffsetTraceAtFailedPoll"] = nativeOffsetsAtFailedPoll
                 report["requestedSize"] = String(describing: size)
                 report["originalStage"] = stage
                 report["expectedWidth"] = requestedReadingWidth(f) as Any? ?? NSNull()
@@ -1720,6 +1731,66 @@ import XCTest
         return width.map { readingWidthMatchesRequested(fixture, cssWidth: $0) } == true
     }
 
+    // TEMPORARY test-only diagnostics. This owns no view, observation or delegate.
+    @MainActor private final class NativeReadingOffsetProbe {
+        private let id = UUID().uuidString
+        private let scrollID: String
+        private let registrationUptime = ProcessInfo.processInfo.systemUptime
+        private let registrationEpoch = Date().timeIntervalSince1970
+        private var callbacks = 0
+        private var changes = 0
+        private var first: [[String: Any]] = []
+        private var latest: [[String: Any]] = []
+
+        init(scroll: UIScrollView) {
+            scrollID = String(describing: ObjectIdentifier(scroll))
+        }
+
+        func record(_ scroll: UIScrollView, change: NSKeyValueObservedChange<CGPoint>) {
+            callbacks += 1
+            // KVO can notify when a setter repeats the same value. Retain only
+            // changes, while reporting callbackCount to make that visible.
+            if let old = change.oldValue, let new = change.newValue, old == new { return }
+            let uptime = ProcessInfo.processInfo.systemUptime
+            let epoch = Date().timeIntervalSince1970
+            changes += 1
+            let record: [String: Any] = [
+                "sequence": changes, "systemUptimeSeconds": uptime,
+                "epochSeconds": epoch, "sinceRegistrationSeconds": uptime - registrationUptime,
+                "oldOffset": point(change.oldValue), "newOffset": point(change.newValue),
+                "bounds": ["x": Double(scroll.bounds.origin.x), "y": Double(scroll.bounds.origin.y),
+                    "width": Double(scroll.bounds.width), "height": Double(scroll.bounds.height)],
+                "contentSize": ["width": Double(scroll.contentSize.width), "height": Double(scroll.contentSize.height)],
+                "tracking": scroll.isTracking, "dragging": scroll.isDragging,
+                "decelerating": scroll.isDecelerating,
+                "callStackSymbols": Array(Thread.callStackSymbols.prefix(20))]
+            if first.count < 20 { first.append(record) }
+            else {
+                latest.append(record)
+                if latest.count > 80 { latest.removeFirst() }
+            }
+        }
+
+        func frozenReport() -> [String: Any] {
+            let uptime = ProcessInfo.processInfo.systemUptime
+            let epoch = Date().timeIntervalSince1970
+            return ["probeID": id, "scrollID": scrollID,
+                "property": "UIScrollView.contentOffset", "options": ["old", "new"],
+                "registrationSystemUptimeSeconds": registrationUptime,
+                "registrationEpochSeconds": registrationEpoch,
+                "freezeSystemUptimeSeconds": uptime, "freezeEpochSeconds": epoch,
+                "callbackCount": callbacks, "changeCount": changes,
+                "dropped": changes - first.count - latest.count,
+                "retainedFirstLimit": 20, "retainedLatestLimit": 80, "stackFrameLimit": 20,
+                "records": first + latest]
+        }
+
+        private func point(_ value: CGPoint?) -> Any {
+            guard let value else { return NSNull() }
+            return ["x": Double(value.x), "y": Double(value.y)]
+        }
+    }
+
     // TEMPORARY: invoked only after an original poll has returned false.
     private func freezeResizeFailureEvidence(_ fixture: Fixture, web: WKWebView,
         world: WKContentWorld) async -> [String: Any] {
@@ -1749,10 +1820,16 @@ import XCTest
             "documentGeneration":String(describing:fixture.reader.documentGeneration),
             "presentationGeneration":String(describing:fixture.reader.discussionPresentationGeneration),
             "layoutGeneration":String(describing:fixture.reader.discussionLayoutGeneration)]
-        let trace = try? await web.callAsyncJavaScript(
-            "return JSON.parse(JSON.stringify(window.marginedResizeDiagnostics ?? null));",
-            arguments: [:], in: nil, contentWorld: world)
-        return ["afterFailedOriginalPoll":true, "nativeAtFailedPoll":native, "trace":trace ?? NSNull()]
+        let value = try? await web.callAsyncJavaScript("""
+            const freezePerformanceNow = performance.now();
+            const timeOrigin = performance.timeOrigin;
+            return {trace:JSON.parse(JSON.stringify(window.marginedResizeDiagnostics ?? null)),
+                clock:{performanceNow:freezePerformanceNow,timeOrigin,
+                    epochMilliseconds:timeOrigin+freezePerformanceNow}};
+            """, arguments: [:], in: nil, contentWorld: world)
+        let frozen = value as? [String: Any]
+        return ["afterFailedOriginalPoll":true, "nativeAtFailedPoll":native,
+            "trace":frozen?["trace"] ?? NSNull(), "appJSClockAtFreeze":frozen?["clock"] ?? NSNull()]
     }
 
     private func printResizeFailureReport(_ name: String, _ report: [String: Any]) {
