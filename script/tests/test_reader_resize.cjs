@@ -20,7 +20,7 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         innerWidth: 550, innerHeight: 446, rootWidth: 550, rootHeight: 446,
         layoutWidth: 550, layoutHeight: 446, createdElements: [],
         x: 0, y: 3538, targetTop: 3541.1875, frames: new Map(), nextFrame: 1,
-        scrollWrites: [], observers: [], listeners: new Map(), focusWrites: 0,
+        scrollWrites: [], navigationScrolls: [], observers: [], listeners: new Map(), focusWrites: 0,
         attributes: new Map([[attribute, 'lease-A']])
     };
     const nodes = Array.from({length: 70}, (_, index) => ({
@@ -34,6 +34,11 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         },
         closest() { return this; },
         matches() { return false; },
+        scrollIntoView(options) {
+            state.y = Math.floor(state.y + this.getBoundingClientRect().top);
+            state.navigationScrolls.push(options);
+            // WebKit delivers the resulting scroll event asynchronously.
+        },
         focus() { state.focusWrites++; document.activeElement = this; }
     }));
     const main = {
@@ -131,6 +136,10 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
     const target = nodes[35];
     const api = {
         state, context, target, nodes, root, document, authoredNode,
+        run(args) {
+            Object.assign(context, args);
+            return script.runInContext(context);
+        },
         install({token = 'lease-A', tokenAttribute = attribute} = {}) {
             context.operation = 'observeResize'; context.documentToken = token; context.documentTokenAttribute = tokenAttribute;
             return script.runInContext(context);
@@ -363,6 +372,67 @@ test('expired-lease-removes-the-owned-host-and-rejects-late-measurement', () => 
     assert.equal(host.parentNode, null); assert.ok(!old.active);
     assert.equal(r.state.scrollWrites.length, 0);
     assert.equal(r.root.children.length, 1); assert.equal(r.root.children[0], r.authoredNode);
+});
+
+test('owned-instant-navigation-publishes-before-the-scroll-event', () => {
+    const r = rig(), target = r.nodes[36];
+    assert.equal(r.run({operation:'navigate',kind:'element',id:target.id,focus:true}), true);
+    assert.equal(r.state.navigationScrolls[0].behavior, 'instant');
+    const top = target.getBoundingClientRect().top;
+    r.committedResize(890, 446, 2639.375);
+    assert.ok(Math.abs(target.getBoundingClientRect().top-top) <= 1,
+        'A resize before the queued scroll event must retain the newer passage jump');
+    assert.equal(r.document.activeElement, target);
+    assert.equal(r.state.focusWrites, 1, 'resize must not refocus the target');
+});
+test('owned-navigation-after-reflow-supersedes-the-undelivered-resize', () => {
+    const r = rig(), target = r.nodes[36];
+    r.committedResize(286, 446, 5971.1875, {deliver:false});
+    assert.equal(r.run({operation:'navigate',kind:'element',id:target.id,focus:true}), true);
+    const top = target.getBoundingClientRect().top;
+    r.deliverResizeObserver();
+    assert.equal(r.state.scrollWrites.length, 0, 'The old reading anchor must not undo newer navigation');
+    r.committedResize(890, 446, 2639.375);
+    assert.ok(Math.abs(target.getBoundingClientRect().top-top) <= 1);
+});
+test('explicit-restore-publishes-before-the-scroll-event', () => {
+    const r = rig(), target = r.nodes[36];
+    r.state.y = Math.floor(r.state.targetTop+100);
+    const position = r.run({operation:'capture'});
+    r.state.y = 3538;
+    assert.equal(r.run({operation:'restore',position}), true);
+    const top = target.getBoundingClientRect().top;
+    r.committedResize(890, 446, 2639.375);
+    assert.ok(Math.abs(target.getBoundingClientRect().top-top) <= 1,
+        'The restored semantic position must replace the older resize snapshot synchronously');
+});
+test('failed-navigation-cannot-publish-a-stale-dom-position', () => {
+    const r = rig();
+    r.state.y = 4000;
+    assert.equal(r.run({operation:'navigate',kind:'element',id:'missing',focus:true}), false);
+    r.committedResize(890, 446, 2639.375); r.assertAnchor();
+});
+test('unfocused-smooth-navigation-does-not-publish-its-starting-position', () => {
+    const r = rig(), target = r.nodes[36];
+    r.state.y = 4000;
+    target.scrollIntoView = options => r.state.navigationScrolls.push(options);
+    assert.equal(r.run({operation:'navigate',kind:'element',id:target.id,focus:false}), true);
+    assert.equal(r.state.navigationScrolls[0].behavior, 'auto');
+    r.committedResize(890, 446, 2639.375); r.assertAnchor();
+});
+test('null-restore-cannot-publish-a-stale-dom-position', () => {
+    const r = rig();
+    r.state.y = 4000;
+    assert.equal(r.run({operation:'restore',position:null}), true);
+    r.committedResize(890, 446, 2639.375); r.assertAnchor();
+});
+test('navigation-cannot-revive-an-expired-resize-lease', () => {
+    const r = rig(), target = r.nodes[36];
+    r.state.attributes.set('data-margined-mobile-token','replacement');
+    assert.equal(r.run({operation:'navigate',kind:'element',id:target.id,focus:true}), true);
+    r.committedResize(890, 446, 2639.375);
+    assert.equal(r.state.scrollWrites.length, 0);
+    assert.equal(r.root.children.length, 1);
 });
 
 let failures = 0, count = 0;

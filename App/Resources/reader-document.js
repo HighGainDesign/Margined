@@ -84,6 +84,10 @@ if (operation === 'navigate') {
     // Focused jumps are atomic: an older smooth-scroll animation must not
     // keep moving the viewport after a policy reload or newer focus request.
     if (kind !== 'reading') target.scrollIntoView({block:'start',behavior:focus ? 'instant' : 'auto'});
+    // An instant owned jump precedes its asynchronous scroll event. Publish
+    // it now so an intervening resize cannot restore the previous passage.
+    // Unfocused jumps may still be animating under the reader's smooth policy.
+    if (kind !== 'reading' && focus) window.marginedReadingResize?.remember?.();
     return true;
 }
 // Keep the passage being read, rather than its old pixel offset, while a
@@ -145,6 +149,18 @@ if (operation === 'observeResize') {
             document.documentElement.getAttribute(tokenAttribute) === documentToken;
     }
     let saved = hasUsableViewport() ? sample() : null;
+    function remember() {
+        if (!current()) { stop(); return; }
+        if (!hasUsableViewport()) return;
+        const nextWidth = measurement.clientWidth, nextHeight = measurement.clientHeight;
+        if (nextWidth <= 0 || nextHeight <= 0) return;
+        if (pending) cancelAnimationFrame(pending);
+        pending = 0;
+        // The jump may already use a new layout whose resize notification
+        // has not arrived. Keep its snapshot paired with those dimensions.
+        width = nextWidth; height = nextHeight;
+        saved = sample();
+    }
     const options = {passive:true, signal:controller.signal};
     window.addEventListener('scroll', () => {
         if (!current()) { stop(); return; }
@@ -182,11 +198,15 @@ if (operation === 'observeResize') {
         resizeObserver = new ResizeObserver(commitResize);
         resizeObserver.observe(measurement);
     }
-    window.marginedReadingResize = {stop};
+    window.marginedReadingResize = {stop,remember};
     return true;
 }
 if (operation === 'capture') return snapshot();
-if (operation === 'restore') { restore(position); return true; }
+if (operation === 'restore') {
+    restore(position);
+    if (position) window.marginedReadingResize?.remember?.();
+    return true;
+}
 if (operation !== 'update') return false;
 const next = new DOMParser().parseFromString(html,'text/html');
 const nextMain = next.getElementById('document');
