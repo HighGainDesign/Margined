@@ -377,6 +377,24 @@ final class DiscussionHistoryLifecycleTests: XCTestCase {
         let ending = try await realMarkdownGeometry(in: web)
         XCTAssertGreaterThan(ending["visibleEndingRects"] as? Int ?? 0, 0, "The actual trailing link must be visible for native hit testing")
         XCTAssertEqual(ending["endingHitsLink"] as? Bool, true, "The visible ending must hit its link rather than the disclosure: \(ending)")
+        // Removing resize observation must not change the document's usable
+        // width, scroll extent, reading offset or content geometry. Measure
+        // only after the original ending visibility and hit checks above.
+        let footprint = try await web.callAsyncJavaScript("""
+        const root=document.documentElement,main=document.getElementById('document');
+        function geometry(){const box=main.getBoundingClientRect();return {
+            overflow:root.scrollWidth-root.clientWidth,scrollHeight:root.scrollHeight,
+            clientWidth:root.clientWidth,clientHeight:root.clientHeight,
+            y:scrollY,top:box.top,height:box.height};}
+        const before=geometry();window.marginedReadingResize?.stop();
+        return {before,after:geometry()};
+        """, arguments: [:], in: nil, contentWorld: .world(name: "MarginedDiscussionHistory"))
+        let geometry = try XCTUnwrap(footprint as? [String: Any])
+        let before = try XCTUnwrap(geometry["before"] as? [String: Double])
+        let after = try XCTUnwrap(geometry["after"] as? [String: Double])
+        XCTAssertLessThanOrEqual(try XCTUnwrap(before["overflow"]), 1,
+                                 "Resize observation must not add horizontal document overflow")
+        XCTAssertEqual(before, after, "Resize observation must leave the rendered document geometry untouched")
         XCTAssertEqual(thread.messages.first?.body, body)
     }
 

@@ -1,7 +1,8 @@
 'use strict';
 
 // No packages or browser automation. Execute the complete, unmodified input
-// reader-document.js in a vm, with independently controlled viewport signals.
+// reader-document.js in a vm. Logical full viewport, usable root/body dimensions,
+// and stale inner* values are independent adapter inputs, not a CSS engine.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -17,6 +18,7 @@ const test = (name, run) => tests.push({name, run});
 function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, compatMode = 'CSS1Compat'} = {}) {
     const state = {
         innerWidth: 550, innerHeight: 446, rootWidth: 550, rootHeight: 446,
+        layoutWidth: 550, layoutHeight: 446, createdElements: [],
         x: 0, y: 3538, targetTop: 3541.1875, frames: new Map(), nextFrame: 1,
         scrollWrites: [], observers: [], listeners: new Map(), focusWrites: 0,
         attributes: new Map([[attribute, 'lease-A']])
@@ -40,7 +42,8 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         getBoundingClientRect() { return {left: 0, width: state.rootWidth}; }
     };
     const root = {
-        style: {scrollBehavior: 'smooth'},
+        style: {scrollBehavior: 'smooth'}, children: [],
+        appendChild(node) { node.parentNode = this; this.children.push(node); return node; },
         get clientWidth() { return compatMode === 'BackCompat' ? 1200 : state.rootWidth; },
         get clientHeight() { return compatMode === 'BackCompat' ? 9000 : state.rootHeight; },
         getAttribute(key) { return state.attributes.get(key) ?? null; }
@@ -51,6 +54,34 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         activeElement: null,
         getElementById(id) { return id === 'document' ? main : nodes.find(node => node.id === id) ?? null; },
         querySelectorAll() { return nodes; },
+        createElement(tag) {
+            const attributes = new Map();
+            const node = {
+                tagName: tag.toUpperCase(), style: {}, children: [], parentNode: null, textContent: '',
+                get isConnected() {
+                    let ancestor = this;
+                    while (ancestor.parentNode) ancestor = ancestor.parentNode;
+                    return ancestor === root;
+                },
+                get clientWidth() {
+                    if (!this.isConnected) return 0;
+                    return this.style.width === '100vw' ? state.layoutWidth : Number.parseFloat(this.style.width) || 0;
+                },
+                get clientHeight() {
+                    if (!this.isConnected) return 0;
+                    return this.style.height === '100vh' ? state.layoutHeight : Number.parseFloat(this.style.height) || 0;
+                },
+                setAttribute(key, value) { attributes.set(key, String(value)); },
+                getAttribute(key) { return attributes.get(key) ?? null; },
+                appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
+                remove() {
+                    if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+                    this.parentNode = null;
+                }
+            };
+            state.createdElements.push(node);
+            return node;
+        },
         elementFromPoint(x, y) {
             if (x < 0 || x >= state.rootWidth || y < 0 || y >= state.rootHeight) return null;
             return nodes.find(node => {
@@ -60,6 +91,8 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         }
     };
     document.activeElement = document.body;
+    const authoredNode = document.createElement('div');
+    authoredNode.setAttribute('data-authored', 'keep'); root.appendChild(authoredNode);
     function addEventListener(name, callback, options = {}) {
         if (options.signal?.aborted) return;
         const entries = state.listeners.get(name) ?? new Set();
@@ -80,7 +113,12 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         operation: 'observeResize', restoreFocus: false, documentToken: 'lease-A', documentTokenAttribute: attribute,
         ResizeObserver: resizeObserver ? class {
             constructor(callback) { this.callback = callback; this.active = false; state.observers.push(this); }
-            observe(target) { assert.equal(target, root); this.active = true; }
+            observe(target) {
+                assert.ok(target === root || (target.parentNode?.parentNode === root &&
+                    target.style.width === '100vw' && target.style.height === '100vh'),
+                    'Observe the original root or the owned full-viewport measurement child');
+                this.target = target; this.active = true;
+            }
             disconnect() { this.active = false; }
         } : undefined
     });
@@ -92,7 +130,7 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
     };
     const target = nodes[35];
     const api = {
-        state, context, target, nodes,
+        state, context, target, nodes, root, document, authoredNode,
         install({token = 'lease-A', tokenAttribute = attribute} = {}) {
             context.operation = 'observeResize'; context.documentToken = token; context.documentTokenAttribute = tokenAttribute;
             return script.runInContext(context);
@@ -104,10 +142,15 @@ function rig({attribute = 'data-margined-mobile-token', resizeObserver = true, c
         },
         committedResize(width, height, targetTop, {deliver = true} = {}) {
             state.rootWidth = width; state.rootHeight = height; state.targetTop = targetTop;
+            state.layoutWidth = width; state.layoutHeight = height;
+            if (deliver) api.deliverResizeObserver();
+        },
+        usableResize(width, height, targetTop, {deliver = true} = {}) {
+            state.rootWidth = width; state.rootHeight = height; state.targetTop = targetTop;
             if (deliver) api.deliverResizeObserver();
         },
         deliverResizeObserver() {
-            for (const observer of state.observers) if (observer.active) observer.callback([{target: root}]);
+            for (const observer of state.observers) if (observer.active) observer.callback([{target: observer.target}]);
         },
         userScrollToParagraph(index) {
             state.y = state.targetTop + (index - 35) * 100 - 3.1875;
@@ -254,6 +297,72 @@ test('window-resize-fallback-without-resize-observer', () => {
     r.state.innerWidth = 890; r.state.innerHeight = 446;
     r.committedResize(890, 446, 2639.375, {deliver: false}); r.emit('resize');
     r.assertAnchor();
+});
+
+for (const compatMode of ['CSS1Compat', 'BackCompat']) {
+    test('auto-gutter-17px-late-observation-preserves-explicit-scroll-' + compatMode, () => {
+        const r = rig({compatMode, attribute: 'data-margined-history-token'});
+        r.usableResize(533, 446, 3660, {deliver: false});
+        assert.equal(r.state.layoutWidth, 550, 'Automatic gutter does not change the logical viewport');
+        r.userScrollToParagraph(38); // No sampling frame has run before the late RO.
+        const explicitY = r.state.y;
+        r.deliverResizeObserver(); r.frame();
+        assert.equal(r.state.scrollWrites.length, 0, 'A gutter-only observation must not restore the old anchor');
+        assert.equal(r.state.y, explicitY, 'The explicit ending jump must survive');
+        r.committedResize(890, 446, 2639.375); r.assertAnchor(38);
+    });
+}
+test('actual-native-17px-width-change-must-restore', () => {
+    const r = rig();
+    r.committedResize(533, 446, 3660);
+    assert.equal(r.state.scrollWrites.length, 1, 'A native 17px change is a resize, never a gutter heuristic');
+    r.assertAnchor();
+});
+test('actual-native-17px-height-change-must-restore', () => {
+    const r = rig();
+    r.committedResize(550, 429, 3660);
+    assert.equal(r.state.scrollWrites.length, 1);
+    r.assertAnchor();
+});
+for (const compatMode of ['CSS1Compat', 'BackCompat']) {
+    test('zero-usable-page-cannot-resample-positive-measurement-child-' + compatMode, () => {
+        const r = rig({compatMode});
+        r.usableResize(0, 0, 0, {deliver: false});
+        assert.equal(r.state.layoutWidth, 550); assert.equal(r.state.layoutHeight, 446);
+        r.state.y = 0; r.emit('scroll'); r.frame(); r.deliverResizeObserver();
+        assert.equal(r.state.scrollWrites.length, 0, 'Hidden geometry must not initiate restoration');
+        r.usableResize(550, 446, 3541.1875, {deliver: false});
+        r.committedResize(890, 446, 2639.375);
+        r.assertAnchor();
+    });
+}
+test('lease-stop-removes-only-its-owned-measurement-host', () => {
+    const r = rig(); const old = r.state.observers[0], host = old.target.parentNode;
+    r.emit('scroll'); r.context.marginedReadingResize.stop();
+    assert.equal(host.parentNode, null); assert.ok(!old.active);
+    assert.equal(r.root.children.length, 1); assert.equal(r.root.children[0], r.authoredNode);
+    assert.equal(r.authoredNode.getAttribute('data-authored'), 'keep');
+    assert.equal(r.state.frames.size, 0);
+    r.committedResize(533, 446, 3660, {deliver: false});
+    old.callback([{target: old.target}]);
+    assert.equal(r.state.scrollWrites.length, 0);
+});
+test('lease-reinstall-replaces-only-the-prior-owned-host', () => {
+    const r = rig(); const old = r.state.observers[0], host = old.target.parentNode;
+    r.emit('scroll'); assert.equal(r.install(), true);
+    const current = r.state.observers.find(observer => observer.active);
+    assert.ok(current && current !== old); assert.ok(!old.active);
+    assert.equal(host.parentNode, null); assert.equal(r.state.frames.size, 0);
+    assert.equal(r.root.children.length, 2); assert.ok(r.root.children.includes(r.authoredNode));
+    assert.equal(current.target.parentNode.parentNode, r.root);
+});
+test('expired-lease-removes-the-owned-host-and-rejects-late-measurement', () => {
+    const r = rig(); const old = r.state.observers[0], host = old.target.parentNode;
+    r.state.attributes.set('data-margined-mobile-token', 'lease-B');
+    r.committedResize(533, 446, 3660);
+    assert.equal(host.parentNode, null); assert.ok(!old.active);
+    assert.equal(r.state.scrollWrites.length, 0);
+    assert.equal(r.root.children.length, 1); assert.equal(r.root.children[0], r.authoredNode);
 });
 
 let failures = 0, count = 0;
