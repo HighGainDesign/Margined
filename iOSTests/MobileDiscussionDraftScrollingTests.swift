@@ -35,8 +35,15 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         editor.setContentOffset(target, animated: false)
         editor.setNeedsLayout(); editor.layoutIfNeeded()
         for _ in 0..<10 { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(editor.contentOffset.y, target.y, accuracy: 1,
+        let actualOffset = editor.contentOffset.y
+        #if MARGINED_DRAFT_LAYOUT_DIAGNOSTIC
+        let observationTime = CACurrentMediaTime()
+        #endif
+        XCTAssertEqual(actualOffset, target.y, accuracy: 1,
                        "Unrelated layout must not pull a deliberately scrolled draft back to its caret")
+        #if MARGINED_DRAFT_LAYOUT_DIAGNOSTIC
+        (editor as? any DiscussionDraftLayoutDiagnostics)?.freezeDraftLayoutDiagnostics()
+        #endif
         XCTAssertEqual(editor.selectedRange, NSRange(location: 0, length: 0))
         XCTAssertTrue(editor.isFirstResponder)
         window.frame.size.height = 200
@@ -47,6 +54,11 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         }
         XCTAssertTrue(revealed, "A changed viewport must reveal the retained caret")
         XCTAssertEqual(reader.discussions.drafts[key]?.body, text)
+        #if MARGINED_DRAFT_LAYOUT_DIAGNOSTIC
+        if let diagnostic = editor as? any DiscussionDraftLayoutDiagnostics {
+            print("DRAFT-LIGHT-LAYOUT-DIAGNOSTIC time=\(observationTime) observedOffset=\(actualOffset) \(diagnostic.draftLayoutDiagnosticReport())")
+        }
+        #endif
     }
 
     private func findEditor(_ view: UIView) -> UITextView? {
