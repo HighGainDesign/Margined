@@ -465,6 +465,14 @@ import XCTest
     }
 
     func testCompactConversationUsesAvailableHeightAndKeepsEveryReplyAcrossRotation() async throws {
+        try await exerciseExpandedConversation(hiddenKeyboardFrame: false)
+    }
+
+    func testHiddenKeyboardFrameDoesNotConstrainAnExpandedConversation() async throws {
+        try await exerciseExpandedConversation(hiddenKeyboardFrame: true)
+    }
+
+    private func exerciseExpandedConversation(hiddenKeyboardFrame: Bool) async throws {
         let f = try await fixture(withThread: true)
         let paragraphs = (0..<35).map { "Saved history paragraph \($0)." }.joined(separator: "\n\n")
         let bytes = try appendHistoryReply(paragraphs + "\n\nLast saved message marker.",
@@ -473,6 +481,22 @@ import XCTest
         f.window.frame.size = CGSize(width: 626, height: 1194)
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        if hiddenKeyboardFrame {
+            // Public keyboard frames use screen coordinates. A hidden keyboard
+            // starts below the physical screen even when a layout fixture's
+            // window extends farther down that same coordinate space.
+            let screen = f.window.screen.coordinateSpace.bounds
+            let hidden = CGRect(x: screen.minX, y: screen.maxY, width: screen.width, height: 300)
+            XCTAssertTrue(hidden.intersection(screen).isNull || hidden.intersection(screen).height == 0)
+            XCTAssertGreaterThan(f.window.convert(hidden, from: f.window.screen.coordinateSpace)
+                .intersection(f.window.bounds).height, 0, "Exercise the offscreen/window overlap")
+            for name in [UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardDidChangeFrameNotification] {
+                NotificationCenter.default.post(name: name, object: f.window.screen, userInfo: [
+                    UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: hidden),
+                    UIResponder.keyboardIsLocalUserInfoKey: true,
+                    UIResponder.keyboardAnimationDurationUserInfoKey: 0])
+            }
+        }
         f.reader.openDiscussion("t-mobile")
         f.reader.discussionSheetExpanded = true
         f.reader.discussions.setDraft("Keep this unposted reply through rotation.", for: .thread("t-mobile"))

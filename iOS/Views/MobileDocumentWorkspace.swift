@@ -326,6 +326,7 @@ private final class MobileDiscussionKeyboardViewportView: UIView {
     required init?(coder: NSCoder) { return nil }
     deinit { NotificationCenter.default.removeObserver(self) }
     @objc private func keyboardChanged(_ notification: Notification) {
+        if let screen = notification.object as? UIScreen, let window, screen !== window.screen { return }
         keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
         measure()
     }
@@ -350,8 +351,15 @@ private final class MobileDiscussionKeyboardViewportView: UIView {
                 let top = window.rootViewController.flatMap { navigation(in: $0) }?.topViewController?.viewIfLoaded
                 let content = top.map { convert($0.safeAreaLayoutGuide.layoutFrame, from: $0) } ?? bounds
                 let keyboard = keyboardFrame.map { convert($0, from: window.screen.coordinateSpace) }
-                let onScreen = keyboardFrame.map { window.convert($0, from: window.screen.coordinateSpace).intersection(window.bounds) }
-                if let keyboard, let onScreen, !onScreen.isNull, onScreen.height > 0 {
+                let onScreen = keyboardFrame.map { frame -> CGRect in
+                    // Hidden keyboard frames can still overlap a window that
+                    // extends beyond the display. Require physical visibility
+                    // before spending any of the discussion's height budget.
+                    let visible = frame.intersection(window.screen.coordinateSpace.bounds)
+                    guard !visible.isNull else { return .null }
+                    return window.convert(visible, from: window.screen.coordinateSpace).intersection(window.bounds)
+                }
+                if let keyboard, let onScreen, !onScreen.isNull, onScreen.width > 0, onScreen.height > 0 {
                     height = max(0, min(bounds.maxY, keyboard.minY) - max(bounds.minY, content.minY))
                 } else if typing {
                     // Hardware-keyboard input and focus before the software

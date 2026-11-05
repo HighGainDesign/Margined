@@ -6,6 +6,7 @@
 - Refresh discussion markers after a resize even when scrolling overlaps the update.
 - Remove the filesystem exception from Mac TestFlight Quick Look; unavailable images retain alternative text.
 - Preserve unfinished-reply browsing when an ordinary view update leaves the text and layout unchanged.
+- Ignore offscreen keyboard frames when allocating discussion history space.
 - Prepare Build 16 for iPhone/iPad and the GitHub Mac beta; public Mac TestFlight remains on Build 15.
 - Run validation locally before publishing changes; check committed native geometry, painted history and completed Find clearing.
 - Preserve exact Reply glyph checks when text recognition groups neighboring labels.
