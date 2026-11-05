@@ -256,12 +256,31 @@ import XCTest
         let mounted = await poll { self.editor(in: f.host.view)?.text == "An unposted sheet reply." }
         XCTAssertTrue(mounted); guard mounted else { return }
         XCTAssertTrue(f.web.window === f.window, "Compact discussion must leave the actual retained reader mounted")
+        var firstGeometry: [String: Any]?, lastGeometry: [String: Any] = [:]
+        let allocated = await poll {
+            guard let editor = self.editor(in: f.host.view) else { return false }
+            let reader = f.web.convert(f.web.bounds, to: f.window)
+            let composer = editor.convert(editor.bounds, to: f.window)
+            let matches = f.web.bounds.height > 120 && reader.maxY <= composer.minY
+            if !matches || firstGeometry != nil {
+                lastGeometry = self.nativeReadingGeometry(f)
+                lastGeometry["composerFrame"] = String(describing: composer)
+                if firstGeometry == nil { firstGeometry = lastGeometry }
+            }
+            return matches
+        }
+        if let firstGeometry {
+            recordReadingReadiness(["first": firstGeometry, "last": lastGeometry, "allocated": allocated],
+                name: "Sheet-native-allocation-before-GoTo")
+        }
         let readerFrame = f.web.convert(f.web.bounds, to: f.window)
         let editor = try XCTUnwrap(self.editor(in: f.host.view))
         let composerFrame = editor.convert(editor.bounds, to: f.window)
         XCTAssertGreaterThan(f.web.bounds.height, 120, "Reading detent reserves an actual unobscured reader viewport")
         XCTAssertLessThanOrEqual(readerFrame.maxY, composerFrame.minY,
             "A sheet cannot claim passage visibility while covering the reader viewport")
+        XCTAssertTrue(allocated, "Commit the actual unobscured native reader allocation before testing Go to Passage")
+        guard allocated else { return }
         f.reader.goToDiscussion("t-mobile", version: f.reader.currentDiscussionVersion)
         let revealed = await pollAsync {
             guard f.reader.discussionPassageRequest == nil, f.web.window === f.window else { return false }
@@ -1367,7 +1386,21 @@ import XCTest
         XCTAssertTrue(returned && width)
         guard returned, width else { return }
         _ = try await f.web.takeSnapshot(configuration: configuration)
-        let reading = try await resizeReadingMetrics(f.web)
+        var reading: [String: Any] = [:], finalEvidence: [String: Any] = [:]
+        var firstEvidence: [String: Any]?
+        let positionCommitted = await pollAsync {
+            let ready = try await self.resizeSeedHasCommitted(f, metrics: &reading, evidence: &finalEvidence)
+            if !ready || firstEvidence != nil {
+                finalEvidence["nativeGeometry"] = self.nativeReadingGeometry(f)
+                if firstEvidence == nil { firstEvidence = finalEvidence }
+            }
+            return ready
+        }
+        if let firstEvidence {
+            recordReadingReadiness(["first": firstEvidence, "last": finalEvidence, "committed": positionCommitted],
+                name: "Lagging-window-native-reading-convergence")
+        }
+        XCTAssertTrue(positionCommitted, "Commit the same native/model/presentation reading passage after the single layout change: \(finalEvidence)")
         XCTAssertEqual(reading["visible"] as? Bool, true,
                        "Committed layout must restore the passage even when window dimensions stay stale: \(reading)")
         XCTAssertEqual(reading["samePage"] as? Bool, true)
@@ -1804,6 +1837,45 @@ import XCTest
         // page's committed layout and width-policy checks.
         _ = try await web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;",
             arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+    }
+
+    /// Evidence only: retain model/presentation and clipping geometry at the
+    /// first mismatch and convergence. This helper never lays out or scrolls.
+    private func nativeReadingGeometry(_ fixture: Fixture) -> [String: Any] {
+        let scroll = fixture.web.scrollView
+        var ancestors: [[String: Any]] = [], current: UIView? = fixture.web
+        while let view = current {
+            var item: [String: Any] = ["bounds": String(describing: view.bounds),
+                "frameInWindow": String(describing: view.convert(view.bounds, to: fixture.window)),
+                "clips": view.clipsToBounds, "hidden": view.isHidden, "alpha": view.alpha]
+            if let shown = view.layer.presentation(), let window = fixture.window.layer.presentation() {
+                item["presentationInWindow"] = String(describing: shown.convert(shown.bounds, to: window))
+            }
+            ancestors.append(item)
+            current = view.superview
+        }
+        let content = scroll.subviews.filter {
+            !$0.isHidden && $0.alpha > 0.01 && abs($0.bounds.width-scroll.contentSize.width)<=1 &&
+                abs($0.bounds.height-scroll.contentSize.height)<=1
+        }.map { view -> [String: Any] in
+            var item: [String: Any] = ["bounds": String(describing: view.bounds),
+                "modelIdentity": NativeReadingLayerMapping.isIdentity(view.layer, to: scroll.layer)]
+            if let shown = view.layer.presentation(), let parent = scroll.layer.presentation() {
+                item["presentationBounds"] = String(describing: shown.bounds)
+                item["presentationIdentity"] = NativeReadingLayerMapping.isIdentity(shown, to: parent)
+            }
+            return item
+        }
+        return ["time": CACurrentMediaTime(), "offset": String(describing: scroll.contentOffset),
+            "scrollBounds": String(describing: scroll.bounds),
+            "scrollPresentation": String(describing: scroll.layer.presentation()?.bounds),
+            "contentSize": String(describing: scroll.contentSize), "content": content, "ancestors": ancestors]
+    }
+
+    private func recordReadingReadiness(_ evidence: [String: Any], name: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: evidence, options: [.sortedKeys]) else { return }
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
     }
 
     private func requestedReadingWidth(_ fixture: Fixture) -> Double? {
