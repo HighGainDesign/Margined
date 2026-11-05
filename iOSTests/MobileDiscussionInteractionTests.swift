@@ -1580,6 +1580,7 @@ import XCTest
         XCTAssertEqual(f.web.scrollView.contentOffset.y, native.y, accuracy: 1, "Feedback emulation must not move the native viewport")
         XCTAssertEqual(emulation?["markedVisible"] as? Bool, false, "The emulated DOM viewport must describe a different passage")
         print("EMULATED-NATIVE-FEEDBACK \(emulation ?? [:])")
+        print("EMULATED-NATIVE-FEEDBACK-PROCESS \(ProcessInfo.processInfo.processIdentifier)")
         f.window.frame.size = CGSize(width: 890, height: 626)
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         let reflowed = await pollAsync {

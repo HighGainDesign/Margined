@@ -295,6 +295,7 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
         // An accepted setter is not proof of the final painted passage. The
         // unchanged native behavior assertions remain the outcome checks.
         let report: [String: Any] = ["id": id.uuidString, "reason": reason, "nativeSetterAccepted": preserved,
+            "processID": Int(ProcessInfo.processInfo.processIdentifier),
             "queries": queries, "target": String(describing: latestTarget),
             "nativeOffset": String(describing: web?.scrollView.contentOffset), "lastGeometry": evidence,
             "capture": captureReceipt]
