@@ -1510,6 +1510,92 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
+    #if MARGINED_NATIVE_RESIZE_FEEDBACK_FIXTURE
+    func testResizePreservesPassageAfterEmulatedStaleDOMFeedback() async throws {
+        let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to reflow between native reading-pane widths while retaining its semantic passage." }.joined(separator: "\n\n")
+        let f = try await fixture(tail: "\n\n" + paragraphs)
+        let observing = await pollAsync {
+            try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool == true
+        }
+        XCTAssertTrue(observing)
+        guard observing else { return }
+        _ = try await f.web.callAsyncJavaScript("""
+        await document.fonts.ready;
+        window.mobileResizePage=document;
+        const passage=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 35 '));
+        passage.id='resize-reading-passage';
+        passage.scrollIntoView({block:'start',behavior:'instant'});
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        var seed: [String: Any] = [:], evidence: [String: Any] = [:]
+        let seeded = await pollAsync { try await self.resizeSeedHasCommitted(f, metrics: &seed, evidence: &evidence) }
+        XCTAssertTrue(seeded, "Establish native P35 before emulating feedback: \(evidence)")
+        guard seeded else { return }
+        let native = f.web.scrollView.contentOffset
+        XCTAssertGreaterThan(native.y, 300)
+        addTeardownBlock { @MainActor in
+            _ = try? await f.web.callAsyncJavaScript("window.__nativeFeedbackFixture?.restore();return true;",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        }
+        let emulation = try await f.web.callAsyncJavaScript("""
+        // Replay the captured relationship only in the app's isolated world.
+        // Native scrolling and default-world outcome measurements stay real.
+        const root=document.documentElement,main=document.getElementById('document');
+        const width=root.clientWidth,height=root.clientHeight;
+        const scrollDescriptor=Object.getOwnPropertyDescriptor(window,'scrollY');
+        if(scrollDescriptor && !scrollDescriptor.configurable)return {supported:false};
+        const rect=Element.prototype.getBoundingClientRect;
+        const point=document.elementFromPoint;
+        const pointDescriptor=Object.getOwnPropertyDescriptor(document,'elementFromPoint');
+        const active=()=>root.clientWidth===width && root.clientHeight===height;
+        const restore=()=>{
+            if(scrollDescriptor)Object.defineProperty(window,'scrollY',scrollDescriptor);else delete window.scrollY;
+            Element.prototype.getBoundingClientRect=rect;
+            if(pointDescriptor)Object.defineProperty(document,'elementFromPoint',pointDescriptor);else delete document.elementFromPoint;
+            delete window.__nativeFeedbackFixture;
+        };
+        window.__nativeFeedbackFixture={restore};
+        Object.defineProperty(window,'scrollY',{configurable:true,get:()=>active()?fakeY:window.pageYOffset});
+        Element.prototype.getBoundingClientRect=function(){
+            const r=rect.call(this);
+            return active() && main.contains(this) ? new DOMRect(r.x,r.y+window.pageYOffset-fakeY,r.width,r.height) : r;
+        };
+        document.elementFromPoint=function(x,y){
+            if(!active())return point.call(this,x,y);
+            return Array.from(main.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,pre,tr,dt,dd,figure')).find(node=>{
+                const r=node.getBoundingClientRect();return r.left<=x && x<r.right && r.top<=y && y<r.bottom;
+            })??null;
+        };
+        window.dispatchEvent(new Event('resize'));
+        window.dispatchEvent(new Event('scroll'));
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        const p=document.getElementById('resize-reading-passage').getBoundingClientRect();
+        return {supported:true,domY:scrollY,nativeY,markedVisible:p.bottom>0&&p.top<height,width,height};
+        """, arguments: ["fakeY": Double(native.y) / 2, "nativeY": Double(native.y)],
+            in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? [String: Any]
+        XCTAssertEqual(emulation?["supported"] as? Bool, true, "The fixture must actually replace isolated-world feedback")
+        guard emulation?["supported"] as? Bool == true else { return }
+        XCTAssertEqual(f.web.scrollView.contentOffset.y, native.y, accuracy: 1, "Feedback emulation must not move the native viewport")
+        XCTAssertEqual(emulation?["markedVisible"] as? Bool, false, "The emulated DOM viewport must describe a different passage")
+        print("EMULATED-NATIVE-FEEDBACK \(emulation ?? [:])")
+        f.window.frame.size = CGSize(width: 890, height: 626)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let reflowed = await pollAsync {
+            guard abs(Double(f.web.bounds.width) - (seed["width"] as? Double ?? 0)) > 100 else { return false }
+            return try await self.readingWidthHasCommitted(f)
+        }
+        XCTAssertTrue(reflowed, "The test must commit a genuinely different native reading width")
+        guard reflowed else { return }
+        var after: [String: Any] = [:], finalEvidence: [String: Any] = [:]
+        let retained = await pollAsync { try await self.resizeSeedHasCommitted(f, metrics: &after, evidence: &finalEvidence) }
+        XCTAssertTrue(retained, "Emulated stale DOM feedback must not replace native P35 during reflow: \(finalEvidence)")
+        XCTAssertEqual(after["samePage"] as? Bool, true)
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+    #endif
+
     func testOldResizeObserverCannotScrollANewerDocumentVersion() async throws {
         let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to wrap onto several lines when the native window changes width." }.joined(separator: "\n\n")
         let f = try await fixture(tail: "\n\n" + paragraphs)

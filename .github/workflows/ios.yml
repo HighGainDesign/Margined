@@ -1,40 +1,27 @@
-name: iOS validation
+name: iOS native resize ownership diagnostic
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - CHANGELOG.md
-      - README.md
-      - ROADMAP.md
-      - PRIVACY.md
-      - .github/workflows/ci.yml
-      - .github/workflows/tests.yml
-      - .github/workflows/release.yml
-  pull_request:
-    paths-ignore:
-      - CHANGELOG.md
-      - README.md
-      - ROADMAP.md
-      - PRIVACY.md
-      - .github/workflows/ci.yml
-      - .github/workflows/tests.yml
-      - .github/workflows/release.yml
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Existing JavaScript writer or bounded native owner
+        type: choice
+        options: [javascript, native]
+        default: javascript
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  group: ios-native-owner-${{ github.ref }}-${{ inputs.mode }}
+  cancel-in-progress: false
 
 jobs:
-  test:
+  diagnostic:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
-      - name: Check out source
+      - name: Check out immutable diagnostic source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -44,29 +31,58 @@ jobs:
           python3 script/verify-vendor.py
           python3 script/validate-localizations.py
           node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
+          node script/tests/test_native_reading_position_diagnostic.cjs iOS/Resources/native-reading-position-diagnostic.js
           node --test script/tests/test_discussion_layout.cjs
+          python3 -m unittest discover -s script/tests -p test_native_resize_diagnostic_evidence.py
           xcodegen generate
-      - name: Test on iPhone
+      - name: Run unchanged behavior cases plus controlled feedback in two fresh processes
+        env:
+          MARGINED_NATIVE_OWNER_MODE: ${{ inputs.mode }}
         run: |
-          device_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if "iPhone" in d["name"]))')
+          mkdir -p "$RUNNER_TEMP/native-owner-diagnostic"
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/native-owner-diagnostic/devices.json"
+          device_id=$(python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/native-owner-diagnostic/devices.json")); print(next(x["udid"] for g in d["devices"].values() for x in g if "iPhone" in x["name"]))')
+          owner_flags='DEBUG MARGINED_NATIVE_RESIZE_FEEDBACK_FIXTURE'
+          additional_tests=()
+          if [[ "$MARGINED_NATIVE_OWNER_MODE" == native ]]; then
+            owner_flags+=' MARGINED_NATIVE_RESIZE_OWNER_DIAGNOSTIC'
+            additional_tests+=('-only-testing:MarginediOSTests/MobileNativeResizeOwnerDiagnosticTests')
+          fi
+          git rev-parse HEAD > "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
+          xcodebuild -version >> "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
+          printf '%s\n' "device=$device_id mode=$MARGINED_NATIVE_OWNER_MODE flags=$owner_flags" >> "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
+          shasum -a 256 App/Resources/reader-document.js iOS/Resources/native-reading-position-diagnostic.js iOS/Services/MobileNativeResizeOwnerDiagnostic.swift iOSTests/MobileDiscussionInteractionTests.swift >> "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
+          result=0
           xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
             -destination "platform=iOS Simulator,id=$device_id" \
-            -derivedDataPath "$RUNNER_TEMP/Margined-ios" CODE_SIGNING_ALLOWED=NO \
-            -parallel-testing-enabled NO \
-            test > "$RUNNER_TEMP/ios-tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-tests.log"; exit 1; }
-          tail -20 "$RUNNER_TEMP/ios-tests.log"
-      - name: Build for iPad and iPhone devices
-        run: |
-          xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
-            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/Margined-device" \
-            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/ios-device.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-device.log"; exit 1; }
-      - name: Preserve validation details including all test attempts
+            -derivedDataPath "$RUNNER_TEMP/Margined-native-owner-diagnostic" \
+            -resultBundlePath "$RUNNER_TEMP/native-owner-diagnostic/behavior.xcresult" \
+            CODE_SIGNING_ALLOWED=NO "SWIFT_ACTIVE_COMPILATION_CONDITIONS=$owner_flags" \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testCompactDiscussionSheetKeepsTheSelectedPassageInItsActualReaderViewport \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testCompactTypingExpandsAboveTheActualKeyboardAndGoToPassageRetainsCaret \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testLargestTextTypingKeepsCaretReplyAndACompleteMessageLineAboveTheKeyboard \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testGoToPassageReturnsToTheRetainedDocumentAndRejectsStaleActions \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testNativeWidthTracksParentResizeWhenContentKeepsItsSize \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testLiveWindowResizingKeepsTheOpenReplyAndDocumentIdentity \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testReadingResizeRetainsPassageWhenWindowDimensionsLagTheLayout \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testResizingBetweenWideWindowsDoesNotRecreateDiscussionNavigation \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testOpeningConversationDuringThresholdResizeSettlesAndKeepsItsReply \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testWindowResizingPreservesTheReadersVisiblePassage \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testDiscussionHistoryRetainsItsSemanticPositionAcrossHideAndWidthChanges \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testResizePreservesPassageAfterEmulatedStaleDOMFeedback \
+            "${additional_tests[@]}" \
+            -parallel-testing-enabled NO -test-iterations 2 -test-repetition-relaunch-enabled YES \
+            test > "$RUNNER_TEMP/native-owner-diagnostic/behavior.log" 2>&1 || result=$?
+          printf '%s\n' "$result" > "$RUNNER_TEMP/native-owner-diagnostic/test-exit.txt"
+          tail -35 "$RUNNER_TEMP/native-owner-diagnostic/behavior.log"
+          if [[ "$MARGINED_NATIVE_OWNER_MODE" == native && "$result" == 0 ]]; then
+            python3 script/verify-native-resize-diagnostic.py "$RUNNER_TEMP/native-owner-diagnostic/behavior.log" > "$RUNNER_TEMP/native-owner-diagnostic/replay-evidence.json"
+          fi
+          exit "$result"
+      - name: Preserve every outcome including the expected control failure
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ios-validation-details
-          path: |
-            ${{ runner.temp }}/ios-tests.log
-            ${{ runner.temp }}/ios-device.log
-            ${{ runner.temp }}/Margined-ios/Logs/Test
+          name: ios-native-owner-${{ inputs.mode }}
+          path: ${{ runner.temp }}/native-owner-diagnostic
           retention-days: 7

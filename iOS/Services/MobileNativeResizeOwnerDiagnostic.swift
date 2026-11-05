@@ -53,8 +53,9 @@ final class MobileNativeResizeFenceDiagnostic {
     func endAppIntent(_ id: UUID) { intents.remove(id) }
 
     @discardableResult
-    func commit(_ stamp: Stamp, revision: UInt64, ready: Bool, write: () -> Void) -> Bool {
-        guard matches(stamp), revision == self.revision, ready else { return false }
+    func commit(_ stamp: Stamp, revision: UInt64, now: Double, ready: Bool, write: () -> Void) -> Bool {
+        guard matches(stamp), revision == self.revision, ready,
+              now >= started, now - started < 3 else { return false }
         pending = false
         write() // No await or queued JavaScript setter may separate check/write.
         return true
@@ -105,6 +106,7 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
         let token: String
         let position: [String: Any]
         let stamp: MobileNativeResizeFenceDiagnostic.Stamp
+        let receipt: [String: Any]
     }
     private var retained: Retained?
     // At most one WebContent request may remain outstanding, even if a prior
@@ -115,6 +117,7 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
     private var invalidated = false
     private var queries = 0
     private var evidence: [String: Any] = [:]
+    private var captureReceipt: [String: Any] = [:]
 
     init(web: WKWebView, world: WKContentWorld, document: @escaping () -> String?) {
         self.web = web
@@ -155,6 +158,8 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
         session = UUID(); self.token = token
         position = retained?.position
         captured = retained == nil ? nil : fence.stamp()
+        captureReceipt = retained?.receipt ?? [:]
+        if retained != nil { captureReceipt["remounted"] = true }
         retained = nil
         queries = 0; lastQuery = 0; evidence = [:]
         if position != nil { apply(target) }
@@ -233,6 +238,9 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
             self.query = nil
             guard self.session == currentSession, self.fence.pending, !self.invalidated,
                   self.token == self.document(), let web = self.web else { return }
+            if self.fence.expire(now: CACurrentMediaTime()) != nil {
+                self.finish("completion-after-deadline", preserved: false); return
+            }
             guard case let .success(raw) = result, let value = raw as? [String: Any],
                   let metrics = value["metrics"] as? [String: Any] else { return }
             if capturing {
@@ -240,6 +248,15 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
                       web.scrollView.contentOffset == origin, self.idle(web.scrollView),
                       self.geometry(metrics, web: web), let position = value["position"] as? [String: Any] else { return }
                 self.position = position; self.captured = stamp
+                let anchor = (position["candidates"] as? [[String: Any]])?.first
+                // No document text or arbitrary author identifiers enter logs.
+                self.captureReceipt = ["nativeX": Double(origin.x), "nativeY": Double(origin.y),
+                    "domX": metrics["domX"] ?? NSNull(), "domY": metrics["domY"] ?? NSNull(),
+                    "oldWidth": Double(oldSize.width), "oldHeight": Double(oldSize.height),
+                    "anchorTag": anchor?["tag"] as? String ?? "", "virtualTop": position["top"] ?? NSNull(),
+                    "markedReadingPassage": anchor?["id"] as? String == "resize-reading-passage",
+                    "captureEpochs": ["transaction": stamp.transaction, "offset": stamp.offset,
+                        "input": stamp.input, "intent": stamp.intent]]
                 self.apply(self.fence.target)
             } else {
                 guard let captured = self.captured else { return }
@@ -256,9 +273,12 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
                 // only the computed destination, never a stale DOM origin.
                 let destination = CGPoint(x: min(max(0, CGFloat(x)), max(0, scroll.contentSize.width - scroll.bounds.width)),
                     y: min(max(0, CGFloat(y)), max(0, scroll.contentSize.height - scroll.bounds.height)))
-                if self.fence.commit(captured, revision: revision, ready: ready, write: {
+                if self.fence.commit(captured, revision: revision, now: CACurrentMediaTime(), ready: ready, write: {
                     scroll.setContentOffset(destination, animated: false)
                 }) { self.finish("native-restore", preserved: true) }
+                else if self.fence.expire(now: CACurrentMediaTime()) != nil {
+                    self.finish("commit-after-deadline", preserved: false)
+                }
             }
         }
     }
@@ -266,7 +286,7 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
     private func finish(_ reason: String, preserved: Bool, retainPosition: Bool = false, releaseFrame: Bool = true) {
         guard let id = session else { return }
         if retainPosition, let token, let position, let captured, fence.matches(captured) {
-            retained = Retained(token: token, position: position, stamp: captured)
+            retained = Retained(token: token, position: position, stamp: captured, receipt: captureReceipt)
         }
         _ = fence.retire()
         session = nil; position = nil; captured = nil; token = nil
@@ -276,7 +296,8 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
         // unchanged native behavior assertions remain the outcome checks.
         let report: [String: Any] = ["id": id.uuidString, "reason": reason, "nativeSetterAccepted": preserved,
             "queries": queries, "target": String(describing: latestTarget),
-            "nativeOffset": String(describing: web?.scrollView.contentOffset), "lastGeometry": evidence]
+            "nativeOffset": String(describing: web?.scrollView.contentOffset), "lastGeometry": evidence,
+            "capture": captureReceipt]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
            let json = String(data: data, encoding: .utf8) { print("NATIVE-RESIZE-OWNER " + json) }
     }
@@ -319,6 +340,7 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
         guard web.bounds.origin == .zero, same(web.bounds.size, size), same(scroll.bounds.size, size) else { return reject("viewport-dimensions") }
         guard same(scroll.contentSize, content) else { return reject("content-dimensions") }
         guard let displayed = scroll.layer.presentation(), same(displayed.bounds.size, size),
+              near(scroll.bounds.minX, scroll.contentOffset.x), near(scroll.bounds.minY, scroll.contentOffset.y),
               near(displayed.bounds.minX, scroll.contentOffset.x), near(displayed.bounds.minY, scroll.contentOffset.y) else { return reject("native-model-presentation") }
         let children = scroll.subviews.filter { !$0.isHidden && $0.alpha > 0.01 && same($0.bounds.size, content) }
         guard !children.isEmpty else { return reject("missing-native-content") }
