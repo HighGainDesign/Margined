@@ -1837,9 +1837,7 @@ import XCTest
             // reader's asynchronous frame commit. Measure its actual allocation.
             var firstAllocation: [String: Any]?
             let allocated = await poll {
-                let matches = self.webView(in: f.host.view) === f.web &&
-                    self.readingWidthMatchesRequested(f) && f.web.bounds.size == f.web.superview?.bounds.size &&
-                    f.web.layer.presentation().map { abs($0.bounds.width - f.web.bounds.width) < 1 } == true
+                let matches = self.nativeReadingAllocationMatches(f)
                 if !matches && firstAllocation == nil { firstAllocation = self.nativeReadingGeometry(f) }
                 return matches
             }
@@ -1999,6 +1997,12 @@ import XCTest
         let native = Double(fixture.web.bounds.width), pixel = 1 / Double(fixture.window.screen.scale)
         return abs(native - expected) <= pixel + expected.ulp * 8 &&
             (cssWidth.map { abs($0 - native) < 1 } ?? true)
+    }
+
+    private func nativeReadingAllocationMatches(_ fixture: Fixture) -> Bool {
+        webView(in: fixture.host.view) === fixture.web && readingWidthMatchesRequested(fixture) &&
+            fixture.web.bounds.size == fixture.web.superview?.bounds.size &&
+            fixture.web.layer.presentation().map { abs($0.bounds.width - fixture.web.bounds.width) < 1 } == true
     }
 
     private func readingWidthHasCommitted(_ fixture: Fixture) async throws -> Bool {
@@ -2161,6 +2165,19 @@ import XCTest
     private func assertVisibleDiscussionMargin(_ f: Fixture, required: Bool) async {
         let settled = await settledNavigation(f)
         XCTAssertTrue(settled, "Opening and refreshing the conversation must preserve a settled native layout")
+        guard settled else { return }
+        var firstAllocation: [String: Any]?
+        let allocated = await poll {
+            let matches = self.nativeReadingAllocationMatches(f)
+            if !matches && firstAllocation == nil { firstAllocation = self.nativeReadingGeometry(f) }
+            return matches
+        }
+        if let firstAllocation {
+            recordReadingReadiness(["first": firstAllocation, "last": nativeReadingGeometry(f), "allocated": allocated],
+                name: "External-resolve-native-width-allocation")
+        }
+        XCTAssertTrue(allocated, "Commit the requested reader frame before checking the margin after opening or refreshing")
+        guard allocated else { return }
         if required {
             XCTAssertTrue(f.reader.discussionUsesMargin, "The wide positive control must exercise the discussion margin")
         }
