@@ -91,6 +91,24 @@ enum MobileNativeResizeFenceScenarios {
             expect(writes == 0, "expired completion performs no native setter")
             expect(fence.expire(now: 3.001) == first, "expired completion can release held layout")
         }
+        do {
+            let fence = MobileNativeResizeFenceDiagnostic()
+            let old = fence.begin(target: first, now: 0)
+            let neverFinished = fence.beginAppIntent()
+            let previousDocument = fence.stamp()
+            fence.documentWillChange()
+            expect(!fence.hasAppIntent, "old document's unfinished app work cannot block the replacement")
+            expect(!fence.sameMotion(previousDocument), "a new document cannot reuse old semantic intent")
+            expect(!fence.commit(old, revision: fence.revision, now: 1, ready: true) {},
+                   "old document's callback cannot write after replacement")
+            let currentIntent = fence.beginAppIntent()
+            fence.endAppIntent(neverFinished)
+            expect(fence.hasAppIntent, "old completion cannot end current document's intent")
+            fence.endAppIntent(currentIntent)
+            let current = fence.begin(target: latest, now: 1)
+            expect(fence.commit(current, revision: fence.revision, now: 1, ready: true) {},
+                   "new document can preserve reading without waiting for old work")
+        }
         return failures
     }
 }

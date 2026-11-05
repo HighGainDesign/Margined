@@ -51,6 +51,13 @@ final class MobileNativeResizeFenceDiagnostic {
         return id
     }
     func endAppIntent(_ id: UUID) { intents.remove(id) }
+    func documentWillChange() {
+        // Old asynchronous work can outlive cancellation. Its completion may
+        // end only its own ticket; it cannot block or authorize a new document.
+        intent += 1
+        intents.removeAll()
+        _ = retire()
+    }
 
     @discardableResult
     func commit(_ stamp: Stamp, revision: UInt64, now: Double, ready: Bool, write: () -> Void) -> Bool {
@@ -177,6 +184,11 @@ final class MobileNativeResizeOwnerDiagnostic: NSObject {
         return id
     }
     func endAppIntent(_ id: UUID) { fence.endAppIntent(id) }
+    func documentWillChange() {
+        retained = nil
+        if session != nil { finish("document-replaced", preserved: false) }
+        fence.documentWillChange()
+    }
     func detach() {
         if session != nil { finish("temporarily-detached", preserved: false, retainPosition: true, releaseFrame: false) }
     }

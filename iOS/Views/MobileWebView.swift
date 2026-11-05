@@ -242,6 +242,11 @@ struct MobileWebView: UIViewRepresentable {
             if let id { nativeResizeOwner?.endAppIntent(id) }
             #endif
         }
+        private func nativeResizeDocumentWillChange() {
+            #if MARGINED_NATIVE_RESIZE_OWNER_DIAGNOSTIC
+            nativeResizeOwner?.documentWillChange()
+            #endif
+        }
         private var html: String?
         private var documentGeneration: UUID?
         private var loadedFile: URL?
@@ -295,6 +300,7 @@ struct MobileWebView: UIViewRepresentable {
             defer { configureDiscussions() }
             self.category = category
             if documentGeneration != reader.documentGeneration {
+                nativeResizeDocumentWillChange()
                 let intent = beginNativeResizeIntent()
                 defer { endNativeResizeIntent(intent) }
                 documentGeneration = reader.documentGeneration
@@ -345,6 +351,7 @@ struct MobileWebView: UIViewRepresentable {
 
         private func load(_ html: String, forceNavigation: Bool, preservePosition: Bool) {
             guard let webView else { return }
+            nativeResizeDocumentWillChange()
             let resizeIntent = beginNativeResizeIntent()
             let reconcile = contentReady && !forceNavigation
             generation += 1
