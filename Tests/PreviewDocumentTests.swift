@@ -109,6 +109,37 @@ final class PreviewDocumentTests: XCTestCase {
         XCTAssertTrue(preview.attachments.isEmpty)
     }
 
+    func testPreviewRetainsVisibleDiagramSourceWhenArtworkIsTooLarge() async throws {
+        let root = try folder()
+        let diagram = "flowchart LR\nA[Read]-->B[Reply]\n%% " + String(repeating: "Bounded source ", count: 1_600) + "end"
+        XCTAssertGreaterThan(diagram.utf8.count, 20_000)
+        let rendered = try await MarkdownRenderer.shared.render("```mermaid\n" + diagram + "\n```")
+        let preview = try await PreviewDocument.package(html: rendered.html, documentURL: root.appendingPathComponent("review.md"))
+        let doc = try SwiftSoup.parse(preview.html)
+        XCTAssertEqual(try doc.select("figure.margined-diagram").size(), 1)
+        let figure = try XCTUnwrap(doc.select("figure.margined-diagram").first())
+        try assertPreservedDiagram(figure, source: diagram)
+        XCTAssertEqual(try figure.select("img").size(), 0, "Oversized artwork must use the readable source fallback")
+        XCTAssertTrue(preview.attachments.isEmpty)
+    }
+
+    func testPackagingPreservesTheExactSanitizedDiagramImage() async throws {
+        let root = try folder()
+        // Packaging accepts sanitized renderer output. Exercise this boundary
+        // directly so preservation never depends on a new WebKit worker's speed.
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"Read then reply\"><text>Read then reply</text></svg>"
+        let image = "data:image/svg+xml;base64," + Data(svg.utf8).base64EncodedString()
+        let html = "<figure class=\"margined-diagram\"><img src=\"\(image)\" alt=\"Read then reply\"><details><summary>Diagram source</summary><pre><code class=\"language-mermaid\">flowchart LR\nA[Read]--&gt;B[Reply]</code></pre></details></figure>"
+        let preview = try await PreviewDocument.package(html: html, documentURL: root.appendingPathComponent("review.md"))
+        let doc = try SwiftSoup.parse(preview.html)
+        XCTAssertEqual(try doc.select("figure.margined-diagram").size(), 1)
+        let figure = try XCTUnwrap(doc.select("figure.margined-diagram").first())
+        try assertPreservedDiagram(figure, source: "flowchart LR\nA[Read]-->B[Reply]")
+        XCTAssertEqual(try figure.select("img").attr("src"), image)
+        XCTAssertEqual(try figure.select("img").attr("alt"), "Read then reply")
+        XCTAssertTrue(preview.attachments.isEmpty)
+    }
+
     func testBOMMarkedSourceLoadsWithoutModification() async throws {
         let file = try folder().appendingPathComponent("review.md")
         let data = try Data([0xff, 0xfe]) + XCTUnwrap("# 日本語\n\nReadable.".data(using: .utf16LittleEndian))
@@ -159,7 +190,9 @@ final class PreviewDocumentTests: XCTestCase {
         XCTAssertEqual(try history.select("strong").text(), "A formatted note.")
         XCTAssertEqual(try history.select("td").first()?.text(), "Reader")
         XCTAssertEqual(try history.select("math").size(), 1)
-        XCTAssertEqual(try history.select("figure.margined-diagram img[src^='data:image/svg+xml;base64,']").size(), 1)
+        XCTAssertEqual(try history.select("figure.margined-diagram").size(), 1)
+        let diagram = try XCTUnwrap(history.select("figure.margined-diagram").first())
+        try assertPreservedDiagram(diagram, source: "flowchart LR\nA[Read]-->B[Reply]")
         let local = try history.select("img[alt=Local]").attr("src")
         XCTAssertTrue(local.hasPrefix("cid:"))
         XCTAssertEqual(preview.attachments[String(local.dropFirst(4))]?.data, pixel)
@@ -168,6 +201,36 @@ final class PreviewDocumentTests: XCTestCase {
         XCTAssertEqual(try doc.select("button,form,script,[data-margined-task],[data-margined-thread]").size(), 0)
         XCTAssertTrue(try history.text().contains("Open this file in Margined to reply."))
         XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    private func assertPreservedDiagram(_ figure: Element, source: String,
+                                        file: StaticString = #filePath, line: UInt = #line) throws {
+        let code = try figure.select("pre > code.language-mermaid")
+        XCTAssertEqual(code.size(), 1, file: file, line: line)
+        var preservedSource = try code.text(trimAndNormaliseWhitespace: false)
+        // Fenced-code parsing adds a terminal newline; preserve every authored
+        // character in these fixtures, including spaces, apart from that newline.
+        if preservedSource.hasSuffix("\n") { preservedSource.removeLast() }
+        XCTAssertEqual(preservedSource, source, file: file, line: line)
+        XCTAssertEqual(try figure.select("script,iframe,object,embed,form").size(), 0, file: file, line: line)
+        XCTAssertFalse(figure.hasAttr("hidden"), file: file, line: line)
+        let images = try figure.select("img")
+        if images.isEmpty() {
+            // A bounded/failed renderer keeps source directly visible, rather
+            // than hiding it in closed details with no image to read.
+            XCTAssertEqual(try figure.select("figure > pre > code.language-mermaid").size(), 1, file: file, line: line)
+            XCTAssertEqual(try figure.select("details").size(), 0, file: file, line: line)
+        } else {
+            XCTAssertEqual(images.size(), 1, file: file, line: line)
+            let image = try XCTUnwrap(images.first(), file: file, line: line)
+            let url = try image.attr("src"), prefix = "data:image/svg+xml;base64,"
+            XCTAssertTrue(url.hasPrefix(prefix), file: file, line: line)
+            let bytes = try XCTUnwrap(Data(base64Encoded: String(url.dropFirst(prefix.count))), file: file, line: line)
+            let svg = try SwiftSoup.parse(String(decoding: bytes, as: UTF8.self), "", Parser.xmlParser())
+            XCTAssertEqual(try svg.select("svg[role=img]").size(), 1, file: file, line: line)
+            XCTAssertEqual(try svg.select("script,foreignObject,iframe").size(), 0, file: file, line: line)
+            XCTAssertFalse(try image.attr("alt").isEmpty, file: file, line: line)
+        }
     }
 
     func testPreviewKeepsMissingAndAmbiguousQuotesVisibleWithAnUnavailablePassageLabel() async throws {

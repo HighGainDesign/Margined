@@ -30,7 +30,9 @@ struct MobileDiscussionDraftEditor: UIViewRepresentable {
         let font = UIFont.preferredFont(forTextStyle: .body,
             compatibleWith: UITraitCollection(preferredContentSizeCategory: sizeCategory.uiCategory))
         if view.font != font { view.font = font }
-        view.textColor = .label
+        // Reapplying a color invalidates TextKit layout and can queue a
+        // selection scroll after the user has browsed away from the caret.
+        if view.textColor != UIColor.label { view.textColor = .label }
         if view.text != text {
             let selection = view.selectedRange
             view.text = text

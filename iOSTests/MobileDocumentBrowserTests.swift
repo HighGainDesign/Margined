@@ -73,10 +73,12 @@ final class MobileDocumentBrowserTests: XCTestCase {
         let mounted = await poll { self.browser(in: host)?.delegate != nil }; XCTAssertTrue(mounted, "The native browser must finish connecting its selection delegate")
         let firstBrowser = try XCTUnwrap(browser(in: host))
         firstBrowser.delegate?.documentBrowser?(firstBrowser, didPickDocumentsAt: [first])
-        let opened = await poll { reader.fileURL == first && reader.hasDocument && self.web(in: host.view)?.isLoading == false }
+        let opened = await poll { reader.fileURL == first && reader.hasDocument }
         XCTAssertTrue(opened, "Exercise the actual native browser delegate; hasDocument=\(reader.hasDocument), opening=\(reader.isOpening), URL=\(String(describing: reader.fileURL)), error=\(String(describing: reader.errorMessage)), presented=\(String(describing: host.presentedViewController))")
         guard opened else { return }
-        let web = try XCTUnwrap(web(in: host.view))
+        let committed = await WebKitTestReadiness.navigation({ self.web(in: host.view) },
+            expectedURL: first.deletingLastPathComponent())
+        let web = try XCTUnwrap(committed, "Finish initial native navigation before checking the selected document")
         let loaded = await pollAsync { try await web.evaluateJavaScript("document.querySelector('h1')?.textContent === 'First native document'") as? Bool == true }
         XCTAssertTrue(loaded)
         reader.discussions.setDraft("Keep this unposted reply.", for: .new(UUID()))

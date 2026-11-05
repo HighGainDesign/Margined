@@ -6,8 +6,12 @@ import XCTest
 
 @MainActor
 final class MobileWebViewTests: XCTestCase {
+    // Named content worlds are weakly cached. Keep the probe's world alive
+    // until the coordinator's lazy Find world and its clear operation exist.
+    private static let findProbeWorld = WKContentWorld.world(name: "MarginedMobileFind")
     func testClearingFindRemovesNativeHighlightsAndPreservesAnotherSelection() async throws {
         let reader = MobileReaderState()
+        addTeardownBlock { @MainActor in await reader.close() }
         var parts = URLComponents(string: "margined://preview")!
         parts.queryItems = [.init(name: "text", value: "# Find\n\nFindneedle Findneedle Findneedle.\n\nA different passage to discuss.")]
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
@@ -36,11 +40,17 @@ final class MobileWebViewTests: XCTestCase {
         let highlighted = try await eventually { try await paintedMatch() }
         XCTAssertTrue(highlighted, "Establish a painted native Find match before clearing")
         guard highlighted else { return }
+        let firstClearProbe = try await observeNextFindClear(in: web)
         reader.searchText = ""; reader.find()
         let firstClear = try await eventually {
+            guard try await self.findClearFinished(in: web, probe: firstClearProbe) else { return false }
             let collapsed = try await web.evaluateJavaScript("getSelection().isCollapsed") as? Bool
             let marks = try await self.findPixels(in: web)
             return reader.searchMatch == nil && collapsed == true && marks < 20
+        }
+        if !firstClear {
+            let state = try await web.callAsyncJavaScript("return JSON.stringify({probe:window.__marginedTestFindClearProbe,scratch:Object.prototype.hasOwnProperty.call(window,'__marginedFindRestore'),selected:getSelection().toString(),collapsed:getSelection().isCollapsed});", arguments: [:], in: nil, contentWorld: WKContentWorld.world(name: "MarginedMobileFind"))
+            print("FIND-CLEAR-STATE \(String(describing: state)) match=\(String(describing:reader.searchMatch)) pixels=\(try await findPixels(in:web))")
         }
         XCTAssertTrue(firstClear, "Clearing Find removes its own selection as well as its yellow overlay")
         reader.searchText = "Findneedle"; reader.find()
@@ -53,13 +63,50 @@ final class MobileWebViewTests: XCTestCase {
         const p=document.querySelector('main p:last-of-type'), r=document.createRange();
         r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);true;
         """)
+        let clearProbe = try await observeNextFindClear(in: web)
         reader.searchText = ""; reader.find()
-        let cleared = try await eventually { try await self.findPixels(in: web) < 20 }
+        let cleared = try await eventually {
+            guard try await self.findClearFinished(in: web, probe: clearProbe) else { return false }
+            let marks = try await self.findPixels(in: web)
+            let selected = try await web.evaluateJavaScript("getSelection().toString()") as? String
+            return reader.searchMatch == nil && marks < 20 && selected == "A different passage to discuss."
+        }
         XCTAssertTrue(cleared, "An empty query must clear WebKit's actual Find overlay")
         let selection = try await web.evaluateJavaScript("getSelection().toString()") as? String
         XCTAssertEqual(selection, "A different passage to discuss.")
         XCTAssertNil(reader.searchMatch)
-        await reader.close()
+    }
+
+    // A nil searchMatch is published before the async clear starts, and iOS 26
+    // can paint blue Find selections with no yellow pixels. Observe the real
+    // capture/deletion boundary without changing its saved range or native Find.
+    private func observeNextFindClear(in web: WKWebView) async throws -> String {
+        let probe = UUID().uuidString
+        let installed = try await web.callAsyncJavaScript("""
+        if (Object.prototype.hasOwnProperty.call(window, '__marginedFindRestore')) return false;
+        const probe = {id, started:false};
+        window.__marginedTestFindClearProbe = probe;
+        let saved;
+        Object.defineProperty(window, '__marginedFindRestore', {
+            configurable:true, enumerable:true,
+            get() { return saved; },
+            set(value) { saved=value; probe.started=true; }
+        });
+        return true;
+        """, arguments: ["id": probe], in: nil,
+            contentWorld: Self.findProbeWorld) as? Bool
+        XCTAssertEqual(installed, true, "The previous Find clear must finish before observing the next one")
+        return probe
+    }
+
+    private func findClearFinished(in web: WKWebView, probe: String) async throws -> Bool {
+        let finished = try await web.callAsyncJavaScript("""
+        const probe=window.__marginedTestFindClearProbe;
+        return probe?.id===id && probe.started &&
+            !Object.prototype.hasOwnProperty.call(window, '__marginedFindRestore');
+        """, arguments: ["id": probe], in: nil,
+            contentWorld: Self.findProbeWorld) as? Bool
+        return finished == true
     }
 
     private func findPixels(in web: WKWebView, blue: Bool = false) async throws -> Int {
@@ -115,7 +162,7 @@ final class MobileWebViewTests: XCTestCase {
         let navigation = TestWebNavigation(finished: finished)
         web.navigationDelegate = navigation
         web.loadHTMLString(output.html, baseURL: nil)
-        await fulfillment(of: [finished], timeout: 10)
+        await fulfillment(of: [finished], timeout: WebKitTestReadiness.navigationTimeout)
         XCTAssertNil(navigation.error)
         let count = try await web.callAsyncJavaScript("return document.querySelectorAll('table').length;",
             arguments: [:], in: nil, contentWorld: .defaultClient) as? Int
@@ -241,27 +288,45 @@ final class MobileWebViewTests: XCTestCase {
 
     func testOpeningAnotherSnapshotStartsAtTopAndRejectsOldPageTypography() async throws {
         let reader = MobileReaderState()
+        addTeardownBlock { @MainActor in await reader.close() }
         var parts = URLComponents(string: "margined://preview")!
         parts.queryItems = [.init(name: "text", value: "# Snapshot\n\n" + (0..<100).map { "Paragraph \($0)." }.joined(separator: "\n\n"))]
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
         let coordinator = MobileWebView.Coordinator(reader: reader)
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 650), configuration: MobileWebView.configuration())
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let controller = UIViewController()
+        controller.view = web
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        let window = UIWindow(windowScene: scene)
+        window.frame = web.frame
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        defer {
+            coordinator.invalidate()
+            web.navigationDelegate = nil
+            web.stopLoading()
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        XCTAssertNotNil(web.window)
         coordinator.webView = web
         web.navigationDelegate = coordinator
         coordinator.update(category: .large)
         try await waitForToken(web)
+        try await present(web)
         let oldTokenValue = try await web.callAsyncJavaScript("window.identity='old'; scrollTo({top:800,behavior:'instant'}); return document.documentElement.getAttribute('data-margined-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
         let oldToken = try XCTUnwrap(oldTokenValue as? String)
         await reader.openPreview(url: parts.url!); await reader.waitForRendering()
         coordinator.update(category: .large)
         try await waitForToken(web, excluding: oldToken)
+        try await present(web)
         try await MobileWebTypography.apply(to: web, category: .accessibilityExtraExtraExtraLarge, zoom: 3, expectedToken: oldToken)
         let result = try await web.callAsyncJavaScript("return {y:scrollY, identity:window.identity ?? null, font:parseFloat(getComputedStyle(document.body).fontSize)};", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? [String: Any]
         XCTAssertEqual(try XCTUnwrap(result?["y"] as? Double), 0, accuracy: 1)
         XCTAssertEqual(try XCTUnwrap(result?["font"] as? Double), Double(MobileWebTypography.fontSize(category: .large, zoom: 1)), accuracy: 0.5)
         XCTAssertTrue(result?["identity"] is NSNull)
-        coordinator.invalidate()
-        await reader.close()
     }
 
     func testLocalImagesAreNamespacedAcrossFileSwitchAndFolderReload() async throws {
@@ -387,6 +452,11 @@ final class MobileWebViewTests: XCTestCase {
     }
 
     private func waitForToken(_ web: WKWebView, excluding previous: String? = nil) async throws {
+        if previous == nil {
+            let committed = await WebKitTestReadiness.navigation { web }
+            XCTAssertNotNil(committed, "Finish initial native navigation before inspecting the current token")
+            guard committed != nil else { throw URLError(.timedOut) }
+        }
         for _ in 0..<200 {
             if !web.isLoading,
                let token = try? await web.callAsyncJavaScript("return document.documentElement.getAttribute('data-margined-mobile-token');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? String,
@@ -423,6 +493,9 @@ final class MobileWebViewTests: XCTestCase {
     }
 
     private func waitForDocument(_ web: WKWebView) async throws {
+        let committed = await WebKitTestReadiness.navigation { web }
+        XCTAssertNotNil(committed, "Finish initial native navigation before inspecting the typography fixture")
+        guard committed != nil else { throw URLError(.timedOut) }
         for _ in 0..<200 {
             if !web.isLoading, (try? await web.callAsyncJavaScript("return !!document.getElementById('line-35');", arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool) == true { return }
             try await Task.sleep(for: .milliseconds(25))

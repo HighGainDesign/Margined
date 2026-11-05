@@ -34,8 +34,10 @@ established cold-launch target or a measured Margined result.
 
 ### Delivery
 
-The Mac beta is available on GitHub and public TestFlight; iPhone/iPad testing
-remains invitation-only. Native Files browsing and the replayable practice tour
+The Mac beta is available on GitHub and public TestFlight. iPhone/iPad beta
+availability and public TestFlight distribution are recorded in the
+[delivery tracker](https://github.com/HighGainDesign/Margined/issues/24).
+Native Files browsing and the replayable practice tour
 are implemented. Manual acceptance testing continues, including File Providers,
 background audio, accessibility and file handoff. iOS 27 Quick Look dispatch
 remains limited; use Open With or Share.
@@ -47,11 +49,16 @@ targets these next steps; build numbers may move if additional fixes are needed:
   commands, and suggest the current document's folder for iOS image access.
   Combined Build 11–14 manual testing continues. Broader menu/navigation changes
   remain pending feedback and acceptance.
-- **Build 15:** required compact choose-one checkboxes and focused text responses,
+- **Build 15:** Mac public TestFlight beta with the Quick Look entitlement repair.
+  Combined Build 11–14 manual acceptance remains open.
+- **Build 16:** repair iOS reading-position restoration during resizing and
+  unfinished-reply browsing; validate locally before public iPhone/iPad and
+  GitHub beta distribution. Keep the existing Mac TestFlight beta available.
+- **Build 17:** required compact choose-one checkboxes and focused text responses,
   with explicit readable Markdown conventions, safe saves/Undo and a matching
   authoring-skill update. The exact grammar and UX need focused review; these
   controls are not implemented yet.
-- **Build 16:** release candidate, remaining accessibility/performance and manual
+- **Build 18:** release candidate, remaining accessibility/performance and manual
   acceptance checks, documentation and verified distribution.
 
 Keep the maintained Markdown authoring skill aligned with each release's actual

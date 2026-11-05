@@ -2,7 +2,9 @@
 
 User request: keep the Margined authoring skill current for other agents. Updates are driven by verified product changes and demonstrated authoring failures, not a periodic rewrite or an untested roadmap.
 
-Latest behavior check: Build 14 parser/source-mapper revision `bd1d96e`, 2026-11-01.
+Latest authoring check: beta.4 source `0e31abf`, 2026-11-04. The local Mac
+CPU probes passed the real task/source-mapper examples and discussion contract.
+The original Build 14 parser/source-mapper fix is revision `bd1d96e`.
 Inline-pipeline and multi-block task mapping pass the real renderer/source-mapper
 checks on Mac and the focused iOS rendering suite. Retain the Build 13
 compatible example and guidance for older readers. Discussion v1

@@ -31,6 +31,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 script/validate-localizations.py
+          node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
+          node --test script/tests/test_discussion_layout.cjs
           xcodegen generate
           xcodebuild -project Margined.xcodeproj -scheme Margined -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Margined-tests" \

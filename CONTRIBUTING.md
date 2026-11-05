@@ -13,6 +13,15 @@ before opening a large pull request.
 
 ## Build and test
 
+Run the relevant checks locally before pushing code or updating a pull request.
+Keep diagnostic changes and intentionally failing experiments local. Use GitHub
+Actions to confirm the validated change across hosted toolchains and OS versions;
+record an intermittent failure even when a later attempt passes.
+
+Record Xcode and Simulator runtime versions. Reproduce CI-only iOS failures on
+the matching runtime locally before pushing another diagnostic change; a pass on
+a newer runtime does not establish the older runtime's behavior.
+
 Use Xcode 26+, its command-line tools and XcodeGen 2.44+. Deployment targets are
 macOS 14 and iOS 17. `project.yml` is authoritative; the generated Xcode project
 is ignored. Dependencies are pinned. Start the Mac development app with:
@@ -49,6 +58,9 @@ Replace `SIMULATOR_UDID` with your device’s identifier. Real-device builds req
 your own team and profiles. Simulator checks do not replace real File Provider,
 background audio or share-sheet acceptance. [Viewing benchmarks](Benchmarks/README.md)
 use a separate optimized build and strict visible-frame checks.
+
+For a headless local run, use a dedicated Simulator and boot it with
+`xcrun simctl boot SIMULATOR_UDID`; opening Simulator.app is unnecessary.
 
 ## Code boundaries
 

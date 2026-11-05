@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0-beta.4 — 2026-11-04
+
+- Keep the native-visible iOS reading passage during resizing, including pinched zoom and page zoom; newer scrolling or navigation takes priority.
+- Refresh discussion markers after a resize even when scrolling overlaps the update.
+- Remove the filesystem exception from Mac TestFlight Quick Look; unavailable images retain alternative text.
+- Preserve unfinished-reply browsing when an ordinary view update leaves the text and layout unchanged.
+- Ignore offscreen keyboard frames when allocating discussion history space.
+- Prepare Build 16 for iPhone/iPad and the GitHub Mac beta; public Mac TestFlight remains on Build 15.
+- Run validation locally before publishing changes; check committed native geometry, painted history and completed Find clearing.
+- Preserve exact Reply glyph checks when text recognition groups neighboring labels.
+- Publish the privacy policy for local files, optional connections and TestFlight feedback.
+
 ## 2.0-beta.3 — 2026-11-02
 
 - Keep checklists usable with adjacent inline shell pipelines and fenced commands inside tasks.

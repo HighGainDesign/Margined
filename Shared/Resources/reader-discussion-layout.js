@@ -108,9 +108,15 @@ function marginedDiscussionLayout() {
         }
         document.body.appendChild(layer);layout.overlay=layer;publish();
     }
+    let pendingFullRefresh=false;
     function schedule(full) {
+        pendingFullRefresh=pendingFullRefresh || full;
         if(layout.pending!==null)cancelAnimationFrame(layout.pending);
-        layout.pending=requestAnimationFrame(()=>{layout.pending=null;full ? refresh() : publish();});
+        layout.pending=requestAnimationFrame(()=>{
+            layout.pending=null;
+            const needsRefresh=pendingFullRefresh;pendingFullRefresh=false;
+            needsRefresh ? refresh() : publish();
+        });
     }
     layout.refresh=refresh;
     const options={signal:layout.abort.signal};

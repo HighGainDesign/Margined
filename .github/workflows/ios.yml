@@ -3,7 +3,24 @@ name: iOS validation
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - CHANGELOG.md
+      - README.md
+      - ROADMAP.md
+      - PRIVACY.md
+      - .github/workflows/ci.yml
+      - .github/workflows/tests.yml
+      - .github/workflows/release.yml
   pull_request:
+    paths-ignore:
+      - CHANGELOG.md
+      - README.md
+      - ROADMAP.md
+      - PRIVACY.md
+      - .github/workflows/ci.yml
+      - .github/workflows/tests.yml
+      - .github/workflows/release.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,28 +43,20 @@ jobs:
           brew install xcodegen
           python3 script/verify-vendor.py
           python3 script/validate-localizations.py
+          node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
+          node script/tests/test_native_reading_position.cjs iOS/Resources/native-reading-position.js
+          node script/tests/test_native_scroll_lock.cjs iOS/Resources/native-resize-scroll-lock.js
+          node --test script/tests/test_discussion_layout.cjs
           xcodegen generate
       - name: Test on iPhone
         run: |
           device_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if "iPhone" in d["name"]))')
-          # A failed case gets one fresh process; keep both attempts as evidence.
           xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
             -destination "platform=iOS Simulator,id=$device_id" \
             -derivedDataPath "$RUNNER_TEMP/Margined-ios" CODE_SIGNING_ALLOWED=NO \
-            -parallel-testing-enabled NO -retry-tests-on-failure -test-iterations 2 \
-            -test-repetition-relaunch-enabled YES \
+            -parallel-testing-enabled NO \
             test > "$RUNNER_TEMP/ios-tests.log" 2>&1 || { tail -80 "$RUNNER_TEMP/ios-tests.log"; exit 1; }
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          lines = (Path(os.environ['RUNNER_TEMP']) / 'ios-tests.log').read_text().splitlines()
-          failed = [line for line in lines if 'error: -[' in line or ('Test Case ' in line and "' failed" in line)]
-          if failed:
-              print('Passed after retry; first-attempt failures remain flaky and require beta acceptance:')
-              print('\n'.join(failed))
-          else:
-              print('Passed without a test retry.')
-          PY
+          tail -20 "$RUNNER_TEMP/ios-tests.log"
       - name: Build for iPad and iPhone devices
         run: |
           xcodebuild -project Margined.xcodeproj -scheme MarginediOS \

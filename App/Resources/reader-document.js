@@ -84,6 +84,10 @@ if (operation === 'navigate') {
     // Focused jumps are atomic: an older smooth-scroll animation must not
     // keep moving the viewport after a policy reload or newer focus request.
     if (kind !== 'reading') target.scrollIntoView({block:'start',behavior:focus ? 'instant' : 'auto'});
+    // An instant owned jump precedes its asynchronous scroll event. Publish
+    // it now so an intervening resize cannot restore the previous passage.
+    // Unfocused jumps may still be animating under the reader's smooth policy.
+    if (kind !== 'reading' && focus) window.marginedReadingResize?.remember?.();
     return true;
 }
 // Keep the passage being read, rather than its old pixel offset, while a
@@ -91,20 +95,44 @@ if (operation === 'navigate') {
 // resize event arrives after WebKit has already changed line wrapping.
 if (operation === 'observeResize') {
     window.marginedReadingResize?.stop();
+    // The iOS native viewport owner retains sampling/lease lifecycle but
+    // retire the competing automatic writer. Explicit app operations stay live.
+    const nativeOwnsResize = typeof nativeResizeOwnsRestore !== 'undefined' && nativeResizeOwnsRestore === true;
     // Callers lease their own document namespace. Mobile remains the default
     // for existing reading-page callers; history must opt into its token.
     const tokenAttribute = typeof documentTokenAttribute === 'undefined' ? 'data-margined-mobile-token' : documentTokenAttribute;
     if (tokenAttribute !== 'data-margined-mobile-token' && tokenAttribute !== 'data-margined-history-token') return false;
     const controller = new AbortController();
-    let width = innerWidth, height = innerHeight, pending = 0;
+    // Use the usable viewport for hit testing and hidden-layout guards. Its
+    // classic scrollbar gutter is not a change to the native reading viewport.
+    const viewport = document.compatMode === 'BackCompat' ? document.body : document.documentElement;
+    const measurementHost = document.createElement('div');
+    measurementHost.setAttribute('aria-hidden','true');
+    Object.assign(measurementHost.style,{position:'fixed',left:'0px',top:'0px',
+        width:'0px',height:'0px',margin:'0px',padding:'0px',border:'0px',
+        display:'block',minWidth:'0px',maxWidth:'none',minHeight:'0px',maxHeight:'none',
+        boxSizing:'content-box',overflow:'hidden',contain:'strict',visibility:'hidden',pointerEvents:'none'});
+    const measurement = document.createElement('div');
+    Object.assign(measurement.style,{display:'block',width:'100vw',height:'100vh',
+        minWidth:'0px',maxWidth:'none',minHeight:'0px',maxHeight:'none',
+        margin:'0px',padding:'0px',border:'0px',boxSizing:'content-box'});
+    measurementHost.appendChild(measurement);
+    document.documentElement.appendChild(measurementHost);
+    // Under the reader's default root overflow:auto, viewport units retain
+    // full committed dimensions when a content scrollbar appears or disappears.
+    // Unlike innerWidth/innerHeight, this box participates in committed layout.
+    let width = measurement.clientWidth, height = measurement.clientHeight, pending = 0;
+    function hasUsableViewport() { return viewport.clientWidth > 0 && viewport.clientHeight > 0; }
+    let resizeObserver;
     function sample() {
         const box = main?.getBoundingClientRect();
-        const x = box ? Math.max(1, Math.min(innerWidth - 1, box.left + box.width / 2)) : innerWidth / 2;
+        const viewWidth = viewport.clientWidth, viewHeight = viewport.clientHeight;
+        const x = box ? Math.max(1, Math.min(viewWidth - 1, box.left + box.width / 2)) : viewWidth / 2;
         // Point queries avoid scanning the whole document on each scroll.
         // Margins and unusual layouts fall back to the semantic block search.
         let node;
         for (const y of [24, 64, 128]) {
-            if (y >= innerHeight) break;
+            if (y >= viewHeight) break;
             const candidate = document.elementFromPoint(x, y)?.closest(selector);
             if (candidate && main?.contains(candidate)) { node = candidate; break; }
         }
@@ -114,39 +142,74 @@ if (operation === 'observeResize') {
     }
     function stop() {
         controller.abort();
+        resizeObserver?.disconnect();
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
+        measurementHost.remove();
     }
     function current() {
         return !controller.signal.aborted &&
             document.documentElement.getAttribute(tokenAttribute) === documentToken;
     }
-    let saved = sample();
+    let saved = hasUsableViewport() ? sample() : null;
+    function remember() {
+        if (!current()) { stop(); return; }
+        if (!hasUsableViewport()) return;
+        const nextWidth = measurement.clientWidth, nextHeight = measurement.clientHeight;
+        if (nextWidth <= 0 || nextHeight <= 0) return;
+        if (pending) cancelAnimationFrame(pending);
+        pending = 0;
+        // The jump may already use a new layout whose resize notification
+        // has not arrived. Keep its snapshot paired with those dimensions.
+        width = nextWidth; height = nextHeight;
+        saved = sample();
+    }
     const options = {passive:true, signal:controller.signal};
     window.addEventListener('scroll', () => {
         if (!current()) { stop(); return; }
+        // Retain a user scroll before its pending frame can be overtaken by a
+        // layout commit. Never sample a reflowed or hidden page against old dimensions.
+        if (!hasUsableViewport()) return;
+        if (measurement.clientWidth === width && measurement.clientHeight === height) saved = sample();
         if (pending) cancelAnimationFrame(pending);
         pending = requestAnimationFrame(() => {
             pending = 0;
             if (!current()) { stop(); return; }
             // A scroll event can precede the resize event for the same layout.
-            if (innerWidth === width && innerHeight === height) saved = sample();
+            if (!hasUsableViewport()) return;
+            if (measurement.clientWidth === width && measurement.clientHeight === height) saved = sample();
         });
     }, options);
-    window.addEventListener('resize', () => {
+    function commitResize() {
         if (!current()) { stop(); return; }
-        if (innerWidth === width && innerHeight === height) return;
+        const nextWidth = measurement.clientWidth, nextHeight = measurement.clientHeight;
+        // Viewport-unit boxes can retain dimensions while the usable page is
+        // hidden. Neither kind of zero-sized layout may erase a valid snapshot.
+        if (!hasUsableViewport() || nextWidth <= 0 || nextHeight <= 0) return;
+        if (!saved) { width = nextWidth; height = nextHeight; saved = sample(); return; }
+        if (nextWidth === width && nextHeight === height) return;
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
-        restore(saved);
-        width = innerWidth; height = innerHeight;
+        if (!nativeOwnsResize) restore(saved);
+        width = nextWidth; height = nextHeight;
         saved = sample();
-    }, options);
-    window.marginedReadingResize = {stop};
+    }
+    window.addEventListener('resize', commitResize, options);
+    // A native resize can dispatch before layout commits, with no later
+    // window event. Observe the committed full-viewport box without polling.
+    if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(commitResize);
+        resizeObserver.observe(measurement);
+    }
+    window.marginedReadingResize = {stop,remember};
     return true;
 }
 if (operation === 'capture') return snapshot();
-if (operation === 'restore') { restore(position); return true; }
+if (operation === 'restore') {
+    restore(position);
+    if (position) window.marginedReadingResize?.remember?.();
+    return true;
+}
 if (operation !== 'update') return false;
 const next = new DOMParser().parseFromString(html,'text/html');
 const nextMain = next.getElementById('document');

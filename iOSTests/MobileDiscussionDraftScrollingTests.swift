@@ -6,6 +6,14 @@ import XCTest
 @MainActor
 final class MobileDiscussionDraftScrollingTests: XCTestCase {
     func testBrowsingAFocusedDraftStaysPutUntilItsViewportChanges() async throws {
+        try await exerciseBrowsing(recompose: false)
+    }
+
+    func testRecomposingAFocusedDraftPreservesBrowsingUntilResize() async throws {
+        try await exerciseBrowsing(recompose: true)
+    }
+
+    private func exerciseBrowsing(recompose: Bool) async throws {
         let suite = "MarginedTests.DraftScrolling." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -33,10 +41,17 @@ final class MobileDiscussionDraftScrollingTests: XCTestCase {
         editor.setNeedsLayout(); editor.layoutIfNeeded()
         let target = CGPoint(x: 0, y: 500)
         editor.setContentOffset(target, animated: false)
+        if recompose {
+            // Ordinary parent updates must keep this same focused editor and
+            // its browsing position even when no content or geometry changed.
+            let updated = host.rootView
+            host.rootView = updated
+        }
         editor.setNeedsLayout(); editor.layoutIfNeeded()
         for _ in 0..<10 { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(editor.contentOffset.y, target.y, accuracy: 1,
                        "Unrelated layout must not pull a deliberately scrolled draft back to its caret")
+        XCTAssertTrue(findEditor(host.view) === editor, "Recomposition must retain the actual editor")
         XCTAssertEqual(editor.selectedRange, NSRange(location: 0, length: 0))
         XCTAssertTrue(editor.isFirstResponder)
         window.frame.size.height = 200

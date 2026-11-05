@@ -4,11 +4,13 @@ A native Markdown reader for Mac, iPhone and iPad, with live updates, change
 review, checklists, Read Aloud and portable passage discussions. Documents stay
 ordinary `.md` files that people and agents can use in their own tools.
 
-**2.0 is an early Mac beta.** [Download the beta](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.3)
+**2.0 is an early beta.** [Download the Mac beta](https://github.com/HighGainDesign/Margined/releases)
 to try passage discussions alongside the established reading, Quick Look, live
 streaming and change-review features. Discussions remain experimental and hands-on
-beta testing is ongoing. iPhone/iPad TestFlight testing remains invitation-only.
+beta testing is ongoing.
 Join the [public Mac TestFlight beta](https://testflight.apple.com/join/CDxY24jy).
+For iPhone/iPad availability and TestFlight links, see the
+[current beta release notes](https://github.com/HighGainDesign/Margined/releases).
 
 ## Install and open
 
@@ -124,6 +126,9 @@ Remote images are off by default. **Load Remote Images** opts the current docume
 into HTTPS image requests; hosts can see your IP address. Margined sends no document
 referrer. The choice resets when the document closes. Quick Look stays offline.
 
+See the [privacy policy](PRIVACY.md) for file handling, optional connections and
+TestFlight feedback.
+
 Authors can size images using GitHub-style HTML; printing adds no arbitrary cap:
 
 ```html
@@ -136,6 +141,10 @@ The extension is bundled with the app. On Mac, launch Margined once, then enable
 it from **Settings → Open Extension Settings… → Quick Look**. Finder previews a
 selected Markdown file with Space. macOS may choose another enabled Markdown
 extension; disable competitors if you want Margined’s preview.
+
+The Mac TestFlight extension relies on macOS file access. Images beside a document
+may be unavailable in Quick Look and retain their alternative text. Folder access
+granted in Margined applies to the app; open the document there to load its images.
 
 On iOS 27 and some earlier versions, Files currently shows standard Markdown as
 plain text instead of dispatching to Margined’s extension. Use **Open With** or

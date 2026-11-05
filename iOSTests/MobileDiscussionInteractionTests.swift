@@ -7,6 +7,29 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    func testReplyOCRFindsOnlyTheWordBoundsInsideAMergedRow() throws {
+        let image = replyOCRFixture("Reader • Reply")
+        let bounds = try XCTUnwrap(recognizedBounds("Reply", in: XCTUnwrap(image.cgImage), size: image.size))
+        XCTAssertGreaterThan(bounds.minX, 80, "Measure Reply rather than the neighboring Reader text")
+        XCTAssertLessThan(bounds.width, 80, "Return the word's glyph bounds rather than the entire merged row")
+        XCTAssertLessThanOrEqual(bounds.maxY, image.size.height)
+    }
+
+    func testReplyOCRRejectsMissingOrSimilarWords() throws {
+        for row in ["Reader • Post", "Reader • Replying", "Reader • PreReply"] {
+            let image = replyOCRFixture(row)
+            XCTAssertNil(try recognizedBounds("Reply", in: XCTUnwrap(image.cgImage), size: image.size), row)
+        }
+    }
+
+    private func replyOCRFixture(_ row: String) -> UIImage {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 3; format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: 320, height: 70), format: format).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 70))
+            (row as NSString).draw(at: CGPoint(x: 16, y: 16), withAttributes: [.font: UIFont.systemFont(ofSize: 24), .foregroundColor: UIColor.black])
+        }
+    }
+
     func testMountingANativeDraftEditorRestoresTheRetainedCaretBeforeObservingSelection() async throws {
         let f = try await fixture(withThread: true)
         let key = DiscussionSession.DraftKey.thread("t-mobile")
@@ -154,6 +177,7 @@ import XCTest
         let mounted = await poll { self.editor(in: f.host.view)?.text == "Retain this hardware keyboard draft." }
         XCTAssertTrue(mounted); guard mounted else { return }
         let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        try await waitForInitialHistory(f)
         let historyReady = await pollAsync {
             guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
             return try await history.evaluateJavaScript("document.querySelector('article .discussion-message-body')?.textContent.includes('A portable note.')===true") as? Bool == true
@@ -232,12 +256,31 @@ import XCTest
         let mounted = await poll { self.editor(in: f.host.view)?.text == "An unposted sheet reply." }
         XCTAssertTrue(mounted); guard mounted else { return }
         XCTAssertTrue(f.web.window === f.window, "Compact discussion must leave the actual retained reader mounted")
+        var firstGeometry: [String: Any]?, lastGeometry: [String: Any] = [:]
+        let allocated = await poll {
+            guard let editor = self.editor(in: f.host.view) else { return false }
+            let reader = f.web.convert(f.web.bounds, to: f.window)
+            let composer = editor.convert(editor.bounds, to: f.window)
+            let matches = f.web.bounds.height > 120 && reader.maxY <= composer.minY
+            if !matches || firstGeometry != nil {
+                lastGeometry = self.nativeReadingGeometry(f)
+                lastGeometry["composerFrame"] = String(describing: composer)
+                if firstGeometry == nil { firstGeometry = lastGeometry }
+            }
+            return matches
+        }
+        if let firstGeometry {
+            recordReadingReadiness(["first": firstGeometry, "last": lastGeometry, "allocated": allocated],
+                name: "Sheet-native-allocation-before-GoTo")
+        }
         let readerFrame = f.web.convert(f.web.bounds, to: f.window)
         let editor = try XCTUnwrap(self.editor(in: f.host.view))
         let composerFrame = editor.convert(editor.bounds, to: f.window)
         XCTAssertGreaterThan(f.web.bounds.height, 120, "Reading detent reserves an actual unobscured reader viewport")
         XCTAssertLessThanOrEqual(readerFrame.maxY, composerFrame.minY,
             "A sheet cannot claim passage visibility while covering the reader viewport")
+        XCTAssertTrue(allocated, "Commit the actual unobscured native reader allocation before testing Go to Passage")
+        guard allocated else { return }
         f.reader.goToDiscussion("t-mobile", version: f.reader.currentDiscussionVersion)
         let revealed = await pollAsync {
             guard f.reader.discussionPassageRequest == nil, f.web.window === f.window else { return false }
@@ -261,6 +304,30 @@ import XCTest
         let navigationReady = await settledNavigation(f)
         XCTAssertTrue(navigationReady, "Establish the actual native navigation before selecting its live editor")
         let editor = try XCTUnwrap(self.visibleEditor(in: f.host.view))
+        var firstAllocation: [String:Any]?,lastAllocation: [String:Any] = [:]
+        let readingAllocated = await poll {
+            let readerFrame = f.web.convert(f.web.bounds,to:f.window)
+            let composerFrame = editor.convert(editor.bounds,to:f.window)
+            let presentation = f.web.layer.presentation().flatMap { shown in
+                f.window.layer.presentation().map { shown.convert(shown.bounds,to:$0) }
+            }
+            let matches = self.visibleEditor(in:f.host.view) === editor && !editor.isFirstResponder &&
+                f.web.bounds.height > 120 && readerFrame.maxY <= composerFrame.minY &&
+                presentation.map { abs($0.height-readerFrame.height)<1 && $0.maxY<=composerFrame.minY+1 } == true
+            if !matches || firstAllocation != nil {
+                lastAllocation = self.nativeReadingGeometry(f)
+                lastAllocation["composerFrame"] = String(describing:composerFrame)
+                lastAllocation["editorIdentity"] = String(describing:ObjectIdentifier(editor))
+                if firstAllocation == nil { firstAllocation = lastAllocation }
+            }
+            return matches
+        }
+        if let firstAllocation {
+            recordReadingReadiness(["first":firstAllocation,"last":lastAllocation,"allocated":readingAllocated],
+                name:"Typing-native-allocation-before-focus")
+        }
+        XCTAssertTrue(readingAllocated,"Establish the actual unobscured reader height before storing its baseline or focusing")
+        guard readingAllocated else { return }
         let readingHeight = f.web.bounds.height
         let keyboardObservation = MobileKeyboardFrameObservation(window: f.window)
         editor.selectedRange = NSRange(location: 5, length: 4)
@@ -341,6 +408,7 @@ import XCTest
         let paragraphs = (0..<45).map { "History paragraph \($0) stays readable." }.joined(separator: "\n\n")
         _ = try appendHistoryReply(paragraphs, id: "m-sheet-history", file: f.file, threadID: "t-mobile")
         await f.reader.refresh(); await f.reader.waitForRendering(); f.reader.openDiscussion("t-mobile")
+        try await waitForInitialHistory(f)
         let ready = await pollAsync {
             guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
             return try await history.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.body.style.fontSize!==''") as? Bool == true
@@ -348,10 +416,12 @@ import XCTest
         XCTAssertTrue(ready); guard ready else { return }
         let initial = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
         _ = try await initial.evaluateJavaScript("Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 ')).scrollIntoView({block:'start',behavior:'instant'});true")
+        var lastHistoryReadiness: [String: Any] = [:]
         let initialPosition = await pollAsync {
-            try await initial.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return scrollY>300 && Math.abs(p.getBoundingClientRect().top)<2;})()") as? Bool == true
+            try await self.historyReadingPositionHasCommitted(initial, in: f, initial: true, evidence: &lastHistoryReadiness)
         }
-        XCTAssertTrue(initialPosition)
+        XCTAssertTrue(initialPosition, "Establish the paragraph in both DOM and native viewports before hiding history: \(lastHistoryReadiness)")
+        guard initialPosition else { return }
         for width in [CGFloat(390), CGFloat(1120), CGFloat(390)] {
             f.reader.hideDiscussions()
             let hidden = await poll { self.history(in: f.host.view, excluding: f.web) == nil }
@@ -359,14 +429,18 @@ import XCTest
             f.window.frame.size.width = width
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
             f.reader.openDiscussion("t-mobile")
+            lastHistoryReadiness = ["reason": "awaiting history viewport", "requestedWidth": width]
             let restored = await pollAsync {
-                guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
-                return try await history.evaluateJavaScript("(()=>{const r=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '))?.getBoundingClientRect();return !!r && r.top>=-2 && r.top<90;})()") as? Bool == true
+                guard let history = self.history(in: f.host.view, excluding: f.web) else {
+                    lastHistoryReadiness = ["reason": "history view is not mounted", "requestedWidth": width]
+                    return false
+                }
+                return try await self.historyReadingPositionHasCommitted(history, in: f, initial: false, evidence: &lastHistoryReadiness)
             }
             if !restored, let history = self.history(in: f.host.view, excluding: f.web) {
                 let values = try await history.evaluateJavaScript("(()=>{const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));return {y:scrollY,height:innerHeight,top:p?.getBoundingClientRect().top,font:document.body.style.fontSize};})()")
                 let saved = await f.reader.discussionHistoryPosition(for: "t-mobile").restorePosition()
-                print("SHEET-HISTORY width=\(width) metrics=\(String(describing: values)) saved=\(String(describing: saved))")
+                print("SHEET-HISTORY width=\(width) metrics=\(String(describing: values)) saved=\(String(describing: saved)) readiness=\(lastHistoryReadiness)")
             }
             XCTAssertTrue(restored, "Reopening at width \(width) must restore the paragraph being read")
         }
@@ -391,6 +465,14 @@ import XCTest
     }
 
     func testCompactConversationUsesAvailableHeightAndKeepsEveryReplyAcrossRotation() async throws {
+        try await exerciseExpandedConversation(hiddenKeyboardFrame: false)
+    }
+
+    func testHiddenKeyboardFrameDoesNotConstrainAnExpandedConversation() async throws {
+        try await exerciseExpandedConversation(hiddenKeyboardFrame: true)
+    }
+
+    private func exerciseExpandedConversation(hiddenKeyboardFrame: Bool) async throws {
         let f = try await fixture(withThread: true)
         let paragraphs = (0..<35).map { "Saved history paragraph \($0)." }.joined(separator: "\n\n")
         let bytes = try appendHistoryReply(paragraphs + "\n\nLast saved message marker.",
@@ -399,15 +481,53 @@ import XCTest
         f.window.frame.size = CGSize(width: 626, height: 1194)
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
         let settled = await settledNavigation(f); XCTAssertTrue(settled)
+        if hiddenKeyboardFrame {
+            // Public keyboard frames use screen coordinates. A hidden keyboard
+            // starts below the physical screen even when a layout fixture's
+            // window extends farther down that same coordinate space.
+            let screen = f.window.screen.coordinateSpace.bounds
+            let hidden = CGRect(x: screen.minX, y: screen.maxY, width: screen.width, height: 300)
+            XCTAssertTrue(hidden.intersection(screen).isNull || hidden.intersection(screen).height == 0)
+            XCTAssertGreaterThan(f.window.convert(hidden, from: f.window.screen.coordinateSpace)
+                .intersection(f.window.bounds).height, 0, "Exercise the offscreen/window overlap")
+            for name in [UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardDidChangeFrameNotification] {
+                NotificationCenter.default.post(name: name, object: f.window.screen, userInfo: [
+                    UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: hidden),
+                    UIResponder.keyboardIsLocalUserInfoKey: true,
+                    UIResponder.keyboardAnimationDurationUserInfoKey: 0])
+            }
+        }
         f.reader.openDiscussion("t-mobile")
         f.reader.discussionSheetExpanded = true
         f.reader.discussions.setDraft("Keep this unposted reply through rotation.", for: .thread("t-mobile"))
+        try await waitForInitialHistory(f)
         let ready = await pollAsync {
             guard let history = self.history(in: f.host.view, excluding: f.web) else { return false }
             return try await history.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.body.style.fontSize!==''") as? Bool == true
         }
         XCTAssertTrue(ready); guard ready else { return }
         let history = try XCTUnwrap(self.history(in: f.host.view, excluding: f.web))
+        var firstHeight: [String:Any]?,lastHeight: [String:Any] = [:]
+        let heightAllocated = await poll {
+            let matches = self.history(in:f.host.view,excluding:f.web) === history && history.window === f.window &&
+                history.bounds.height > 350
+            if !matches || firstHeight != nil {
+                lastHeight = self.nativeReadingGeometry(f)
+                lastHeight["historyIdentity"] = String(describing:ObjectIdentifier(history))
+                lastHeight["historyBounds"] = String(describing:history.bounds)
+                lastHeight["historyFrame"] = String(describing:history.convert(history.bounds,to:f.window))
+                lastHeight["historyPresentation"] = String(describing:history.layer.presentation()?.bounds)
+                lastHeight["historyParentBounds"] = String(describing:history.superview?.bounds)
+                if firstHeight == nil { firstHeight = lastHeight }
+            }
+            return matches
+        }
+        if let firstHeight {
+            recordReadingReadiness(["first":firstHeight,"last":lastHeight,"allocated":heightAllocated],
+                name:"History-native-expanded-height-before-snapshot")
+        }
+        XCTAssertTrue(heightAllocated,"Commit the original expanded native history height before snapshot or tail scrolling")
+        guard heightAllocated else { return }
         XCTAssertGreaterThan(history.bounds.height, 350,
             "A tall portrait conversation must use its available reading space rather than a fixed 240-point viewport")
         let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
@@ -588,6 +708,7 @@ import XCTest
         f.reader.openDiscussion("t-mobile")
         let reply = "Keep this unposted reply at the chosen text size."
         f.reader.discussions.setDraft(reply, for: .thread("t-mobile"))
+        try await waitForInitialHistory(f)
         let ready = await pollAsync {
             guard let history = self.history(in: f.host.view, excluding: f.web),
                   self.editor(in: f.host.view)?.text == reply else { return false }
@@ -601,8 +722,14 @@ import XCTest
         // ScrollView. Measure its actual unclipped native viewport.
         let frame = history.convert(history.bounds, to: f.host.view)
         let available = frame.intersection(f.host.view.bounds).height
-        XCTAssertGreaterThanOrEqual(available, 140,
-            "At the largest text size, the conversation still needs room to read several lines")
+        // Native layout at 3x can allocate 419 pixels for the 420-pixel target.
+        // Keep the measurement unrounded: allow one physical pixel plus floating-point roundoff.
+        let scale = f.window.screen.scale
+        let availablePixels = available * scale
+        let targetPixels = CGFloat(140) * scale
+        let floatingRoundoff = 8 * targetPixels.ulp
+        XCTAssertGreaterThanOrEqual(availablePixels + floatingRoundoff, targetPixels - 1,
+            "At the largest text size, the conversation still needs 140 points within one physical pixel; available=\(available), scale=\(scale)")
         XCTAssertGreaterThanOrEqual(editor.font?.pointSize ?? 0, 35,
             "Making room must not shrink the user's chosen accessibility text")
         XCTAssertEqual(editor.text, reply)
@@ -628,7 +755,7 @@ import XCTest
         const rect=n=>{const r=n?.getBoundingClientRect();return r?{top:r.top,bottom:r.bottom,height:r.height}:null;};
         function observePassage(event) {
             const active=document.activeElement;
-            const row={event,time:performance.now(),samePage:window.passageDocument===document,innerWidth,innerHeight,y:scrollY,
+            const row={event,time:performance.now(),wallMS:Date.now(),samePage:window.passageDocument===document,innerWidth,innerHeight,y:scrollY,
                 clientWidth:document.documentElement.clientWidth,visualHeight:visualViewport?.height,
                 active:active?.tagName,activeQuote:active?.textContent.normalize('NFC').includes('Café bold passage.')===true,
                 activeRect:rect(active),quoteRect:rect(quote),token:document.documentElement.getAttribute('data-margined-mobile-token'),
@@ -656,30 +783,47 @@ import XCTest
             guard f.reader.discussionPassageRequest == nil else { return false }
             return try await f.web.evaluateJavaScript("window.passageDocument===document && document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<innerHeight") as? Bool == true
         }
-        // The original predicate can catch a transient successful jump while
-        // older motion continues. Observe actual completion without delaying the app.
+        // Cancellation can finish the older native motion before focus. Require
+        // its recorded end when supported, then verify the painted native viewport
+        // and every observed post-success position within the original poll budget.
         let supportsScrollEnd = try await f.web.evaluateJavaScript("window.duoPassageScrollEndSupported") as? Bool == true
-        let observedEnd: Bool
-        if supportsScrollEnd {
-            observedEnd = await pollAsync {
-                try await f.web.evaluateJavaScript("""
-                (()=>{
-                    const trace=window.duoPassageTrace??[];
-                    const visible=e=>e.active==='P' && e.activeQuote && e.quoteRect?.top>=0 && e.quoteRect.bottom<e.innerHeight;
-                    const focus=trace.find(e=>e.event==='focusin' && e.active==='P' && e.activeQuote);
-                    if(!focus)return false;
-                    const success=trace.find(e=>e.time>=focus.time && e.event==='scroll' && visible(e));
-                    const end=trace.find(e=>e.time>=focus.time && e.event==='scrollend');
-                    const r=document.activeElement.getBoundingClientRect();
-                    return !!success && !!end && r.top>=0 && r.bottom<innerHeight &&
-                        trace.filter(e=>e.time>=success.time && ['scroll','resize','scrollend'].includes(e.event)).every(visible);
-                })()
-                """) as? Bool == true
+        var nativePassageCommittedTime: Double?
+        func passageMotionIsCommitted() async throws -> Bool {
+            let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+            _ = try await f.web.takeSnapshot(configuration: configuration)
+            let metrics = try await f.web.callAsyncJavaScript("""
+            const trace=window.duoPassageTrace??[];
+            const visible=e=>e.active==='P' && e.activeQuote && e.quoteRect?.top>=0 && e.quoteRect.bottom<e.innerHeight;
+            const focus=trace.find(e=>e.event==='focusin' && e.active==='P' && e.activeQuote);
+            const success=focus && trace.find(e=>e.time>=focus.time && e.event==='scroll' && visible(e));
+            const end=!requiresEnd || trace.some(e=>e.event==='scrollend');
+            const active=document.activeElement,r=active.getBoundingClientRect();
+            const current=window.passageDocument===document && active.tagName==='P' &&
+                active.textContent.normalize('NFC').includes('Café bold passage.') && r.top>=0 && r.bottom<innerHeight;
+            return {x:scrollX,y:scrollY,sampleTime:performance.now(),continuous:!!success && end && current &&
+                (committedAfter===null || trace.filter(e=>e.time>=committedAfter && ['scroll','resize','scrollend'].includes(e.event)).every(visible))};
+            """, arguments: ["requiresEnd": supportsScrollEnd,
+                "committedAfter": nativePassageCommittedTime as Any? ?? NSNull()], in: nil, contentWorld: .page) as? [String: Any]
+            let scroll = f.web.scrollView
+            guard !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating,
+                  let x = metrics?["x"] as? Double, let y = metrics?["y"] as? Double,
+                  let sampleTime = metrics?["sampleTime"] as? Double,
+                  let presentation = scroll.layer.presentation()?.bounds else { return false }
+            let offset = scroll.contentOffset, model = scroll.bounds
+            let physicalPixel = 1 / f.window.screen.scale
+            let committed = metrics?["continuous"] as? Bool == true &&
+                abs(x - Double(offset.x)) <= 1 && abs(y - Double(offset.y)) <= 1 &&
+                abs(presentation.minX - model.minX) <= physicalPixel &&
+                abs(presentation.minY - model.minY) <= physicalPixel
+            if committed && nativePassageCommittedTime == nil {
+                // WebContent can report its target before the native layer has
+                // painted it, then echo the previous native position. Start
+                // persistence only at this first coherent painted viewport.
+                nativePassageCommittedTime = sampleTime
             }
-        } else {
-            // Older engines use the same continuous geometry observation below.
-            observedEnd = true
+            return committed
         }
+        let observedEnd = await pollAsync { try await passageMotionIsCommitted() }
         // Also inspect every frame after completion, so a transient jump's end
         // cannot hide the observed older motion resuming a few frames later.
         let remainedVisible = try await f.web.callAsyncJavaScript("""
@@ -690,7 +834,8 @@ import XCTest
         }
         return true;
         """,arguments:[:],in:nil,contentWorld:.page) as? Bool == true
-        let motionFinished = observedEnd && remainedVisible
+        let stillCommitted = try await passageMotionIsCommitted()
+        let motionFinished = observedEnd && remainedVisible && stillCommitted
         // The original predicate is frozen before failure-only evidence.
         if !passage || !motionFinished {
             try await recordDuoGeometry(f, keyboard: keyboard, phase: "goTo-compact-\(passage)")
@@ -719,11 +864,50 @@ import XCTest
         XCTAssertTrue(f.reader.filteredDiscussionThreads.isEmpty)
         _ = try await f.web.evaluateJavaScript("scrollTo(0,document.body.scrollHeight);true")
         f.reader.goToDiscussion("t-mobile", version: version)
+        func filteredPassageViewportIsCommitted() async throws -> Bool {
+            let filteredConfiguration = WKSnapshotConfiguration(); filteredConfiguration.afterScreenUpdates = true
+            _ = try await f.web.takeSnapshot(configuration: filteredConfiguration)
+            let filteredViewport = try await f.web.evaluateJavaScript("""
+            (()=>{const a=document.activeElement,r=a.getBoundingClientRect();
+            return {x:scrollX,y:scrollY,visible:window.passageDocument===document && a.tagName==='P' &&
+                a.textContent.normalize('NFC').includes('Café bold passage.') && r.top>=0 && r.bottom<innerHeight};})();
+            """) as? [String: Any]
+            let scroll = f.web.scrollView, model = scroll.bounds, shown = scroll.layer.presentation()?.bounds
+            let pixel = 1 / f.window.screen.scale
+            return filteredViewport?["visible"] as? Bool == true &&
+                !scroll.isTracking && !scroll.isDragging && !scroll.isDecelerating &&
+                abs((filteredViewport?["x"] as? Double ?? .infinity) - Double(scroll.contentOffset.x)) <= 1 &&
+                abs((filteredViewport?["y"] as? Double ?? .infinity) - Double(scroll.contentOffset.y)) <= 1 &&
+                shown.map { abs($0.minX - model.minX) <= pixel && abs($0.minY - model.minY) <= pixel } == true
+        }
         let excluded = await pollAsync {
             guard f.reader.discussionPassageRequest == nil else { return false }
-            return try await f.web.evaluateJavaScript("document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<innerHeight") as? Bool == true
+            return try await filteredPassageViewportIsCommitted()
+        }
+        let excludedRemainedVisible = try await f.web.callAsyncJavaScript("""
+        for(let frame=0;frame<12;frame++) {
+            await new Promise(resolve=>requestAnimationFrame(resolve));
+            const a=document.activeElement,r=a.getBoundingClientRect();
+            if(window.passageDocument!==document || a.tagName!=='P' || !a.textContent.normalize('NFC').includes('Café bold passage.') || r.top<0 || r.bottom>=innerHeight)return false;
+        }
+        return true;
+        """,arguments:[:],in:nil,contentWorld:.page) as? Bool == true
+        let filteredViewportCommitted = try await filteredPassageViewportIsCommitted()
+        if !excluded || !excludedRemainedVisible || !filteredViewportCommitted {
+            try await recordDuoGeometry(f, keyboard: keyboard, phase: "goTo-filter-after-original-failure")
+            let trace = try await f.web.evaluateJavaScript("if(typeof observePassage==='function')observePassage('afterFilterOriginalPredicate');({samePage:window.passageDocument===document,trace:window.duoPassageTrace??null})")
+            let state = try await f.web.callAsyncJavaScript("""
+            const s=window.__marginedDiscussions;
+            return {token:s?.token,sourceID:s?.sourceID,selected:s?.layout?.selected,
+                ranges:s?.layout?.ranges.map(i=>({id:i.id,rects:Array.from(i.range.getClientRects()).map(r=>({top:r.top,bottom:r.bottom,height:r.height}))}))};
+            """, arguments:[:],in:nil,contentWorld:MobileWebView.Coordinator.discussionWorld)
+            let data = try JSONSerialization.data(withJSONObject:["page":trace ?? NSNull(),"discussion":state ?? NSNull(),
+                "request":String(describing:f.reader.discussionPassageRequest),"native":nativeReadingGeometry(f)],options:[.sortedKeys])
+            print("GOTO-FILTER-TRACE " + String(decoding:data,as:UTF8.self))
         }
         XCTAssertTrue(excluded, "A retained reply outside the filter still needs a passage route")
+        XCTAssertTrue(excludedRemainedVisible, "Older motion must not resume after the filtered passage is revealed")
+        XCTAssertTrue(filteredViewportCommitted, "The filtered passage must finish in the actual painted native viewport")
         XCTAssertEqual(f.reader.discussions.filter, .resolved)
         XCTAssertNil(f.reader.discussionPassageRequest)
 
@@ -754,6 +938,7 @@ import XCTest
             XCTAssertEqual(f.reader.discussionUsesMargin, width == 1120)
             f.reader.openDiscussion("t-mobile")
             f.reader.discussions.setDraft(draft, for: key)
+            if width == 1120 { try await waitForInitialHistory(f) }
             let initial = await pollAsync {
                 guard let web = self.history(in: f.host.view, excluding: f.web) else { return false }
                 return try await web.evaluateJavaScript("document.querySelector('article[data-message-id=m-mobile]')?.textContent.includes('A portable note.')===true") as? Bool == true
@@ -927,12 +1112,26 @@ import XCTest
         let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+        return try recognizedBounds(text, in: XCTUnwrap(image.cgImage), size: window.bounds.size)
+    }
+
+    private func recognizedBounds(_ text: String, in image: CGImage, size: CGSize) throws -> CGRect? {
         let request = VNRecognizeTextRequest(); request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
-        try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage)).perform([request])
-        guard let found = request.results?.first(where: { $0.topCandidates(1).first?.string == text }) else { return nil }
-        let box = found.boundingBox
-        return CGRect(x: box.minX * window.bounds.width, y: (1 - box.maxY) * window.bounds.height,
-            width: box.width * window.bounds.width, height: box.height * window.bounds.height)
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        for observation in request.results ?? [] {
+            guard let candidate = observation.topCandidates(1).first else { continue }
+            // Vision may group neighboring controls in one text row. Match an
+            // exact word and retain its glyph bounds for the clipping checks.
+            var wordRange: Range<String.Index>?
+            candidate.string.enumerateSubstrings(in: candidate.string.startIndex..<candidate.string.endIndex, options: .byWords) { word, range, _, stop in
+                if word == text { wordRange = range; stop = true }
+            }
+            guard let wordRange, let box = try candidate.boundingBox(for: wordRange)?.boundingBox else { continue }
+            return CGRect(x: box.minX * size.width, y: (1 - box.maxY) * size.height,
+                width: box.width * size.width, height: box.height * size.height)
+        }
+        print("WORD-BOUNDS-OCR-MISS target=\(String(reflecting: text)) observations=\((request.results ?? []).compactMap { $0.topCandidates(1).first?.string })")
+        return nil
     }
 
     private func recognizedText(in window: UIWindow) throws -> String {
@@ -950,6 +1149,7 @@ import XCTest
         _ = try await f.web.evaluateJavaScript("window.panelReadingPage=document;true")
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("Keep this reply while switching panels.", for: .thread("t-mobile"))
+        try await waitForInitialHistory(f)
         for size in [CGSize(width: 1194, height: 834), CGSize(width: 834, height: 1194),
                      CGSize(width: 1376, height: 1032), CGSize(width: 1032, height: 1376)] {
             f.window.frame.size = size
@@ -957,6 +1157,9 @@ import XCTest
             let discussionSettled = await settledNavigation(f)
             XCTAssertTrue(discussionSettled, "Discussion layout must settle at \(size)")
             guard discussionSettled else { return }
+            let allocated = await settledReadingAllocation(f, evidenceName: "Adaptive-panel-native-width-allocation")
+            XCTAssertTrue(allocated, "Establish the actual reader frame before capturing its panel-width baseline")
+            guard allocated else { return }
             let docked = f.reader.discussionUsesMargin
             if size.width == 834 {
                 XCTAssertFalse(docked, "11-inch portrait keeps readable document width")
@@ -1122,6 +1325,16 @@ import XCTest
     }
 
     func testLiveWindowResizingKeepsTheOpenReplyAndDocumentIdentity() async throws {
+        try await exerciseLiveReadingResize(holdReturn: false)
+    }
+
+    #if DEBUG
+    func testReturningReaderRestoresItsPassageAfterTheNativeViewportCommits() async throws {
+        try await exerciseLiveReadingResize(holdReturn: true)
+    }
+    #endif
+
+    private func exerciseLiveReadingResize(holdReturn: Bool) async throws {
         let paragraphs = (0..<100).map { "Paragraph \($0) keeps the document long enough to test its reading position while an unfinished reply moves between compact navigation and the margin." }.joined(separator: "\n\n")
         let f = try await fixture(withThread: true, tail: "\n\n" + paragraphs)
         let context = f.reader.documentGeneration
@@ -1140,9 +1353,14 @@ import XCTest
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         try await settleMobileResizeObserver(f.web)
-        let seed = try await resizeReadingMetrics(f.web)
+        var seed: [String: Any] = [:], seedEvidence: [String: Any] = [:]
+        let seedReady = await pollAsync {
+            try await self.resizeSeedHasCommitted(f, metrics: &seed, evidence: &seedEvidence)
+        }
+        XCTAssertTrue(seedReady, "Establish the native reading position before opening its conversation: \(seedEvidence)")
         XCTAssertEqual(seed["visible"] as? Bool, true, "Establish the actual passage before opening its conversation")
         XCTAssertGreaterThan(seed["scroll"] as? Double ?? 0, 0)
+        guard seedReady else { return }
         f.reader.openDiscussion("t-mobile")
         f.reader.discussions.setDraft("An unfinished reply across both displays.", for: .thread("t-mobile"))
         let initial = await poll { self.visibleEditor(in: f.host.view)?.text == "An unfinished reply across both displays." }
@@ -1151,6 +1369,10 @@ import XCTest
         // Safe areas and vertical system bars can make the same outer size use
         // different layouts; require retained state and exercise both modes.
         var sawMargin = false, sawCompact = false
+        let configuration = WKSnapshotConfiguration()
+        configuration.afterScreenUpdates = true
+        var beforeHide: [String: Any] = [:]
+        var lastStagePaint: UIImage?
         for size in [CGSize(width: 890, height: 626), CGSize(width: 626, height: 890),
                      CGSize(width: 466, height: 678), CGSize(width: 1_120, height: 780),
                      CGSize(width: 890, height: 626)] {
@@ -1163,15 +1385,26 @@ import XCTest
             let nativeSettled = await settledNavigation(f)
             XCTAssertTrue(nativeSettled, "The actual native top controller must finish resizing before assessing the layout")
             let widthCommitted = await pollAsync {
-                let width = try await f.web.evaluateJavaScript("innerWidth") as? Double
-                return width.map { abs($0 - f.web.bounds.width) < 1 } == true
+                try await self.readingWidthHasCommitted(f)
             }
             XCTAssertTrue(widthCommitted, "Commit the actual native reader width before its next resize")
             try await settleMobileResizeObserver(f.web)
+            // Each next resize starts from the requested, displayed pane, not
+            // merely two layers that still agree on the previous width.
+            lastStagePaint = try await f.web.takeSnapshot(configuration: configuration)
+            var stage: [String: Any] = [:]
             let passageSettled = await pollAsync {
-                try await self.resizeReadingMetrics(f.web)["visible"] as? Bool == true
+                stage = try await self.resizeReadingMetrics(f.web)
+                guard stage["visible"] as? Bool == true, let y = stage["scroll"] as? Double,
+                      let width = stage["width"] as? Double else { return false }
+                return self.readingWidthMatchesRequested(f, cssWidth: width) &&
+                    abs(y - Double(f.web.scrollView.contentOffset.y)) <= 1
             }
             XCTAssertTrue(passageSettled, "The reading passage must be visible before the next intentional resize or hide")
+            beforeHide = ["window": String(describing: size), "dom": stage,
+                "readerBounds": String(describing: f.web.bounds), "nativeOffset": String(describing: f.web.scrollView.contentOffset),
+                "nativePresentation": String(describing: f.web.scrollView.layer.presentation()?.bounds),
+                "expectedWidth": requestedReadingWidth(f) as Any? ?? NSNull()]
             sawMargin = sawMargin || f.reader.discussionUsesMargin
             sawCompact = sawCompact || !f.reader.discussionUsesMargin
             XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"))
@@ -1179,6 +1412,11 @@ import XCTest
             XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "An unfinished reply across both displays.")
         }
         XCTAssertTrue(sawMargin && sawCompact, "The test must actually move the reply between native navigation and the margin")
+        #if DEBUG
+        let owner = try XCTUnwrap((f.web.navigationDelegate as? MobileWebView.Coordinator)?.nativeResizeOwner)
+        let offsetBeforeHide = f.web.scrollView.contentOffset
+        if holdReturn { owner.debugHoldNextReadyRestore = true }
+        #endif
         f.reader.hideDiscussions()
         let visible = await poll { self.webView(in: f.host.view) === f.web }
         XCTAssertTrue(visible)
@@ -1187,12 +1425,150 @@ import XCTest
         XCTAssertEqual(samePage, true, "Resizing must retain the mounted document instead of reloading it")
         let returned = await settledNavigation(f)
         XCTAssertTrue(returned, "Return must finish the native pop and display the retained reading page")
+        let widthReturned = await pollAsync { try await self.readingWidthHasCommitted(f) }
+        XCTAssertTrue(widthReturned, "Hiding the conversation must commit the full native reader allocation")
         // An unattached page cannot complete requestAnimationFrame. Preserve the
         // failed assertions above without hanging before XCTest can report them.
-        guard visible, returned else { return }
-        let reading = try await resizeReadingMetrics(f.web)
+        guard visible, returned, widthReturned else { return }
+        #if DEBUG
+        if holdReturn {
+            let held = await poll { owner.debugHeldRestoreIsCurrent }
+            XCTAssertTrue(held, "Hold a real current destination after the requested viewport has committed")
+            guard held else { return }
+            XCTAssertTrue(readingWidthMatchesRequested(f))
+            XCTAssertEqual(f.web.scrollView.contentOffset.y, offsetBeforeHide.y, accuracy: 1,
+                "The width must commit before this controlled position delivery")
+            let accepted = owner.debugAcceptedRestoreTokens.count
+            owner.debugDeliverHeldRestore()
+            XCTAssertEqual(owner.debugAcceptedRestoreTokens.count, accepted + 1,
+                "The current controlled delivery must perform an actual native restore")
+            XCTAssertGreaterThan(abs(f.web.scrollView.contentOffset.y - offsetBeforeHide.y), 100,
+                "The fixture must require a genuine reading-position correction")
+        }
+        #endif
+        // Viewport allocation and semantic restoration are separate asynchronous
+        // results. Wait for the actual retained passage and native presentation.
+        var reading: [String: Any] = [:], returnEvidence: [String: Any] = [:]
+        var firstReturnEvidence: [String: Any]?
+        let positionReturned = await pollAsync {
+            let ready = try await self.resizeSeedHasCommitted(f, metrics: &reading, evidence: &returnEvidence)
+            let requested = (reading["width"] as? Double).map { self.readingWidthMatchesRequested(f, cssWidth: $0) } == true
+            if (!ready || !requested) && firstReturnEvidence == nil { firstReturnEvidence = returnEvidence }
+            return ready && requested
+        }
+        if let firstReturnEvidence {
+            recordReadingReadiness(["first": firstReturnEvidence, "last": returnEvidence, "committed": positionReturned],
+                name: "Return-native-reading-convergence")
+        }
+        XCTAssertTrue(positionReturned, "Commit the retained native/model/presentation passage after hiding: \(returnEvidence)")
+        let image = try await f.web.takeSnapshot(configuration: configuration)
+        reading = try await resizeReadingMetrics(f.web)
+        let nativeY = Double(f.web.scrollView.contentOffset.y)
+        let domY = try XCTUnwrap(reading["scroll"] as? Double)
+        let finalWidth = try XCTUnwrap(reading["width"] as? Double)
+        let finalWidthMatches = readingWidthMatchesRequested(f, cssWidth: finalWidth)
+        if reading["visible"] as? Bool != true || abs(domY - nativeY) > 1 || !finalWidthMatches {
+            if let lastStagePaint {
+                let before = XCTAttachment(image: lastStagePaint)
+                before.name = "Last-resize-stage-paint-before-visibility-poll"
+                before.lifetime = .keepAlways; add(before)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "Resize-return-reading-position"
+            attachment.lifetime = .keepAlways; add(attachment)
+        }
+        XCTAssertTrue(finalWidthMatches, "The final reading sample must describe the requested full reader allocation")
+        XCTAssertEqual(domY, nativeY, accuracy: 1, "DOM and native viewport must describe the same painted reading position")
         XCTAssertEqual(reading["visible"] as? Bool, true,
-                       "Returning from a compact conversation must retain the passage being read")
+                       "Returning from a compact conversation must retain the passage being read: before Hide \(beforeHide), after \(reading), native bounds \(f.web.bounds), offset \(f.web.scrollView.contentOffset)")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+
+    func testReadingResizeRetainsPassageWhenWindowDimensionsLagTheLayout() async throws {
+        let paragraphs = (0..<100).map { "Paragraph \($0) keeps the document long enough to test its reading position while an unfinished reply moves between compact navigation and the margin." }.joined(separator: "\n\n")
+        let f = try await fixture(withThread: true, tail: "\n\n" + paragraphs)
+        f.window.frame.size = CGSize(width: 890, height: 626)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let wide = await settledNavigation(f)
+        XCTAssertTrue(wide)
+        f.reader.openDiscussion("t-mobile")
+        f.reader.discussions.setDraft("Keep the passage when closing this reply.", for: .thread("t-mobile"))
+        let composer = await poll { self.visibleEditor(in: f.host.view)?.text == "Keep the passage when closing this reply." }
+        XCTAssertTrue(composer)
+        let settled = await settledNavigation(f)
+        let committed = await pollAsync { try await self.readingWidthHasCommitted(f) }
+        XCTAssertTrue(settled && committed && f.reader.discussionUsesMargin)
+        guard settled, committed, f.reader.discussionUsesMargin else { return }
+        let observing = await pollAsync {
+            try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool == true
+        }
+        XCTAssertTrue(observing)
+        // Establish the displayed discussion pane before the test's explicit
+        // reading jump; opening it also changes the reader's native allocation.
+        let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+        _ = try await f.web.takeSnapshot(configuration: configuration)
+        try await settleMobileResizeObserver(f.web)
+        _ = try await f.web.callAsyncJavaScript("""
+        await document.fonts.ready;
+        window.mobileResizePage=document;
+        const passage=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 35 '));
+        passage.id='resize-reading-passage';
+        passage.scrollIntoView({block:'start',behavior:'instant'});
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        try await settleMobileResizeObserver(f.web)
+        var initialReading: [String: Any] = [:], seedEvidence: [String: Any] = [:]
+        let seedReady = await pollAsync {
+            try await self.resizeSeedHasCommitted(f, metrics: &initialReading, evidence: &seedEvidence)
+        }
+        XCTAssertTrue(seedReady, "Establish the native reading position before changing its allocation: \(seedEvidence)")
+        XCTAssertEqual(initialReading["visible"] as? Bool, true)
+        guard seedReady, initialReading["visible"] as? Bool == true else { return }
+        // Reproduce the captured WKWebView ordering: the resize event retains
+        // the previous window dimensions while the actual layout widens. Only
+        // the app's isolated world sees these stale values; layout stays real.
+        _ = try await f.web.callAsyncJavaScript("""
+        window.marginedTestWindowSize={};
+        for(const name of ['innerWidth','innerHeight']) {
+            window.marginedTestWindowSize[name]=Object.getOwnPropertyDescriptor(window,name) ?? null;
+            Object.defineProperty(window,name,{configurable:true,value:window[name]});
+        }
+        return true;
+        """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        addTeardownBlock { @MainActor in
+            _ = try? await f.web.callAsyncJavaScript("""
+            for(const [name,descriptor] of Object.entries(window.marginedTestWindowSize ?? {})) {
+                if(descriptor)Object.defineProperty(window,name,descriptor);else delete window[name];
+            }
+            delete window.marginedTestWindowSize;return true;
+            """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        }
+        f.reader.hideDiscussions()
+        let returned = await settledNavigation(f)
+        let width = await pollAsync { try await self.readingWidthHasCommitted(f) }
+        XCTAssertTrue(returned && width)
+        guard returned, width else { return }
+        _ = try await f.web.takeSnapshot(configuration: configuration)
+        var reading: [String: Any] = [:], finalEvidence: [String: Any] = [:]
+        var firstEvidence: [String: Any]?
+        let positionCommitted = await pollAsync {
+            let ready = try await self.resizeSeedHasCommitted(f, metrics: &reading, evidence: &finalEvidence)
+            if !ready || firstEvidence != nil {
+                finalEvidence["nativeGeometry"] = self.nativeReadingGeometry(f)
+                if firstEvidence == nil { firstEvidence = finalEvidence }
+            }
+            return ready
+        }
+        if let firstEvidence {
+            recordReadingReadiness(["first": firstEvidence, "last": finalEvidence, "committed": positionCommitted],
+                name: "Lagging-window-native-reading-convergence")
+        }
+        XCTAssertTrue(positionCommitted, "Commit the same native/model/presentation reading passage after the single layout change: \(finalEvidence)")
+        XCTAssertEqual(reading["visible"] as? Bool, true,
+                       "Committed layout must restore the passage even when window dimensions stay stale: \(reading)")
+        XCTAssertEqual(reading["samePage"] as? Bool, true)
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
@@ -1236,6 +1612,9 @@ import XCTest
             XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"), "Resizing must keep the selected conversation")
             XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body,
                            "Keep this reply through the threshold transition.")
+            let allocated = await settledReadingAllocation(f, evidenceName: "Threshold-native-width-allocation")
+            XCTAssertTrue(allocated, "Commit the requested native reader frame before its threshold-width check")
+            guard settled, allocated else { return }
             if f.reader.discussionUsesMargin {
                 let minimum = DiscussionMarginLayout.minimumDocumentWidth(
                     bodyFont: f.reader.discussionMargin?.bodyFont ?? 16 * f.reader.zoom,
@@ -1297,10 +1676,15 @@ import XCTest
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         try await settleMobileResizeObserver(f.web)
-        let initial = try await resizeReadingMetrics(f.web)
+        var initial: [String: Any] = [:], seedEvidence: [String: Any] = [:]
+        let seedReady = await pollAsync {
+            try await self.resizeSeedHasCommitted(f, metrics: &initial, evidence: &seedEvidence)
+        }
+        XCTAssertTrue(seedReady, "Establish the native reading position before the first resize: \(seedEvidence)")
         XCTAssertGreaterThan(try XCTUnwrap(initial["scroll"] as? Double), 0,
                              "The fixture must actually be partway through its rendered document")
         XCTAssertEqual(initial["visible"] as? Bool, true)
+        guard seedReady else { return }
         for size in [CGSize(width: 890, height: 626), CGSize(width: 626, height: 890), CGSize(width: 466, height: 678)] {
             f.window.frame.size = size
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
@@ -1327,53 +1711,173 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
 
-    func testOldResizeObserverCannotScrollANewerDocumentVersion() async throws {
-        let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to wrap onto several lines when the native window changes width." }.joined(separator: "\n\n")
+    func testResizePreservesPassageAfterEmulatedStaleDOMFeedback() async throws {
+        let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to reflow between native reading-pane widths while retaining its semantic passage." }.joined(separator: "\n\n")
         let f = try await fixture(tail: "\n\n" + paragraphs)
+        let observing = await pollAsync {
+            try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool == true
+        }
+        XCTAssertTrue(observing)
+        guard observing else { return }
         _ = try await f.web.callAsyncJavaScript("""
         await document.fonts.ready;
+        window.mobileResizePage=document;
         const passage=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 35 '));
+        passage.id='resize-reading-passage';
         passage.scrollIntoView({block:'start',behavior:'instant'});
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
         return true;
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
-        let observer = try await f.web.callAsyncJavaScript("return typeof window.marginedReadingResize?.stop==='function';",
-            arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Bool
-        XCTAssertEqual(observer, true, "The actual app observer must be installed before testing stale work")
-        // Observe app-issued scrolling in its actual isolated world. First prove
-        // the observer acts while current, then require silence after supersession.
-        _ = try await f.web.callAsyncJavaScript("""
-        window.resizeScrollCalls=0;
-        const original=window.scrollTo;
-        window.scrollTo=function(...args) {
-            window.resizeScrollCalls++;
-            return Reflect.apply(original,this,args);
+        var seed: [String: Any] = [:], evidence: [String: Any] = [:]
+        let seeded = await pollAsync { try await self.resizeSeedHasCommitted(f, metrics: &seed, evidence: &evidence) }
+        XCTAssertTrue(seeded, "Establish native P35 before emulating feedback: \(evidence)")
+        guard seeded else { return }
+        let native = f.web.scrollView.contentOffset
+        XCTAssertGreaterThan(native.y, 300)
+        addTeardownBlock { @MainActor in
+            _ = try? await f.web.callAsyncJavaScript("window.__nativeFeedbackFixture?.restore();return true;",
+                arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        }
+        let emulation = try await f.web.callAsyncJavaScript("""
+        // Replay the captured relationship only in the app's isolated world.
+        // Native scrolling and default-world outcome measurements stay real.
+        const root=document.documentElement,main=document.getElementById('document');
+        const width=root.clientWidth,height=root.clientHeight;
+        const scrollDescriptor=Object.getOwnPropertyDescriptor(window,'scrollY');
+        if(scrollDescriptor && !scrollDescriptor.configurable)return {supported:false};
+        const rect=Element.prototype.getBoundingClientRect;
+        const point=document.elementFromPoint;
+        const pointDescriptor=Object.getOwnPropertyDescriptor(document,'elementFromPoint');
+        const active=()=>root.clientWidth===width && root.clientHeight===height;
+        const restore=()=>{
+            if(scrollDescriptor)Object.defineProperty(window,'scrollY',scrollDescriptor);else delete window.scrollY;
+            Element.prototype.getBoundingClientRect=rect;
+            if(pointDescriptor)Object.defineProperty(document,'elementFromPoint',pointDescriptor);else delete document.elementFromPoint;
+            delete window.__nativeFeedbackFixture;
         };
-        return true;
-        """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
-        f.window.frame.size = CGSize(width: 520, height: 780)
-        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
-        _ = try await f.web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;",
-            arguments: [:], in: nil, contentWorld: .defaultClient)
-        let active = try await f.web.callAsyncJavaScript("const count=window.resizeScrollCalls;window.resizeScrollCalls=0;return count;",
-            arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? Int
-        XCTAssertGreaterThan(try XCTUnwrap(active), 0, "The native resize must exercise a live observer, not a vacuous spy")
-        _ = try await f.web.evaluateJavaScript("document.documentElement.setAttribute('data-margined-mobile-token','superseded-page-version');true")
+        window.__nativeFeedbackFixture={restore};
+        Object.defineProperty(window,'scrollY',{configurable:true,get:()=>active()?fakeY:window.pageYOffset});
+        Element.prototype.getBoundingClientRect=function(){
+            const r=rect.call(this);
+            return active() && main.contains(this) ? new DOMRect(r.x,r.y+window.pageYOffset-fakeY,r.width,r.height) : r;
+        };
+        document.elementFromPoint=function(x,y){
+            if(!active())return point.call(this,x,y);
+            return Array.from(main.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,pre,tr,dt,dd,figure')).find(node=>{
+                const r=node.getBoundingClientRect();return r.left<=x && x<r.right && r.top<=y && y<r.bottom;
+            })??null;
+        };
+        window.dispatchEvent(new Event('resize'));
+        window.dispatchEvent(new Event('scroll'));
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        const p=document.getElementById('resize-reading-passage').getBoundingClientRect();
+        return {supported:true,domY:scrollY,nativeY,markedVisible:p.bottom>0&&p.top<height,width,height};
+        """, arguments: ["fakeY": Double(native.y) / 2, "nativeY": Double(native.y)],
+            in: nil, contentWorld: MobileWebView.Coordinator.contentWorld) as? [String: Any]
+        XCTAssertEqual(emulation?["supported"] as? Bool, true, "The fixture must actually replace isolated-world feedback")
+        guard emulation?["supported"] as? Bool == true else { return }
+        XCTAssertEqual(f.web.scrollView.contentOffset.y, native.y, accuracy: 1, "Feedback emulation must not move the native viewport")
+        XCTAssertEqual(emulation?["markedVisible"] as? Bool, false, "The emulated DOM viewport must describe a different passage")
+        print("EMULATED-NATIVE-FEEDBACK \(emulation ?? [:])")
+        print("EMULATED-NATIVE-FEEDBACK-PROCESS \(ProcessInfo.processInfo.processIdentifier)")
         f.window.frame.size = CGSize(width: 890, height: 626)
         f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
-        let committed = await pollAsync {
-            let width = try await f.web.evaluateJavaScript("innerWidth") as? Double
-            return width.map { abs($0 - f.web.bounds.width) < 1 } == true
+        let reflowed = await pollAsync {
+            guard abs(Double(f.web.bounds.width) - (seed["width"] as? Double ?? 0)) > 100 else { return false }
+            return try await self.readingWidthHasCommitted(f)
         }
-        XCTAssertTrue(committed)
-        let callsValue = try await f.web.callAsyncJavaScript("""
-        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-        return window.resizeScrollCalls;
-        """, arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
-        XCTAssertEqual(try XCTUnwrap(callsValue as? Int), 0,
-                       "A superseded observer must leave scrolling to the new document version")
+        XCTAssertTrue(reflowed, "The test must commit a genuinely different native reading width")
+        guard reflowed else { return }
+        var after: [String: Any] = [:], finalEvidence: [String: Any] = [:]
+        let retained = await pollAsync { try await self.resizeSeedHasCommitted(f, metrics: &after, evidence: &finalEvidence) }
+        XCTAssertTrue(retained, "Emulated stale DOM feedback must not replace native P35 during reflow: \(finalEvidence)")
+        XCTAssertEqual(after["samePage"] as? Bool, true)
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
     }
+
+    #if DEBUG
+    func testOldResizeReplyCannotScrollANewerDocumentVersion() async throws {
+        let paragraphs = (0..<100).map { "Paragraph \($0) has enough words to wrap onto several lines when the native window changes width." }.joined(separator: "\n\n")
+        let f = try await fixture(tail: "\n\n" + paragraphs)
+        try await assertNativeResizeLifetime(f, paragraphs: paragraphs)
+    }
+
+
+    private func assertNativeResizeLifetime(_ f: Fixture, paragraphs: String) async throws {
+        let coordinator = try XCTUnwrap(f.web.navigationDelegate as? MobileWebView.Coordinator)
+        let owner = try XCTUnwrap(coordinator.nativeResizeOwner)
+        let oldGeneration = f.reader.documentGeneration
+        let oldTokenValue = try await f.web.evaluateJavaScript("document.documentElement.getAttribute('data-margined-mobile-token')") as? String
+        let oldToken = try XCTUnwrap(oldTokenValue)
+        _ = try await f.web.callAsyncJavaScript("""
+        await document.fonts.ready;
+        const p=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 35 '));
+        p.id='resize-reading-passage'; window.mobileResizePage=document;
+        p.scrollIntoView({block:'start',behavior:'instant'}); return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        var metrics: [String: Any] = [:], evidence: [String: Any] = [:]
+        let seed = await pollAsync {
+            guard owner.debugReadyForResize else { return false }
+            return try await self.resizeSeedHasCommitted(f, metrics: &metrics, evidence: &evidence)
+        }
+        XCTAssertTrue(seed, "Establish the actual native reading seed and finish initial app intents: \(evidence)")
+        guard seed else { return }
+        owner.debugHoldNextReadyRestore = true
+        f.window.frame.size = CGSize(width: 520, height: 780)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let positiveReply = await poll { owner.debugHasHeldReadyRestore }
+        XCTAssertTrue(positiveReply, "Hold a real computed destination only after its native geometry is ready")
+        guard positiveReply else { return }
+        XCTAssertEqual(owner.debugHeldRestoreDocumentToken, oldToken)
+        let before = owner.debugAcceptedRestoreTokens.filter { $0 == oldToken }.count
+        owner.debugDeliverHeldRestore()
+        let positiveWrite = await poll { owner.debugAcceptedRestoreTokens.filter { $0 == oldToken }.count > before }
+        XCTAssertTrue(positiveWrite, "The same held-reply path must perform a real accepted native restore while current")
+        let positiveReading = await pollAsync { try await self.resizeSeedHasCommitted(f, metrics: &metrics, evidence: &evidence) }
+        XCTAssertTrue(positiveReading, "The positive control must preserve the actual displayed passage: \(evidence)")
+        guard positiveWrite, positiveReading else { return }
+        owner.debugHoldNextReadyRestore = true
+        f.window.frame.size = CGSize(width: 890, height: 626)
+        f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
+        let staleReply = await poll { owner.debugHasHeldReadyRestore }
+        XCTAssertTrue(staleReply)
+        guard staleReply else { return }
+        XCTAssertEqual(owner.debugHeldRestoreDocumentToken, oldToken)
+        var preview = try XCTUnwrap(URLComponents(string: "margined://preview"))
+        preview.queryItems = [.init(name: "text", value: "# Replacement\n\n" + paragraphs)]
+        await f.reader.openPreview(url: try XCTUnwrap(preview.url)); await f.reader.waitForRendering()
+        XCTAssertNotEqual(f.reader.documentGeneration, oldGeneration, "Exercise real native document replacement")
+        let loaded = await WebKitTestReadiness.navigation({ self.webView(in: f.host.view) }, expectedURL: URL(string: "about:blank"))
+        let replacement = try XCTUnwrap(loaded)
+        let newContent = await pollAsync {
+            try await replacement.evaluateJavaScript("document.querySelector('main h1')?.textContent==='Replacement'") as? Bool == true
+        }
+        XCTAssertTrue(newContent)
+        guard newContent else { return }
+        _ = try await replacement.callAsyncJavaScript("""
+        await document.fonts.ready;
+        const p=Array.from(document.querySelectorAll('main p')).find(p=>p.textContent.startsWith('Paragraph 17 '));
+        p.id='resize-reading-passage'; window.mobileResizePage=document;
+        p.scrollIntoView({block:'start',behavior:'instant'}); return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        let next = Fixture(reader: f.reader, file: f.file, original: f.original, window: f.window, host: f.host, web: replacement)
+        let replacementReading = await pollAsync { try await self.resizeSeedHasCommitted(next, metrics: &metrics, evidence: &evidence) }
+        XCTAssertTrue(replacementReading, "Establish the new document's actual native passage before delivering the old reply: \(evidence)")
+        guard replacementReading else { return }
+        XCTAssertTrue(owner.debugHasHeldReadyRestore, "The negative control must actually retain a reply to deliver")
+        XCTAssertEqual(owner.debugHeldRestoreDocumentToken, oldToken)
+        let oldWrites = owner.debugAcceptedRestoreTokens.filter { $0 == oldToken }.count
+        owner.debugDeliverHeldRestore()
+        _ = try await replacement.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;",
+            arguments: [:], in: nil, contentWorld: .defaultClient)
+        XCTAssertEqual(owner.debugAcceptedRestoreTokens.filter { $0 == oldToken }.count, oldWrites,
+            "A computed reply for the old native document must never issue a later setter")
+        let retained = try await resizeSeedHasCommitted(next, metrics: &metrics, evidence: &evidence)
+        XCTAssertTrue(retained, "The old native reply must leave the replacement passage intact: \(evidence)")
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+    #endif
 
     func testChangeReviewUsesAvailableSpaceRatherThanRegularWidthAlone() async throws {
         let f = try await fixture()
@@ -1427,6 +1931,12 @@ import XCTest
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
             let settled = await settledNavigation(f)
             XCTAssertTrue(settled)
+            guard settled else { return }
+            // Navigation and the docking decision can precede the retained
+            // reader's asynchronous frame commit. Measure its actual allocation.
+            let allocated = await settledReadingAllocation(f, evidenceName: "Margin-native-width-allocation")
+            XCTAssertTrue(allocated, "Commit the actual requested reader width before measuring its readable margin")
+            guard allocated else { return }
             if f.reader.discussionUsesMargin {
                 sawMargin = true
                 let minimum = DiscussionMarginLayout.minimumDocumentWidth(
@@ -1434,6 +1944,7 @@ import XCTest
                     horizontalInsets: f.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
                 XCTAssertGreaterThanOrEqual(f.web.bounds.width, minimum - 1,
                     "A discussion margin must leave a readable document after the system's vertical bars")
+
             }
         }
         XCTAssertTrue(sawMargin, "The test must exercise a real wide discussion margin")
@@ -1517,15 +2028,120 @@ import XCTest
             arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
     }
 
+    /// Evidence only: retain model/presentation and clipping geometry at the
+    /// first mismatch and convergence. This helper never lays out or scrolls.
+    private func nativeReadingGeometry(_ fixture: Fixture) -> [String: Any] {
+        let scroll = fixture.web.scrollView
+        var ancestors: [[String: Any]] = [], current: UIView? = fixture.web
+        while let view = current {
+            var item: [String: Any] = ["identity":String(describing:ObjectIdentifier(view)),"bounds": String(describing: view.bounds),
+                "frameInWindow": String(describing: view.convert(view.bounds, to: fixture.window)),
+                "clips": view.clipsToBounds, "hidden": view.isHidden, "alpha": view.alpha]
+            if let shown = view.layer.presentation(), let window = fixture.window.layer.presentation() {
+                item["presentationInWindow"] = String(describing: shown.convert(shown.bounds, to: window))
+            }
+            ancestors.append(item)
+            current = view.superview
+        }
+        let content = scroll.subviews.filter {
+            !$0.isHidden && $0.alpha > 0.01 && abs($0.bounds.width-scroll.contentSize.width)<=1 &&
+                abs($0.bounds.height-scroll.contentSize.height)<=1
+        }.map { view -> [String: Any] in
+            var item: [String: Any] = ["bounds": String(describing: view.bounds),
+                "modelIdentity": NativeReadingLayerMapping.isIdentity(view.layer, to: scroll.layer)]
+            if let shown = view.layer.presentation(), let parent = scroll.layer.presentation() {
+                item["presentationBounds"] = String(describing: shown.bounds)
+                item["presentationIdentity"] = NativeReadingLayerMapping.isIdentity(shown, to: parent)
+            }
+            return item
+        }
+        return ["time": CACurrentMediaTime(),"windowBounds":String(describing:fixture.window.bounds),
+            "hostBounds":String(describing:fixture.host.view.bounds),"webIdentity":String(describing:ObjectIdentifier(fixture.web)),
+            "offset": String(describing: scroll.contentOffset),
+            "scrollBounds": String(describing: scroll.bounds),
+            "scrollPresentation": String(describing: scroll.layer.presentation()?.bounds),
+            "contentSize": String(describing: scroll.contentSize), "content": content, "ancestors": ancestors]
+    }
+
+    private func recordReadingReadiness(_ evidence: [String: Any], name: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: evidence, options: [.sortedKeys]) else { return }
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
+    private func requestedReadingWidth(_ fixture: Fixture) -> Double? {
+        func navigation(_ controller: UIViewController) -> UINavigationController? {
+            if let value = controller as? UINavigationController { return value }
+            return controller.children.lazy.compactMap { navigation($0) }.first
+        }
+        guard let top = navigation(fixture.host)?.topViewController?.viewIfLoaded,
+              top.bounds.size == fixture.window.bounds.size else { return nil }
+        let panel = fixture.reader.inspector == .discussions && fixture.reader.discussionUsesMargin
+            ? Double(MobileReaderPanelLayout.inspectorWidth) + 1 / Double(fixture.window.screen.scale) : 0
+        return Double(top.safeAreaLayoutGuide.layoutFrame.width) - panel
+    }
+
+    private func readingWidthMatchesRequested(_ fixture: Fixture, cssWidth: Double? = nil) -> Bool {
+        guard let expected = requestedReadingWidth(fixture), expected > 0 else { return false }
+        let native = Double(fixture.web.bounds.width), pixel = 1 / Double(fixture.window.screen.scale)
+        return abs(native - expected) <= pixel + expected.ulp * 8 &&
+            (cssWidth.map { abs($0 - native) < 1 } ?? true)
+    }
+
+    private func settledReadingAllocation(_ fixture: Fixture, evidenceName: String) async -> Bool {
+        var first: [String: Any]?
+        let allocated = await poll {
+            let matches = self.nativeReadingAllocationMatches(fixture)
+            if !matches && first == nil { first = self.nativeReadingGeometry(fixture) }
+            return matches
+        }
+        if let first {
+            recordReadingReadiness(["first": first, "last": nativeReadingGeometry(fixture), "allocated": allocated],
+                name: evidenceName)
+        }
+        return allocated
+    }
+
+    private func nativeReadingAllocationMatches(_ fixture: Fixture) -> Bool {
+        webView(in: fixture.host.view) === fixture.web && readingWidthMatchesRequested(fixture) &&
+            fixture.web.bounds.size == fixture.web.superview?.bounds.size &&
+            fixture.web.layer.presentation().map { abs($0.bounds.width - fixture.web.bounds.width) < 1 } == true
+    }
+
+    private func readingWidthHasCommitted(_ fixture: Fixture) async throws -> Bool {
+        guard readingWidthMatchesRequested(fixture) else { return false }
+        let width = try await fixture.web.evaluateJavaScript("innerWidth") as? Double
+        return width.map { readingWidthMatchesRequested(fixture, cssWidth: $0) } == true
+    }
+
     private func resizeReadingMetrics(_ web: WKWebView) async throws -> [String: Any] {
         let value = try await web.callAsyncJavaScript("""
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
         const box=document.getElementById('resize-reading-passage').getBoundingClientRect();
-        return {samePage:window.mobileResizePage===document,scroll:scrollY,
-            visible:box.bottom>0&&box.top<innerHeight,
+        const visible=box.bottom>0&&box.top<innerHeight;
+        return {samePage:window.mobileResizePage===document,scroll:scrollY,x:scrollX,y:scrollY,
+            top:box.top,bottom:box.bottom,width:innerWidth,height:innerHeight,
+            visible,semanticVisible:visible,
+            contentWidth:document.documentElement.scrollWidth,
+            contentHeight:document.documentElement.scrollHeight,
             overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
         """, arguments: [:], in: nil, contentWorld: .defaultClient)
         return try XCTUnwrap(value as? [String: Any])
+    }
+
+    private func resizeSeedHasCommitted(_ fixture: Fixture, metrics: inout [String: Any],
+        evidence: inout [String: Any]) async throws -> Bool {
+        // This reads the result of the original single jump. It never scrolls
+        // again or changes the cadence of the later live-resize sequence.
+        metrics = [:]
+        evidence = ["reason": "awaiting initial resize DOM metrics"]
+        do { metrics = try await resizeReadingMetrics(fixture.web) }
+        catch {
+            evidence = ["reason": "initial resize DOM evaluation failed", "error": String(describing: error)]
+            throw error
+        }
+        return NativeReadingPositionReadiness.matches(metrics, web: fixture.web,
+            window: fixture.window, evidence: &evidence)
     }
 
     func testFirstPostKeepsTheSavedConversationOpenAndCanReply() async throws {
@@ -1548,9 +2164,18 @@ import XCTest
         XCTAssertEqual(thread.messages.first?.body, "The first saved note.")
         XCTAssertEqual(f.reader.discussionRoute, .thread(thread.id), "The saved conversation must replace its now-empty new-draft route")
         XCTAssertEqual(f.reader.discussions.selection, .thread(thread.id))
-        let mounted = await poll { self.editor(in: f.host.view) != nil }
+        var mountedReply: UITextView?
+        let mounted = await poll {
+            guard let candidate = self.visibleEditor(in: f.host.view), candidate.window === f.window,
+                  let coordinator = candidate.delegate as? MobileDiscussionDraftEditor.Coordinator,
+                  coordinator.owner.reader === f.reader,
+                  coordinator.owner.document == f.reader.documentGeneration,
+                  coordinator.owner.key == .thread(thread.id) else { return false }
+            mountedReply = candidate
+            return true
+        }
         XCTAssertTrue(mounted)
-        let reply = try XCTUnwrap(self.editor(in: f.host.view))
+        let reply = try XCTUnwrap(mountedReply)
         reply.text = "A reply from the mounted composer."
         reply.delegate?.textViewDidChange?(reply)
         XCTAssertEqual(f.reader.discussions.drafts[.thread(thread.id)]?.body, "A reply from the mounted composer.")
@@ -1643,6 +2268,10 @@ import XCTest
     private func assertVisibleDiscussionMargin(_ f: Fixture, required: Bool) async {
         let settled = await settledNavigation(f)
         XCTAssertTrue(settled, "Opening and refreshing the conversation must preserve a settled native layout")
+        guard settled else { return }
+        let allocated = await settledReadingAllocation(f, evidenceName: "External-resolve-native-width-allocation")
+        XCTAssertTrue(allocated, "Commit the requested reader frame before checking the margin after opening or refreshing")
+        guard allocated else { return }
         if required {
             XCTAssertTrue(f.reader.discussionUsesMargin, "The wide positive control must exercise the discussion margin")
         }
@@ -2294,6 +2923,7 @@ import XCTest
         let mounted = await poll { self.history(in: f.host.view, excluding: f.web) != nil }
         XCTAssertTrue(mounted, "Saved discussion bodies must use a native rendered history, separate from the composer")
         guard mounted, let history = history(in: f.host.view, excluding: f.web) else { return }
+        try await waitForInitialHistory(f)
         let ready = await pollAsync {
             try await history.evaluateJavaScript("document.querySelector('article[data-message-id=m-rich] strong')?.textContent==='Formatted history.' && document.querySelector('img[alt=History]')?.naturalWidth===1") as? Bool == true
         }; XCTAssertTrue(ready)
@@ -2326,6 +2956,7 @@ import XCTest
         let mounted = await poll { self.history(in: f.host.view, excluding: f.web) != nil && self.editor(in: f.host.view)?.text == "Keep this focused reply." }
         XCTAssertTrue(mounted, "The rendered history and native reply editor must coexist")
         guard mounted, let history = history(in: f.host.view, excluding: f.web), let editor = editor(in: f.host.view) else { return }
+        try await waitForInitialHistory(f)
         let ready = await pollAsync {
             guard !history.isLoading else { return false }
             return try await history.evaluateJavaScript("document.querySelectorAll('article').length===2 && document.documentElement.scrollHeight>innerHeight && document.body.style.fontSize!==''") as? Bool == true
@@ -2374,6 +3005,7 @@ import XCTest
         let mounted = await poll { self.history(in: f.host.view, excluding: f.web) != nil }
         XCTAssertTrue(mounted, "The current conversation must own a native history image context")
         guard mounted, let old = history(in: f.host.view, excluding: f.web) else { return }
+        try await waitForInitialHistory(f)
         let ready = await pollAsync { try await old.evaluateJavaScript("document.querySelector('img[alt=History]')?.naturalWidth===1") as? Bool == true }; XCTAssertTrue(ready)
         let oldAddress = try await old.evaluateJavaScript("document.querySelector('img[alt=History]').src") as? String
         let address = try XCTUnwrap(oldAddress)
@@ -2449,6 +3081,37 @@ import XCTest
         let host: UIHostingController<MobileDocumentWorkspace>
         let web: WKWebView
     }
+    private func historyReadingPositionHasCommitted(_ history: WKWebView, in fixture: Fixture,
+        initial: Bool, evidence: inout [String: Any]) async throws -> Bool {
+        let condition = initial ? "y>300 && Math.abs(r.top)<2" : "r.top>=-2 && r.top<90"
+        evidence = ["reason": "awaiting history DOM metrics", "initial": initial]
+        let value: [String: Any]?
+        do {
+            value = try await history.evaluateJavaScript("""
+        (()=>{
+            const p=Array.from(document.querySelectorAll('p')).find(p=>p.textContent.startsWith('History paragraph 18 '));
+            if(!p)return null;
+            const r=p.getBoundingClientRect(),y=scrollY,height=innerHeight;
+            return {semanticVisible:(\(condition))&&r.bottom>0&&r.top<height,
+                x:scrollX,y,top:r.top,bottom:r.bottom,width:innerWidth,height,
+                contentWidth:document.documentElement.scrollWidth,
+                contentHeight:document.documentElement.scrollHeight};
+        })()
+        """) as? [String: Any]
+        } catch {
+            evidence = ["reason": "history DOM evaluation failed", "error": String(describing: error), "initial": initial]
+            throw error
+        }
+        guard let value else { evidence = ["reason": "missing history DOM metrics"]; return false }
+        return NativeReadingPositionReadiness.matches(value, web: history, window: fixture.window, evidence: &evidence)
+    }
+
+    private func waitForInitialHistory(_ fixture: Fixture) async throws {
+        let committed = await WebKitTestReadiness.navigation({ self.history(in: fixture.host.view, excluding: fixture.web) },
+            expectedURL: fixture.file.deletingLastPathComponent())
+        _ = try XCTUnwrap(committed, "Finish initial native history navigation before checking its content")
+    }
+
     private func fixture(withThread: Bool = false, useNativeSceneBounds: Bool = false, tail: String = "") async throws -> Fixture {
         var source = "# Plan\n\nBefore.\n\nCafe\u{301} **bold** passage.\n\nAfter.\n" + tail
         if withThread {
@@ -2474,7 +3137,9 @@ import XCTest
             window.isHidden = true; window.rootViewController = nil
             try? FileManager.default.removeItem(at: file)
         }
-        let mounted = await poll { self.webView(in: host.view)?.estimatedProgress == 1 && self.webView(in: host.view)?.isLoading == false }
+        let committed = await WebKitTestReadiness.navigation({ self.webView(in: host.view) },
+            expectedURL: file.deletingLastPathComponent())
+        let mounted = committed != nil
         if !mounted {
             // Observe only after the original wait fails; never issue pre-commit JavaScript.
             let web = webView(in: host.view)
@@ -2497,7 +3162,7 @@ import XCTest
         }
         XCTAssertTrue(mounted, "Wait for a committed navigation before querying WebKit")
         guard mounted else { throw FixtureFailure.documentDidNotLoad }
-        let web = try XCTUnwrap(webView(in: host.view))
+        let web = try XCTUnwrap(committed)
         let ready = await pollAsync { try await web.evaluateJavaScript("document.querySelector('main')?.textContent.normalize('NFC').includes('Café bold passage.')===true") as? Bool == true }
         XCTAssertTrue(ready, "The actual formatted fixture must be loaded before exercising discussion actions")
         guard ready else { throw FixtureFailure.documentDidNotLoad }

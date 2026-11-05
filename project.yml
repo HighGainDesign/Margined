@@ -17,7 +17,7 @@ settings:
     AppStoreRelease:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) MARGINED_APP_STORE
       MARKETING_VERSION: '2.0'
-      CURRENT_PROJECT_VERSION: 14
+      CURRENT_PROJECT_VERSION: 15
   base:
     SWIFT_VERSION: '6.0'
     SWIFT_STRICT_CONCURRENCY: complete
@@ -25,7 +25,7 @@ settings:
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: UX8BPNLPX5
     MARKETING_VERSION: '2.0'
-    CURRENT_PROJECT_VERSION: 14
+    CURRENT_PROJECT_VERSION: 16
     ENABLE_DEBUG_DYLIB: NO
     SWIFT_EMIT_LOC_STRINGS: YES
 packages:
@@ -121,22 +121,18 @@ targets:
             QLSupportedContentTypes: [net.daringfireball.markdown]
             QLSupportsSearchableItems: false
             QLIsDataBasedPreview: true
-    entitlements:
-      path: QuickLook/QuickLook.entitlements
-      properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.files.user-selected.read-only: true
-        com.apple.security.temporary-exception.files.absolute-path.read-only: ['/']
-        com.apple.security.network.client: true
-        com.apple.security.application-groups: [UX8BPNLPX5.design.highgain.margined]
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLook.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.quicklook
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
         ENABLE_HARDENED_RUNTIME: YES
       configs:
+        AppStoreDebug:
+          CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLookAppStore.entitlements
         AppStoreRelease:
+          CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLookAppStore.entitlements
           PROVISIONING_PROFILE_SPECIFIER: $(MARGINED_MAC_QUICKLOOK_PROFILE)
     dependencies:
       - package: Apex
@@ -219,7 +215,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
         PRODUCT_MODULE_NAME: MarginediOS
         MARKETING_VERSION: '2.0'
-        CURRENT_PROJECT_VERSION: 14
+        CURRENT_PROJECT_VERSION: 16
         TARGETED_DEVICE_FAMILY: '1,2'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
@@ -266,7 +262,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.quicklook
         MARKETING_VERSION: '2.0'
-        CURRENT_PROJECT_VERSION: 14
+        CURRENT_PROJECT_VERSION: 16
         TARGETED_DEVICE_FAMILY: '1,2'
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
@@ -301,6 +297,7 @@ targets:
       - Tests/DiscussionWebTests.swift
       - Tests/DiscussionRenderingTests.swift
       - Tests/DiscussionHistoryLifecycleTests.swift
+      - Tests/WebKitTestReadiness.swift
     dependencies:
       - target: MarginediOS
     settings:
