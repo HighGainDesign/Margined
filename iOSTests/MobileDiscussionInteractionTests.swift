@@ -1108,6 +1108,9 @@ import XCTest
             let discussionSettled = await settledNavigation(f)
             XCTAssertTrue(discussionSettled, "Discussion layout must settle at \(size)")
             guard discussionSettled else { return }
+            let allocated = await settledReadingAllocation(f, evidenceName: "Adaptive-panel-native-width-allocation")
+            XCTAssertTrue(allocated, "Establish the actual reader frame before capturing its panel-width baseline")
+            guard allocated else { return }
             let docked = f.reader.discussionUsesMargin
             if size.width == 834 {
                 XCTAssertFalse(docked, "11-inch portrait keeps readable document width")
@@ -1273,6 +1276,16 @@ import XCTest
     }
 
     func testLiveWindowResizingKeepsTheOpenReplyAndDocumentIdentity() async throws {
+        try await exerciseLiveReadingResize(holdReturn: false)
+    }
+
+    #if DEBUG
+    func testReturningReaderRestoresItsPassageAfterTheNativeViewportCommits() async throws {
+        try await exerciseLiveReadingResize(holdReturn: true)
+    }
+    #endif
+
+    private func exerciseLiveReadingResize(holdReturn: Bool) async throws {
         let paragraphs = (0..<100).map { "Paragraph \($0) keeps the document long enough to test its reading position while an unfinished reply moves between compact navigation and the margin." }.joined(separator: "\n\n")
         let f = try await fixture(withThread: true, tail: "\n\n" + paragraphs)
         let context = f.reader.documentGeneration
@@ -1350,6 +1363,11 @@ import XCTest
             XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body, "An unfinished reply across both displays.")
         }
         XCTAssertTrue(sawMargin && sawCompact, "The test must actually move the reply between native navigation and the margin")
+        #if DEBUG
+        let owner = try XCTUnwrap((f.web.navigationDelegate as? MobileWebView.Coordinator)?.nativeResizeOwner)
+        let offsetBeforeHide = f.web.scrollView.contentOffset
+        if holdReturn { owner.debugHoldNextReadyRestore = true }
+        #endif
         f.reader.hideDiscussions()
         let visible = await poll { self.webView(in: f.host.view) === f.web }
         XCTAssertTrue(visible)
@@ -1363,10 +1381,39 @@ import XCTest
         // An unattached page cannot complete requestAnimationFrame. Preserve the
         // failed assertions above without hanging before XCTest can report them.
         guard visible, returned, widthReturned else { return }
-        // The DOM can report its restored offset before the native viewport
-        // commits it. Assess the returned reading page after screen updates.
+        #if DEBUG
+        if holdReturn {
+            let held = await poll { owner.debugHeldRestoreIsCurrent }
+            XCTAssertTrue(held, "Hold a real current destination after the requested viewport has committed")
+            guard held else { return }
+            XCTAssertTrue(readingWidthMatchesRequested(f))
+            XCTAssertEqual(f.web.scrollView.contentOffset.y, offsetBeforeHide.y, accuracy: 1,
+                "The width must commit before this controlled position delivery")
+            let accepted = owner.debugAcceptedRestoreTokens.count
+            owner.debugDeliverHeldRestore()
+            XCTAssertEqual(owner.debugAcceptedRestoreTokens.count, accepted + 1,
+                "The current controlled delivery must perform an actual native restore")
+            XCTAssertGreaterThan(abs(f.web.scrollView.contentOffset.y - offsetBeforeHide.y), 100,
+                "The fixture must require a genuine reading-position correction")
+        }
+        #endif
+        // Viewport allocation and semantic restoration are separate asynchronous
+        // results. Wait for the actual retained passage and native presentation.
+        var reading: [String: Any] = [:], returnEvidence: [String: Any] = [:]
+        var firstReturnEvidence: [String: Any]?
+        let positionReturned = await pollAsync {
+            let ready = try await self.resizeSeedHasCommitted(f, metrics: &reading, evidence: &returnEvidence)
+            let requested = (reading["width"] as? Double).map { self.readingWidthMatchesRequested(f, cssWidth: $0) } == true
+            if (!ready || !requested) && firstReturnEvidence == nil { firstReturnEvidence = returnEvidence }
+            return ready && requested
+        }
+        if let firstReturnEvidence {
+            recordReadingReadiness(["first": firstReturnEvidence, "last": returnEvidence, "committed": positionReturned],
+                name: "Return-native-reading-convergence")
+        }
+        XCTAssertTrue(positionReturned, "Commit the retained native/model/presentation passage after hiding: \(returnEvidence)")
         let image = try await f.web.takeSnapshot(configuration: configuration)
-        let reading = try await resizeReadingMetrics(f.web)
+        reading = try await resizeReadingMetrics(f.web)
         let nativeY = Double(f.web.scrollView.contentOffset.y)
         let domY = try XCTUnwrap(reading["scroll"] as? Double)
         let finalWidth = try XCTUnwrap(reading["width"] as? Double)
@@ -1516,6 +1563,9 @@ import XCTest
             XCTAssertEqual(f.reader.discussionRoute, .thread("t-mobile"), "Resizing must keep the selected conversation")
             XCTAssertEqual(f.reader.discussions.drafts[.thread("t-mobile")]?.body,
                            "Keep this reply through the threshold transition.")
+            let allocated = await settledReadingAllocation(f, evidenceName: "Threshold-native-width-allocation")
+            XCTAssertTrue(allocated, "Commit the requested native reader frame before its threshold-width check")
+            guard settled, allocated else { return }
             if f.reader.discussionUsesMargin {
                 let minimum = DiscussionMarginLayout.minimumDocumentWidth(
                     bodyFont: f.reader.discussionMargin?.bodyFont ?? 16 * f.reader.zoom,
@@ -1835,17 +1885,7 @@ import XCTest
             guard settled else { return }
             // Navigation and the docking decision can precede the retained
             // reader's asynchronous frame commit. Measure its actual allocation.
-            var firstAllocation: [String: Any]?
-            let allocated = await poll {
-                let matches = self.nativeReadingAllocationMatches(f)
-                if !matches && firstAllocation == nil { firstAllocation = self.nativeReadingGeometry(f) }
-                return matches
-            }
-            if let firstAllocation {
-                recordReadingReadiness(["first": firstAllocation, "last": nativeReadingGeometry(f),
-                    "allocated": allocated, "requestedWindow": String(describing: size)],
-                    name: "Margin-native-width-allocation")
-            }
+            let allocated = await settledReadingAllocation(f, evidenceName: "Margin-native-width-allocation")
             XCTAssertTrue(allocated, "Commit the actual requested reader width before measuring its readable margin")
             guard allocated else { return }
             if f.reader.discussionUsesMargin {
@@ -1997,6 +2037,20 @@ import XCTest
         let native = Double(fixture.web.bounds.width), pixel = 1 / Double(fixture.window.screen.scale)
         return abs(native - expected) <= pixel + expected.ulp * 8 &&
             (cssWidth.map { abs($0 - native) < 1 } ?? true)
+    }
+
+    private func settledReadingAllocation(_ fixture: Fixture, evidenceName: String) async -> Bool {
+        var first: [String: Any]?
+        let allocated = await poll {
+            let matches = self.nativeReadingAllocationMatches(fixture)
+            if !matches && first == nil { first = self.nativeReadingGeometry(fixture) }
+            return matches
+        }
+        if let first {
+            recordReadingReadiness(["first": first, "last": nativeReadingGeometry(fixture), "allocated": allocated],
+                name: evidenceName)
+        }
+        return allocated
     }
 
     private func nativeReadingAllocationMatches(_ fixture: Fixture) -> Bool {
@@ -2166,16 +2220,7 @@ import XCTest
         let settled = await settledNavigation(f)
         XCTAssertTrue(settled, "Opening and refreshing the conversation must preserve a settled native layout")
         guard settled else { return }
-        var firstAllocation: [String: Any]?
-        let allocated = await poll {
-            let matches = self.nativeReadingAllocationMatches(f)
-            if !matches && firstAllocation == nil { firstAllocation = self.nativeReadingGeometry(f) }
-            return matches
-        }
-        if let firstAllocation {
-            recordReadingReadiness(["first": firstAllocation, "last": nativeReadingGeometry(f), "allocated": allocated],
-                name: "External-resolve-native-width-allocation")
-        }
+        let allocated = await settledReadingAllocation(f, evidenceName: "External-resolve-native-width-allocation")
         XCTAssertTrue(allocated, "Commit the requested reader frame before checking the margin after opening or refreshing")
         guard allocated else { return }
         if required {
