@@ -1,88 +1,49 @@
-name: iOS native resize ownership diagnostic
-
+name: iOS native coordinate calibration
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: Existing JavaScript writer or bounded native owner
-        type: choice
-        options: [javascript, native]
-        default: javascript
-
 permissions:
   contents: read
-
 concurrency:
-  group: ios-native-owner-${{ github.ref }}-${{ inputs.mode }}
+  group: ios-native-coordinate-calibration-${{ github.ref }}
   cancel-in-progress: false
-
 jobs:
   diagnostic:
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      - name: Check out immutable diagnostic source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
       - name: Prepare project
         run: |
           brew install xcodegen
           python3 script/verify-vendor.py
-          python3 script/validate-localizations.py
-          node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
-          node script/tests/test_native_reading_position_diagnostic.cjs iOS/Resources/native-reading-position-diagnostic.js
-          node --test script/tests/test_discussion_layout.cjs
-          python3 -m unittest discover -s script/tests -p test_native_resize_diagnostic_evidence.py
           xcodegen generate
-      - name: Run unchanged behavior cases plus controlled feedback in two fresh processes
-        env:
-          MARGINED_NATIVE_OWNER_MODE: ${{ inputs.mode }}
+      - name: Measure public zoom and inset coordinates in two fresh processes
         run: |
-          mkdir -p "$RUNNER_TEMP/native-owner-diagnostic"
-          xcrun simctl list devices available --json > "$RUNNER_TEMP/native-owner-diagnostic/devices.json"
-          device_id=$(python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/native-owner-diagnostic/devices.json")); print(next(x["udid"] for g in d["devices"].values() for x in g if "iPhone" in x["name"]))')
-          owner_flags='DEBUG MARGINED_NATIVE_RESIZE_FEEDBACK_FIXTURE'
-          additional_tests=()
-          if [[ "$MARGINED_NATIVE_OWNER_MODE" == native ]]; then
-            owner_flags+=' MARGINED_NATIVE_RESIZE_OWNER_DIAGNOSTIC'
-            additional_tests+=('-only-testing:MarginediOSTests/MobileNativeResizeOwnerDiagnosticTests')
-          fi
-          git rev-parse HEAD > "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
-          xcodebuild -version >> "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
-          printf '%s\n' "device=$device_id mode=$MARGINED_NATIVE_OWNER_MODE flags=$owner_flags" >> "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
-          shasum -a 256 App/Resources/reader-document.js iOS/Resources/native-reading-position-diagnostic.js iOS/Services/MobileNativeResizeOwnerDiagnostic.swift iOSTests/MobileDiscussionInteractionTests.swift >> "$RUNNER_TEMP/native-owner-diagnostic/source.txt"
+          mkdir -p "$RUNNER_TEMP/native-coordinate-calibration"
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/native-coordinate-calibration/devices.json"
+          device_id=$(python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/native-coordinate-calibration/devices.json")); print(next(x["udid"] for g in d["devices"].values() for x in g if "iPhone" in x["name"]))')
+          git rev-parse HEAD > "$RUNNER_TEMP/native-coordinate-calibration/source.txt"
+          xcodebuild -version >> "$RUNNER_TEMP/native-coordinate-calibration/source.txt"
+          printf '%s\n' "device=$device_id flags=DEBUG MARGINED_NATIVE_COORDINATE_CALIBRATION" >> "$RUNNER_TEMP/native-coordinate-calibration/source.txt"
+          shasum -a 256 iOSTests/MobileDiscussionInteractionTests.swift >> "$RUNNER_TEMP/native-coordinate-calibration/source.txt"
           result=0
           xcodebuild -project Margined.xcodeproj -scheme MarginediOS \
             -destination "platform=iOS Simulator,id=$device_id" \
-            -derivedDataPath "$RUNNER_TEMP/Margined-native-owner-diagnostic" \
-            -resultBundlePath "$RUNNER_TEMP/native-owner-diagnostic/behavior.xcresult" \
-            CODE_SIGNING_ALLOWED=NO "SWIFT_ACTIVE_COMPILATION_CONDITIONS=$owner_flags" \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testCompactDiscussionSheetKeepsTheSelectedPassageInItsActualReaderViewport \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testCompactTypingExpandsAboveTheActualKeyboardAndGoToPassageRetainsCaret \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testLargestTextTypingKeepsCaretReplyAndACompleteMessageLineAboveTheKeyboard \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testGoToPassageReturnsToTheRetainedDocumentAndRejectsStaleActions \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testNativeWidthTracksParentResizeWhenContentKeepsItsSize \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testLiveWindowResizingKeepsTheOpenReplyAndDocumentIdentity \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testReadingResizeRetainsPassageWhenWindowDimensionsLagTheLayout \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testResizingBetweenWideWindowsDoesNotRecreateDiscussionNavigation \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testOpeningConversationDuringThresholdResizeSettlesAndKeepsItsReply \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testWindowResizingPreservesTheReadersVisiblePassage \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testDiscussionHistoryRetainsItsSemanticPositionAcrossHideAndWidthChanges \
-            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testResizePreservesPassageAfterEmulatedStaleDOMFeedback \
-            "${additional_tests[@]}" \
+            -derivedDataPath "$RUNNER_TEMP/Margined-native-coordinate-calibration" \
+            -resultBundlePath "$RUNNER_TEMP/native-coordinate-calibration/calibration.xcresult" \
+            CODE_SIGNING_ALLOWED=NO 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG MARGINED_NATIVE_COORDINATE_CALIBRATION' \
+            -only-testing:MarginediOSTests/MobileDiscussionInteractionTests/testNativeCoordinateCalibrationAcrossZoomAndInsets \
             -parallel-testing-enabled NO -test-iterations 2 -test-repetition-relaunch-enabled YES \
-            test > "$RUNNER_TEMP/native-owner-diagnostic/behavior.log" 2>&1 || result=$?
-          printf '%s\n' "$result" > "$RUNNER_TEMP/native-owner-diagnostic/test-exit.txt"
-          tail -35 "$RUNNER_TEMP/native-owner-diagnostic/behavior.log"
-          if [[ "$MARGINED_NATIVE_OWNER_MODE" == native && "$result" == 0 ]]; then
-            python3 script/verify-native-resize-diagnostic.py "$RUNNER_TEMP/native-owner-diagnostic/behavior.log" > "$RUNNER_TEMP/native-owner-diagnostic/replay-evidence.json"
-          fi
+            test > "$RUNNER_TEMP/native-coordinate-calibration/calibration.log" 2>&1 || result=$?
+          printf '%s\n' "$result" > "$RUNNER_TEMP/native-coordinate-calibration/test-exit.txt"
+          tail -30 "$RUNNER_TEMP/native-coordinate-calibration/calibration.log"
           exit "$result"
-      - name: Preserve every outcome including the expected control failure
+      - name: Preserve all coordinate measurements
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: ios-native-owner-${{ inputs.mode }}
-          path: ${{ runner.temp }}/native-owner-diagnostic
+          name: ios-native-coordinate-calibration
+          path: ${{ runner.temp }}/native-coordinate-calibration
           retention-days: 7

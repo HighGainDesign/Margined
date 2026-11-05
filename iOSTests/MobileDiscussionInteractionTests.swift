@@ -7,6 +7,77 @@ import XCTest
 @testable import MarginediOS
 
 @MainActor final class MobileDiscussionInteractionTests: XCTestCase {
+    #if MARGINED_NATIVE_COORDINATE_CALIBRATION
+    /// Diagnostic measurements only. This case deliberately controls zoom,
+    /// insets and position; it does not certify preservation during resizing.
+    func testNativeCoordinateCalibrationAcrossZoomAndInsets() async throws {
+        let paragraphs = (0..<100).map { "Calibration paragraph \($0) supplies normal flow content to measure the native and CSS coordinate mapping at several public zoom and inset settings." }.joined(separator: "\n\n")
+        let f = try await fixture(tail: "\n\n" + paragraphs)
+        let scroll = f.web.scrollView
+        _ = try await f.web.callAsyncJavaScript("window.marginedReadingResize?.stop(); return true;",
+            arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
+        scroll.contentInsetAdjustmentBehavior = .never
+        let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+        func point(_ p: CGPoint) -> [Double] { [Double(p.x), Double(p.y)] }
+        func rect(_ r: CGRect) -> [Double] { [Double(r.minX), Double(r.minY), Double(r.width), Double(r.height)] }
+        func mapping(_ layer: CALayer, parent: CALayer) -> [String: Any] {
+            ["bounds": rect(layer.bounds),
+             "zero": point(layer.convert(.zero, to: parent)),
+             "unitX": point(layer.convert(CGPoint(x: 1, y: 0), to: parent)),
+             "unitY": point(layer.convert(CGPoint(x: 0, y: 1), to: parent)),
+             "viewportInContent": rect(layer.convert(parent.bounds, from: parent))]
+        }
+        for stage in ["unit", "zoom2", "zoom2-insets", "unit-insets", "pageZoom1.5", "unit-restored"] {
+            switch stage {
+            case "zoom2":
+                XCTAssertGreaterThanOrEqual(scroll.maximumZoomScale, 2)
+                scroll.setZoomScale(2, animated: false)
+            case "zoom2-insets": scroll.contentInset = UIEdgeInsets(top: 20, left: 12, bottom: 30, right: 18)
+            case "unit-insets": scroll.setZoomScale(1, animated: false)
+            case "pageZoom1.5": scroll.contentInset = .zero; f.web.pageZoom = 1.5
+            case "unit-restored": f.web.pageZoom = 1
+            default: break
+            }
+            let idle = await poll { !scroll.isZooming && !scroll.isZoomBouncing && !scroll.isDecelerating }
+            XCTAssertTrue(idle)
+            _ = try await f.web.callAsyncJavaScript("""
+            await document.fonts.ready;
+            document.querySelectorAll('main p')[38].scrollIntoView({block:'start',behavior:'instant'});
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .defaultClient)
+            _ = try await f.web.takeSnapshot(configuration: configuration)
+            for sample in 0..<5 {
+                let dom = try await f.web.callAsyncJavaScript("""
+                await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+                const root=document.documentElement, p=document.querySelectorAll('main p')[38], r=p.getBoundingClientRect(), v=visualViewport;
+                return {x:scrollX,y:scrollY,width:root.clientWidth,height:root.clientHeight,
+                    contentWidth:root.scrollWidth,contentHeight:root.scrollHeight,
+                    innerWidth,innerHeight,rect:[r.x,r.y,r.width,r.height],
+                    visual:{width:v.width,height:v.height,scale:v.scale,x:v.offsetLeft,y:v.offsetTop,pageX:v.pageLeft,pageY:v.pageTop}};
+                """, arguments: [:], in: nil, contentWorld: .defaultClient)
+                let children = scroll.subviews.filter { !$0.isHidden && $0.alpha > 0.01 && $0.bounds.height > 50 }.map { child -> [String: Any] in
+                    var value = mapping(child.layer, parent: scroll.layer)
+                    if let shown = child.layer.presentation(), let parent = scroll.layer.presentation() {
+                        value["presentation"] = mapping(shown, parent: parent)
+                    }
+                    return value
+                }
+                let report: [String: Any] = ["stage": stage, "sample": sample,
+                    "processID": Int(ProcessInfo.processInfo.processIdentifier), "time": CACurrentMediaTime(),
+                    "dom": dom, "webBounds": rect(f.web.bounds), "scrollBounds": rect(scroll.bounds),
+                    "offset": point(scroll.contentOffset), "contentSize": [Double(scroll.contentSize.width),Double(scroll.contentSize.height)],
+                    "zoomScale": scroll.zoomScale, "pageZoom": f.web.pageZoom,
+                    "zoomLimits": [scroll.minimumZoomScale,scroll.maximumZoomScale],
+                    "insets": [scroll.adjustedContentInset.top,scroll.adjustedContentInset.left,scroll.adjustedContentInset.bottom,scroll.adjustedContentInset.right],
+                    "children": children]
+                let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+                print("NATIVE-COORDINATE-CALIBRATION " + String(decoding: data, as: UTF8.self))
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: f.file), f.original)
+    }
+    #endif
+
     func testReplyOCRFindsOnlyTheWordBoundsInsideAMergedRow() throws {
         let image = replyOCRFixture("Reader • Reply")
         let bounds = try XCTUnwrap(recognizedBounds("Reply", in: XCTUnwrap(image.cgImage), size: image.size))
