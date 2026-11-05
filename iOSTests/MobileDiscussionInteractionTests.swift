@@ -18,6 +18,13 @@ import XCTest
             arguments: [:], in: nil, contentWorld: MobileWebView.Coordinator.contentWorld)
         scroll.contentInsetAdjustmentBehavior = .never
         let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
+        // Establish position once. A later scrollIntoView can reset native
+        // zoom, which would silently turn a requested2x sample into unit scale.
+        _ = try await f.web.callAsyncJavaScript("""
+        await document.fonts.ready;
+        document.querySelectorAll('main p')[38].scrollIntoView({block:'start',behavior:'instant'});
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .defaultClient)
         func point(_ p: CGPoint) -> [Double] { [Double(p.x), Double(p.y)] }
         func rect(_ r: CGRect) -> [Double] { [Double(r.minX), Double(r.minY), Double(r.width), Double(r.height)] }
         func mapping(_ layer: CALayer, parent: CALayer) -> [String: Any] {
@@ -40,12 +47,8 @@ import XCTest
             }
             let idle = await poll { !scroll.isZooming && !scroll.isZoomBouncing && !scroll.isDecelerating }
             XCTAssertTrue(idle)
-            _ = try await f.web.callAsyncJavaScript("""
-            await document.fonts.ready;
-            document.querySelectorAll('main p')[38].scrollIntoView({block:'start',behavior:'instant'});
-            return true;
-            """, arguments: [:], in: nil, contentWorld: .defaultClient)
             _ = try await f.web.takeSnapshot(configuration: configuration)
+            var measuredVisualScale: Double?
             for sample in 0..<5 {
                 let dom = try await f.web.callAsyncJavaScript("""
                 await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
@@ -55,6 +58,7 @@ import XCTest
                     innerWidth,innerHeight,rect:[r.x,r.y,r.width,r.height],
                     visual:{width:v.width,height:v.height,scale:v.scale,x:v.offsetLeft,y:v.offsetTop,pageX:v.pageLeft,pageY:v.pageTop}};
                 """, arguments: [:], in: nil, contentWorld: .defaultClient)
+                measuredVisualScale = ((dom as? [String: Any])?["visual"] as? [String: Any])?["scale"] as? Double
                 let children = scroll.subviews.filter { !$0.isHidden && $0.alpha > 0.01 && $0.bounds.height > 50 }.map { child -> [String: Any] in
                     var value = mapping(child.layer, parent: scroll.layer)
                     if let shown = child.layer.presentation(), let parent = scroll.layer.presentation() {
@@ -72,6 +76,12 @@ import XCTest
                     "children": children]
                 let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
                 print("NATIVE-COORDINATE-CALIBRATION " + String(decoding: data, as: UTF8.self))
+            }
+            if stage.hasPrefix("zoom2") {
+                XCTAssertEqual(Double(scroll.zoomScale), 2, accuracy: 0.001,
+                    "Measure actual native2x rather than only a requested zoom")
+                XCTAssertEqual(try XCTUnwrap(measuredVisualScale), 2, accuracy: 0.01,
+                    "WebContent must also acknowledge actual2x for pinch-coordinate calibration")
             }
         }
         XCTAssertEqual(try Data(contentsOf: f.file), f.original)
