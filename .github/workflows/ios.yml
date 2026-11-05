@@ -1,4 +1,4 @@
-name: iOS draft reveal ownership comparison
+name: iOS full-suite draft reveal comparison
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-draft-reveal-${{ github.ref }}-${{ inputs.trace_mode }}
+  group: ios-draft-full-reveal-${{ github.ref }}-${{ inputs.trace_mode }}
   cancel-in-progress: false
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
           node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
           node --test script/tests/test_discussion_layout.cjs
           xcodegen generate
-      - name: Repeat the unchanged pre-draft suite prefix in twenty fresh processes
+      - name: Repeat the full unchanged native suite in five fresh processes
         env:
           MARGINED_DRAFT_REVEAL_MODE: ${{ inputs.trace_mode }}
         run: |
@@ -53,25 +53,13 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/Margined-draft-reveal-diagnostic" \
             -resultBundlePath "$RUNNER_TEMP/draft-reveal-diagnostic/prefix.xcresult" \
             CODE_SIGNING_ALLOWED=NO "SWIFT_ACTIVE_COMPILATION_CONDITIONS=$draft_flags" \
-            -only-testing:MarginediOSTests/ConversationPlaybackTests \
-            -only-testing:MarginediOSTests/DiscussionAnchorTests \
-            -only-testing:MarginediOSTests/DiscussionCodecTests \
-            -only-testing:MarginediOSTests/DiscussionHistoryLifecycleTests \
-            -only-testing:MarginediOSTests/DiscussionMarginTests \
-            -only-testing:MarginediOSTests/DiscussionReconciliationTests \
-            -only-testing:MarginediOSTests/DiscussionRenderingTests \
-            -only-testing:MarginediOSTests/DiscussionSessionTests \
-            -only-testing:MarginediOSTests/DiscussionWebTests \
-            -only-testing:MarginediOSTests/MarkdownSourceEditsTests \
-            -only-testing:MarginediOSTests/MobileAppearanceTests \
-            -only-testing:MarginediOSTests/MobileDiscussionDraftScrollingTests \
-            -parallel-testing-enabled NO -test-iterations 20 -test-repetition-relaunch-enabled YES \
+            -parallel-testing-enabled NO -test-iterations 5 -test-repetition-relaunch-enabled YES \
             test > "$RUNNER_TEMP/draft-reveal-diagnostic/prefix.log" 2>&1 || { tail -80 "$RUNNER_TEMP/draft-reveal-diagnostic/prefix.log"; exit 1; }
           tail -25 "$RUNNER_TEMP/draft-reveal-diagnostic/prefix.log"
       - name: Preserve every attempt
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ios-draft-reveal-${{ inputs.trace_mode }}
+          name: ios-draft-full-reveal-${{ inputs.trace_mode }}
           path: ${{ runner.temp }}/draft-reveal-diagnostic
           retention-days: 7
