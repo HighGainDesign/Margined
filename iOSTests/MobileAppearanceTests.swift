@@ -17,7 +17,13 @@ final class MobileAppearanceTests: XCTestCase {
         let window = UIWindow(windowScene: scene); window.overrideUserInterfaceStyle = .dark
         window.rootViewController = host; window.makeKeyAndVisible()
         defer {
-            host.dismiss(animated: false); window.isHidden = true; window.rootViewController = nil
+            #if MARGINED_DRAFT_SCROLL_CALLBACK_DIAGNOSTIC
+            let dismissal = DraftDismissalCallbackDiagnostic.begin()
+            host.dismiss(animated: false) { DraftDismissalCallbackDiagnostic.end(dismissal) }
+            #else
+            host.dismiss(animated: false)
+            #endif
+            window.isHidden = true; window.rootViewController = nil
             defaults.set(original, forKey: ReaderPreferences.appearanceKey)
             defaults.set(originalGuide, forKey: "mobileSetupGuideSeen")
         }
