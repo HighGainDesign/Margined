@@ -1,12 +1,13 @@
 # Changelog
 
-## 2.0-beta.4 — 2026-11-03
+## 2.0-beta.4 — 2026-11-04
 
-- Retain the reading passage when a native window resize reports stale WebKit dimensions.
+- Keep the native-visible iOS reading passage during resizing, including pinched zoom and page zoom; newer scrolling or navigation takes priority.
 - Refresh discussion markers after a resize even when scrolling overlaps the update.
 - Remove the filesystem exception from Mac TestFlight Quick Look; unavailable images retain alternative text.
-- Prepare native Build 15 for public Mac, iPhone and iPad beta distribution.
-- Make native validation wait for completed navigation, painted history and Find clearing.
+- Preserve unfinished-reply browsing when an ordinary view update leaves the text and layout unchanged.
+- Prepare Build 16 for iPhone/iPad and the GitHub Mac beta; public Mac TestFlight remains on Build 15.
+- Run validation locally before publishing changes; check committed native geometry, painted history and completed Find clearing.
 - Preserve exact Reply glyph checks when text recognition groups neighboring labels.
 - Publish the privacy policy for local files, optional connections and TestFlight feedback.
 

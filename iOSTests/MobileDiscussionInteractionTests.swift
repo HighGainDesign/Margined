@@ -1808,6 +1808,24 @@ import XCTest
             f.host.view.frame = f.window.bounds; f.host.view.layoutIfNeeded()
             let settled = await settledNavigation(f)
             XCTAssertTrue(settled)
+            guard settled else { return }
+            // Navigation and the docking decision can precede the retained
+            // reader's asynchronous frame commit. Measure its actual allocation.
+            var firstAllocation: [String: Any]?
+            let allocated = await poll {
+                let matches = self.webView(in: f.host.view) === f.web &&
+                    self.readingWidthMatchesRequested(f) && f.web.bounds.size == f.web.superview?.bounds.size &&
+                    f.web.layer.presentation().map { abs($0.bounds.width - f.web.bounds.width) < 1 } == true
+                if !matches && firstAllocation == nil { firstAllocation = self.nativeReadingGeometry(f) }
+                return matches
+            }
+            if let firstAllocation {
+                recordReadingReadiness(["first": firstAllocation, "last": nativeReadingGeometry(f),
+                    "allocated": allocated, "requestedWindow": String(describing: size)],
+                    name: "Margin-native-width-allocation")
+            }
+            XCTAssertTrue(allocated, "Commit the actual requested reader width before measuring its readable margin")
+            guard allocated else { return }
             if f.reader.discussionUsesMargin {
                 sawMargin = true
                 let minimum = DiscussionMarginLayout.minimumDocumentWidth(
@@ -1815,6 +1833,7 @@ import XCTest
                     horizontalInsets: f.reader.discussionMargin?.horizontalInsets ?? 48, outlineWidth: 0)
                 XCTAssertGreaterThanOrEqual(f.web.bounds.width, minimum - 1,
                     "A discussion margin must leave a readable document after the system's vertical bars")
+
             }
         }
         XCTAssertTrue(sawMargin, "The test must exercise a real wide discussion margin")

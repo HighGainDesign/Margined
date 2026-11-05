@@ -7,7 +7,7 @@ description: Use when creating or updating Markdown intended for Margined, inclu
 
 Produce ordinary, portable `.md` files. Margined renders Markdown with Apex and stores optional discussions inside the same file. No account, sidecar, or special filename is required.
 
-Baseline verified against Margined 2.0 internal Build 13, source `9de60d5`, on 2026-10-31. Build 14 fixes for inline pipelines and multi-block tasks are verified at source `bd1d96e` on 2026-11-01. Select guidance for the recipient's actual reader. Discussions are a 2.0 feature; do not assume stable 1.7.1 supports them.
+Baseline verified against Margined 2.0 internal Build 13, source `9de60d5`, on 2026-10-31. Build 14 fixes for inline pipelines and multi-block tasks are verified at source `bd1d96e` on 2026-11-01. The same authoring examples and discussion contract were rechecked at beta.4 source `0e31abf` on 2026-11-04. Select guidance for the recipient's actual reader. Discussions are a 2.0 feature; do not assume stable 1.7.1 supports them.
 
 ## Authoring contract
 
@@ -37,6 +37,7 @@ This is an Apex parser defect, not invalid Markdown or a Dropbox permission issu
 |---|---|
 | Local images | Use relative paths and meaningful alt text. Keep the document and assets under one portable project folder; multiple subdirectories are fine. For explicit sizing use `<img src="images/demo.png" alt="Description" width="320">`. |
 | Folder access | iOS and sandboxed Mac TestFlight require a user-selected containing folder. Subfolders are included; multiple grants are supported. The Mac DMG uses normal macOS file access. Remote-image consent does not grant local-folder access. |
+| Mac TestFlight Quick Look | Build 15 removes the broad filesystem exception. Adjacent and nested image files may be unavailable in Finder previews; always supply meaningful alt text. Use the main app with its folder grant when local images are needed. |
 | Remote images | HTTPS images need the current document's opt-in; Quick Look stays offline. Prefer local assets for offline reading and privacy. |
 | Math | Use `$x^2$` inline or standalone `$$` lines around display TeX. Bundled KaTeX has limits; provide readable surrounding prose. |
 | Diagrams | Use a fenced `mermaid` block. Keep diagrams self-contained; no remote scripts or renderer plugins. |
