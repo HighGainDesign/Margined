@@ -95,6 +95,9 @@ if (operation === 'navigate') {
 // resize event arrives after WebKit has already changed line wrapping.
 if (operation === 'observeResize') {
     window.marginedReadingResize?.stop();
+    // Temporary native-owner experiment: retain sampling/lease lifecycle but
+    // retire the competing automatic writer. Explicit app operations stay live.
+    const nativeOwnsResize = typeof nativeResizeOwnsRestore !== 'undefined' && nativeResizeOwnsRestore === true;
     // Callers lease their own document namespace. Mobile remains the default
     // for existing reading-page callers; history must opt into its token.
     const tokenAttribute = typeof documentTokenAttribute === 'undefined' ? 'data-margined-mobile-token' : documentTokenAttribute;
@@ -187,7 +190,7 @@ if (operation === 'observeResize') {
         if (nextWidth === width && nextHeight === height) return;
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
-        restore(saved);
+        if (!nativeOwnsResize) restore(saved);
         width = nextWidth; height = nextHeight;
         saved = sample();
     }
