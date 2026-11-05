@@ -6,6 +6,7 @@ import WebKit
 /// The rendered page has no author JavaScript. App-owned navigation, tasks and
 /// speech run in a separate content world and share the Mac DOM reconciler.
 struct MobileWebView: UIViewRepresentable {
+    typealias UIViewType = MobileNativeResizeViewport
     let reader: MobileReaderState
     private let inputs: Inputs
     private let retainedPage: MobileReadingPage?
@@ -101,8 +102,9 @@ struct MobileWebView: UIViewRepresentable {
         return Coordinator(reader: reader)
     }
 
-    func makeUIView(context: Context) -> WKWebView {
-        retainedPage?.webView ?? Self.createUIView(coordinator: context.coordinator)
+    func makeUIView(context: Context) -> UIViewType {
+        let web = retainedPage?.webView ?? Self.createUIView(coordinator: context.coordinator)
+        return MobileNativeResizeViewport(web: web, owner: context.coordinator.nativeResizeOwner!)
     }
 
     @MainActor
@@ -122,15 +124,20 @@ struct MobileWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = .clear
         webView.accessibilityLabel = String(localized: "Markdown document")
         coordinator.webView = webView
+        coordinator.nativeResizeOwner = MobileNativeResizeOwner(web: webView, world: Coordinator.contentWorld) { [weak coordinator] in
+            coordinator?.nativeResizeDocumentToken
+        }
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
+    func updateUIView(_ webView: UIViewType, context: Context) {
         guard inputs.readerID == reader.id else { return }
         context.coordinator.update(category: sizeCategory.uiCategory)
     }
 
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+    static func dismantleUIView(_ view: UIViewType, coordinator: Coordinator) {
+        view.owner.detach()
+        let webView = view.web
         // A compact native destination can dismantle its hidden root view.
         // The workspace keeps that page alive until the document workspace ends.
         guard !coordinator.isWorkspaceRetained else { return }
@@ -202,6 +209,20 @@ struct MobileWebView: UIViewRepresentable {
         var isWorkspaceRetained = false
         let images = MobileImageSchemeHandler()
         weak var webView: WKWebView?
+        var nativeResizeOwner: MobileNativeResizeOwner?
+        fileprivate var nativeResizeDocumentToken: String? {
+            guard contentReady, !isInvalidated, documentGeneration == reader.documentGeneration else { return nil }
+            return token
+        }
+        private func beginNativeResizeIntent() -> UUID? {
+            return nativeResizeOwner?.beginAppIntent()
+        }
+        private func endNativeResizeIntent(_ id: UUID?) {
+            if let id { nativeResizeOwner?.endAppIntent(id) }
+        }
+        private func nativeResizeDocumentWillChange() {
+            nativeResizeOwner?.documentWillChange()
+        }
         private var html: String?
         private var documentGeneration: UUID?
         private var loadedFile: URL?
@@ -237,6 +258,8 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         func invalidate() {
+            nativeResizeOwner?.invalidate()
+            nativeResizeOwner = nil
             nativeSelection = nil
             images.cancelPendingLoads()
             isInvalidated = true
@@ -251,6 +274,9 @@ struct MobileWebView: UIViewRepresentable {
             defer { configureDiscussions() }
             self.category = category
             if documentGeneration != reader.documentGeneration {
+                nativeResizeDocumentWillChange()
+                let intent = beginNativeResizeIntent()
+                defer { endNativeResizeIntent(intent) }
                 documentGeneration = reader.documentGeneration
                 generation += 1
                 loadingTask?.cancel()
@@ -299,6 +325,8 @@ struct MobileWebView: UIViewRepresentable {
 
         private func load(_ html: String, forceNavigation: Bool, preservePosition: Bool) {
             guard let webView else { return }
+            nativeResizeDocumentWillChange()
+            let resizeIntent = beginNativeResizeIntent()
             let reconcile = contentReady && !forceNavigation
             generation += 1
             let expectedGeneration = generation
@@ -312,6 +340,7 @@ struct MobileWebView: UIViewRepresentable {
             speechKey = ""
             loadingTask?.cancel()
             loadingTask = Task { [weak self] in
+                defer { self?.endNativeResizeIntent(resizeIntent) }
                 guard let self, !Task.isCancelled else { return }
                 if reconcile {
                     let renderedCategory = category, renderedZoom = reader.zoom
@@ -354,7 +383,9 @@ struct MobileWebView: UIViewRepresentable {
             let expectedGeneration = generation
             let position = readingPosition
             readingPosition = nil
+            let resizeIntent = position != nil ? beginNativeResizeIntent() : nil
             Task { [weak self] in
+                defer { self?.endNativeResizeIntent(resizeIntent) }
                 guard let self, valid(expectedGeneration) else { return }
                 if let position {
                     _ = try? await webView.callAsyncJavaScript(Self.guarded(MobileWebScripts.document),
@@ -381,8 +412,10 @@ struct MobileWebView: UIViewRepresentable {
             let expectedGeneration = generation, documentToken = token
             Task { [weak self] in
                 guard let self, valid(expectedGeneration), token == documentToken else { return }
+                var arguments: [String: Any] = ["operation": "observeResize", "restoreFocus": false, "documentToken": documentToken]
+                arguments["nativeResizeOwnsRestore"] = true
                 _ = try? await webView.callAsyncJavaScript(Self.guarded(MobileWebScripts.document),
-                    arguments: ["operation": "observeResize", "restoreFocus": false, "documentToken": documentToken],
+                    arguments: arguments,
                     in: nil, contentWorld: Self.contentWorld)
             }
         }
@@ -394,7 +427,9 @@ struct MobileWebView: UIViewRepresentable {
             typographyKey = key
             let expectedGeneration = generation
             let category = category, zoom = reader.zoom, token = token
+            let resizeIntent = beginNativeResizeIntent()
             Task { [weak self] in
+                defer { self?.endNativeResizeIntent(resizeIntent) }
                 guard let self, valid(expectedGeneration), typographyKey == key else { return }
                 do { try await MobileWebTypography.apply(to: webView, category: category, zoom: zoom, expectedToken: token) }
                 catch { if valid(expectedGeneration) { reader.errorMessage = error.localizedDescription } }
@@ -542,7 +577,9 @@ struct MobileWebView: UIViewRepresentable {
                     "startUnit": selection.domRange.start.unit, "startOffset": selection.domRange.start.offset,
                     "endUnit": selection.domRange.end.unit, "endOffset": selection.domRange.end.offset]
             }
+            let resizeIntent = wantsPassage ? beginNativeResizeIntent() : nil
             Task { [weak self] in
+                defer { self?.endNativeResizeIntent(resizeIntent) }
                 guard let self else { return }
                 let context = DiscussionBridge.Context(token: token, sourceID: projection.sourceID, enabled: true, allowedThreadIDs: Set(ids))
                 var arguments: [String: Any] = ["operation": "configure", "token": token,
@@ -664,7 +701,9 @@ struct MobileWebView: UIViewRepresentable {
             guard key != speechKey else { return }
             speechKey = key
             let expectedGeneration = generation
+            let resizeIntent = follow && element != nil ? beginNativeResizeIntent() : nil
             Task { [weak self] in
+                defer { self?.endNativeResizeIntent(resizeIntent) }
                 guard let self, valid(expectedGeneration), speechKey == key else { return }
                 _ = try? await webView.callAsyncJavaScript(Self.guarded(MobileWebScripts.speech),
                     arguments: ["operation": "highlight", "elementID": element ?? "", "follow": follow, "documentToken": token],
@@ -676,7 +715,9 @@ struct MobileWebView: UIViewRepresentable {
             guard let webView else { return }
             guard contentReady else { pendingNavigation = target; return }
             let expectedGeneration = generation
+            let resizeIntent = beginNativeResizeIntent()
             Task { [weak self] in
+                defer { self?.endNativeResizeIntent(resizeIntent) }
                 guard let self, valid(expectedGeneration), reader.navigationTarget == target else { return }
                 _ = try? await webView.callAsyncJavaScript(Self.guarded(MobileWebScripts.document),
                     arguments: ["operation": "navigate", "kind": "element", "id": target, "focus": true, "documentToken": token],
@@ -695,7 +736,9 @@ struct MobileWebView: UIViewRepresentable {
             configuration.backwards = reader.searchBackwards
             configuration.caseSensitive = false
             configuration.wraps = true
+            let resizeIntent = query.isEmpty ? nil : beginNativeResizeIntent()
             Task { [weak self] in
+                defer { self?.endNativeResizeIntent(resizeIntent) }
                 guard let self, valid(expectedGeneration), reader.searchGeneration == expectedSearch else { return }
                 if query.isEmpty {
                     await clearFind(in: webView, previousQuery: lastFindQuery ?? "",

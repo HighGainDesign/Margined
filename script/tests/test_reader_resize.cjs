@@ -435,6 +435,28 @@ test('navigation-cannot-revive-an-expired-resize-lease', () => {
     assert.equal(r.root.children.length, 1);
 });
 
+test('native-owner-disables-only-the-automatic-js-resize-writer', () => {
+    const r = rig();
+    r.context.nativeResizeOwnsRestore = true;
+    r.install();
+    r.committedResize(286, 710, 5971.1875); r.emit('resize');
+    assert.equal(r.state.scrollWrites.length, 0, 'Only native may perform this resize restore');
+    assert.equal(typeof r.context.marginedReadingResize.stop, 'function');
+    assert.equal(r.run({operation:'restore',position:{x:0,y:100,top:0,candidates:[]}}), true);
+    assert.equal(r.state.scrollWrites.length, 1, 'Explicit app restoration keeps its existing behavior');
+});
+test('native-owner-keeps-explicit-navigation-and-lease-retirement', () => {
+    const r = rig();
+    r.context.nativeResizeOwnsRestore = true;
+    r.install();
+    assert.equal(r.run({operation:'navigate',kind:'element',id:r.nodes[36].id,focus:true}), true);
+    assert.equal(r.state.navigationScrolls.length, 1);
+    r.context.marginedReadingResize.stop();
+    r.committedResize(286, 710, 5971.1875);
+    assert.equal(r.state.scrollWrites.length, 0);
+    assert.ok(r.state.observers.every(observer=>!observer.active));
+});
+
 let failures = 0, count = 0;
 for (const {name, run} of tests) {
     if (process.argv[3] && !name.includes(process.argv[3])) continue;
