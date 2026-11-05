@@ -755,7 +755,7 @@ import XCTest
         const rect=n=>{const r=n?.getBoundingClientRect();return r?{top:r.top,bottom:r.bottom,height:r.height}:null;};
         function observePassage(event) {
             const active=document.activeElement;
-            const row={event,time:performance.now(),samePage:window.passageDocument===document,innerWidth,innerHeight,y:scrollY,
+            const row={event,time:performance.now(),wallMS:Date.now(),samePage:window.passageDocument===document,innerWidth,innerHeight,y:scrollY,
                 clientWidth:document.documentElement.clientWidth,visualHeight:visualViewport?.height,
                 active:active?.tagName,activeQuote:active?.textContent.normalize('NFC').includes('Café bold passage.')===true,
                 activeRect:rect(active),quoteRect:rect(quote),token:document.documentElement.getAttribute('data-margined-mobile-token'),
@@ -787,6 +787,7 @@ import XCTest
         // its recorded end when supported, then verify the painted native viewport
         // and every observed post-success position within the original poll budget.
         let supportsScrollEnd = try await f.web.evaluateJavaScript("window.duoPassageScrollEndSupported") as? Bool == true
+        var nativePassageCommittedTime: Double?
         func passageMotionIsCommitted() async throws -> Bool {
             let configuration = WKSnapshotConfiguration(); configuration.afterScreenUpdates = true
             _ = try await f.web.takeSnapshot(configuration: configuration)
@@ -799,19 +800,28 @@ import XCTest
             const active=document.activeElement,r=active.getBoundingClientRect();
             const current=window.passageDocument===document && active.tagName==='P' &&
                 active.textContent.normalize('NFC').includes('Café bold passage.') && r.top>=0 && r.bottom<innerHeight;
-            return {x:scrollX,y:scrollY,continuous:!!success && end && current &&
-                trace.filter(e=>e.time>=success.time && ['scroll','resize','scrollend'].includes(e.event)).every(visible)};
-            """, arguments: ["requiresEnd": supportsScrollEnd], in: nil, contentWorld: .page) as? [String: Any]
+            return {x:scrollX,y:scrollY,sampleTime:performance.now(),continuous:!!success && end && current &&
+                (committedAfter===null || trace.filter(e=>e.time>=committedAfter && ['scroll','resize','scrollend'].includes(e.event)).every(visible))};
+            """, arguments: ["requiresEnd": supportsScrollEnd,
+                "committedAfter": nativePassageCommittedTime as Any? ?? NSNull()], in: nil, contentWorld: .page) as? [String: Any]
             let scroll = f.web.scrollView
             guard !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating,
                   let x = metrics?["x"] as? Double, let y = metrics?["y"] as? Double,
+                  let sampleTime = metrics?["sampleTime"] as? Double,
                   let presentation = scroll.layer.presentation()?.bounds else { return false }
             let offset = scroll.contentOffset, model = scroll.bounds
             let physicalPixel = 1 / f.window.screen.scale
-            return metrics?["continuous"] as? Bool == true &&
+            let committed = metrics?["continuous"] as? Bool == true &&
                 abs(x - Double(offset.x)) <= 1 && abs(y - Double(offset.y)) <= 1 &&
                 abs(presentation.minX - model.minX) <= physicalPixel &&
                 abs(presentation.minY - model.minY) <= physicalPixel
+            if committed && nativePassageCommittedTime == nil {
+                // WebContent can report its target before the native layer has
+                // painted it, then echo the previous native position. Start
+                // persistence only at this first coherent painted viewport.
+                nativePassageCommittedTime = sampleTime
+            }
+            return committed
         }
         let observedEnd = await pollAsync { try await passageMotionIsCommitted() }
         // Also inspect every frame after completion, so a transient jump's end
@@ -854,11 +864,50 @@ import XCTest
         XCTAssertTrue(f.reader.filteredDiscussionThreads.isEmpty)
         _ = try await f.web.evaluateJavaScript("scrollTo(0,document.body.scrollHeight);true")
         f.reader.goToDiscussion("t-mobile", version: version)
+        func filteredPassageViewportIsCommitted() async throws -> Bool {
+            let filteredConfiguration = WKSnapshotConfiguration(); filteredConfiguration.afterScreenUpdates = true
+            _ = try await f.web.takeSnapshot(configuration: filteredConfiguration)
+            let filteredViewport = try await f.web.evaluateJavaScript("""
+            (()=>{const a=document.activeElement,r=a.getBoundingClientRect();
+            return {x:scrollX,y:scrollY,visible:window.passageDocument===document && a.tagName==='P' &&
+                a.textContent.normalize('NFC').includes('Café bold passage.') && r.top>=0 && r.bottom<innerHeight};})();
+            """) as? [String: Any]
+            let scroll = f.web.scrollView, model = scroll.bounds, shown = scroll.layer.presentation()?.bounds
+            let pixel = 1 / f.window.screen.scale
+            return filteredViewport?["visible"] as? Bool == true &&
+                !scroll.isTracking && !scroll.isDragging && !scroll.isDecelerating &&
+                abs((filteredViewport?["x"] as? Double ?? .infinity) - Double(scroll.contentOffset.x)) <= 1 &&
+                abs((filteredViewport?["y"] as? Double ?? .infinity) - Double(scroll.contentOffset.y)) <= 1 &&
+                shown.map { abs($0.minX - model.minX) <= pixel && abs($0.minY - model.minY) <= pixel } == true
+        }
         let excluded = await pollAsync {
             guard f.reader.discussionPassageRequest == nil else { return false }
-            return try await f.web.evaluateJavaScript("document.activeElement?.textContent.normalize('NFC').includes('Café bold passage.')===true && document.activeElement.getBoundingClientRect().top>=0 && document.activeElement.getBoundingClientRect().bottom<innerHeight") as? Bool == true
+            return try await filteredPassageViewportIsCommitted()
+        }
+        let excludedRemainedVisible = try await f.web.callAsyncJavaScript("""
+        for(let frame=0;frame<12;frame++) {
+            await new Promise(resolve=>requestAnimationFrame(resolve));
+            const a=document.activeElement,r=a.getBoundingClientRect();
+            if(window.passageDocument!==document || a.tagName!=='P' || !a.textContent.normalize('NFC').includes('Café bold passage.') || r.top<0 || r.bottom>=innerHeight)return false;
+        }
+        return true;
+        """,arguments:[:],in:nil,contentWorld:.page) as? Bool == true
+        let filteredViewportCommitted = try await filteredPassageViewportIsCommitted()
+        if !excluded || !excludedRemainedVisible || !filteredViewportCommitted {
+            try await recordDuoGeometry(f, keyboard: keyboard, phase: "goTo-filter-after-original-failure")
+            let trace = try await f.web.evaluateJavaScript("if(typeof observePassage==='function')observePassage('afterFilterOriginalPredicate');({samePage:window.passageDocument===document,trace:window.duoPassageTrace??null})")
+            let state = try await f.web.callAsyncJavaScript("""
+            const s=window.__marginedDiscussions;
+            return {token:s?.token,sourceID:s?.sourceID,selected:s?.layout?.selected,
+                ranges:s?.layout?.ranges.map(i=>({id:i.id,rects:Array.from(i.range.getClientRects()).map(r=>({top:r.top,bottom:r.bottom,height:r.height}))}))};
+            """, arguments:[:],in:nil,contentWorld:MobileWebView.Coordinator.discussionWorld)
+            let data = try JSONSerialization.data(withJSONObject:["page":trace ?? NSNull(),"discussion":state ?? NSNull(),
+                "request":String(describing:f.reader.discussionPassageRequest),"native":nativeReadingGeometry(f)],options:[.sortedKeys])
+            print("GOTO-FILTER-TRACE " + String(decoding:data,as:UTF8.self))
         }
         XCTAssertTrue(excluded, "A retained reply outside the filter still needs a passage route")
+        XCTAssertTrue(excludedRemainedVisible, "Older motion must not resume after the filtered passage is revealed")
+        XCTAssertTrue(filteredViewportCommitted, "The filtered passage must finish in the actual painted native viewport")
         XCTAssertEqual(f.reader.discussions.filter, .resolved)
         XCTAssertNil(f.reader.discussionPassageRequest)
 

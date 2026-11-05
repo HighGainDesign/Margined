@@ -612,14 +612,22 @@ struct MobileWebView: UIViewRepresentable {
                             "startUnit": selection.domRange.start.unit, "startOffset": selection.domRange.start.offset,
                             "endUnit": selection.domRange.end.unit, "endOffset": selection.domRange.end.offset]
                     }
-                    // An explicit passage jump supersedes native scroll motion.
-                    // WebKit's instant DOM jump alone does not cancel an older
-                    // UIScrollView animation, which can otherwise resume afterward.
-                    webView.scrollView.setContentOffset(webView.scrollView.contentOffset, animated: false)
                     // Let the native reserved reader viewport and WebKit layout
-                    // commit before calculating the passage's visible position.
-                    let revealScript = "await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));\n" + DiscussionWebScripts.script
-                    let moved = try? await webView.callAsyncJavaScript(revealScript,
+                    // commit before cancelling older native motion. Cancelling
+                    // before this barrier can leave a previously submitted smooth
+                    // scroll arriving after the cancellation and passage jump.
+                    let ready = try? await webView.callAsyncJavaScript(
+                        "await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); return true;",
+                        arguments: [:], in: nil, contentWorld: Self.discussionWorld) as? Bool
+                    guard ready == true, !isInvalidated, contentReady,
+                          documentGeneration == reader.documentGeneration, self.webView === webView,
+                          String(generation) == token, html == reader.rendered?.html,
+                          reader.rendered?.discussionText?.sourceID == projection.sourceID,
+                          reader.matchesDiscussionVersion(passage.version),
+                          reader.discussionPassageRequest?.id == passage.id,
+                          passageInFlight == passage.id, canRevealPassage(passage.id) else { return }
+                    webView.scrollView.setContentOffset(webView.scrollView.contentOffset, animated: false)
+                    let moved = try? await webView.callAsyncJavaScript(DiscussionWebScripts.script,
                         arguments: arguments, in: nil, contentWorld: Self.discussionWorld) as? Bool
                     guard contentReady, String(generation) == token,
                           reader.matchesDiscussionVersion(passage.version),
