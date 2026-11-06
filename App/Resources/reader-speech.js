@@ -20,6 +20,7 @@ const selection = getSelection();
 if (!selection?.rangeCount) return null;
 const range = selection.getRangeAt(0);
 let start = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+if (start?.closest?.('[data-margined-response-ui]')) return null;
 let target = start?.closest?.('[data-margined-speech]');
 if (!target && start && main.contains(start)) {
     const child = start.childNodes[range.startOffset];
@@ -36,6 +37,7 @@ if (target.contains(range.startContainer)) {
     // Generated MathML contains visual tokens plus a TeX annotation. Selection
     // offsets use the original single TeX source, matching native speech maps.
     const length = node => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute('data-margined-response-ui')) return 0;
         if (node.nodeType === Node.TEXT_NODE) return node.data.length;
         if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute('data-margined-math-source')) return node.getAttribute('data-margined-math-source').length;
         return Array.from(node.childNodes).reduce((n, child) => n + length(child), 0);

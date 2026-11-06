@@ -137,6 +137,13 @@ struct ReaderView: View {
         .sheet(item: $reader.discussionPassagePicker) { request in
             DiscussionPassagePickerView(reader: reader, request: request)
         }
+        .sheet(item: Binding(get: { reader.answerDraft }, set: { value in
+                if value == nil, reader.answerDraft?.stale != true { reader.cancelAnswer() }
+            }), onDismiss: { reader.answerEditorDidDismiss() }) { draft in
+                ShortAnswerEditor(draft: draft, canSave: reader.canSaveAnswer,
+                    unavailableReason: reader.answerUnavailableReason,
+                    onSave: { reader.saveAnswer() }, onCancel: { reader.cancelAnswer() })
+            }
         .task { reader.documentAppearance = documentAppearance; await reader.watchFile() }
         .onChange(of: documentAppearance) { reader.documentAppearance = documentAppearance; reader.render() }
         .onChange(of: reader.wide) { reader.render() }
@@ -168,7 +175,7 @@ struct ReaderView: View {
         HStack(spacing: 0) {
             if reader.showOutline { outline; Divider() }
             if let rendered = reader.rendered {
-                MarkdownWebView(reader: reader, html: rendered.html, discussionSelectionRequest: reader.discussionSelectionGeneration, discussionsVisible: reader.showDiscussions, discussionFilter: reader.discussions.filter, selectedDiscussion: reader.discussions.selection, discussionPassageRequest: reader.discussionPassageGeneration, speechRequestID: reader.existingSpeech?.startRequest?.id, speechElementID: reader.existingSpeech?.conversationID == nil && reader.existingSpeech?.session.isActive == true ? reader.existingSpeech?.session.currentSegment?.elementID : nil, speechFollowReading: reader.existingSpeech?.session.followReading ?? true, playbackHolding: reader.playbackHolding, checklistEnabled: reader.checklistMode, checklistSaving: reader.fileSaving, checklistRendering: reader.isRendering, checklistPromptPresented: reader.showChecklistConfirmation)
+                MarkdownWebView(reader: reader, html: rendered.html, discussionSelectionRequest: reader.discussionSelectionGeneration, discussionsVisible: reader.showDiscussions, discussionFilter: reader.discussions.filter, selectedDiscussion: reader.discussions.selection, discussionPassageRequest: reader.discussionPassageGeneration, speechRequestID: reader.existingSpeech?.startRequest?.id, speechElementID: reader.existingSpeech?.conversationID == nil && reader.existingSpeech?.session.isActive == true ? reader.existingSpeech?.session.currentSegment?.elementID : nil, speechFollowReading: reader.existingSpeech?.session.followReading ?? true, playbackHolding: reader.playbackHolding, checklistEnabled: reader.checklistMode, checklistSaving: reader.fileSaving, checklistRendering: reader.isRendering, checklistPromptPresented: reader.showChecklistConfirmation, answerPresented: reader.answerDraft != nil, answerFocusReturn: reader.answerFocusReturnGeneration, sourceVersionGeneration: reader.snapshotGeneration)
             } else {
                 ProgressView("Rendering Markdown…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }

@@ -18,6 +18,7 @@ struct MarkdownTaskProbe {
             let suite = XCTestSuite(name: "Noninteractive reader state")
             suite.addTest(ChecklistStateTests.defaultTestSuite)
             suite.addTest(ResponseStateTests.defaultTestSuite)
+            suite.addTest(ResponseEditorTests.defaultTestSuite)
             guard suite.testCaseCount > 0 else { exit(2) }
             suite.run()
             guard suite.testRun?.hasSucceeded == true else { exit(1) }

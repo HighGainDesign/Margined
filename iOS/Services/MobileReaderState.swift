@@ -11,6 +11,8 @@ final class MobileReaderState {
     let access: MobileDocumentAccess
     let discussions = DiscussionSession()
     var answerDraft: ShortAnswerDraft?
+    var answerFocusReturnGeneration = 0
+    func answerEditorDidDismiss() { answerFocusReturnGeneration &+= 1 }
     var canSaveAnswer: Bool {
         guard let draft = answerDraft, !draft.saving, draft.validationMessage == nil else { return false }
         return answerUnavailableReason == nil
@@ -325,6 +327,8 @@ final class MobileReaderState {
     var selectedChange: DocumentChange? {
         changes.entries.isEmpty ? nil : changes.entries[min(currentChangeIndex, changes.count - 1)]
     }
+    var undoFileTitle: String { undoStack.last?.isResponse == true ? String(localized: "Undo Response Change") : String(localized: "Undo Checkbox Change") }
+    var redoFileTitle: String { redoStack.last?.isResponse == true ? String(localized: "Redo Response Change") : String(localized: "Redo Checkbox Change") }
     var canUndoChecklist: Bool { canWrite && !undoStack.isEmpty }
     var canRedoChecklist: Bool { canWrite && !redoStack.isEmpty }
     var canWrite: Bool { answerDraft == nil && answerFileReady }

@@ -52,7 +52,7 @@ function canonicalOffset(unit,raw) {
     return unit.text.length;
 }
 function ignored(node) {
-    return node.hasAttribute('hidden') || node.getAttribute('aria-hidden')==='true' ||
+    return node.hasAttribute('data-margined-response-ui') || node.hasAttribute('hidden') || node.getAttribute('aria-hidden')==='true' ||
         ['script','style','input','button','noscript'].includes(node.localName) || node.classList.contains('margined-discussion-decoration');
 }
 function unsupported(node) {

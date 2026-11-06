@@ -128,8 +128,8 @@ struct MobileReaderView: View {
                         Button("Smaller Text", systemImage: "textformat.size.smaller") { reader.changeZoom(by: -0.1) }
                     }
                     Section {
-                        Button("Undo Checkbox Change", systemImage: "arrow.uturn.backward") { reader.undoChecklist() }.disabled(!reader.canUndoChecklist)
-                        Button("Redo Checkbox Change", systemImage: "arrow.uturn.forward") { reader.redoChecklist() }.disabled(!reader.canRedoChecklist)
+                        Button(reader.undoFileTitle, systemImage: "arrow.uturn.backward") { reader.undoChecklist() }.disabled(!reader.canUndoChecklist)
+                        Button(reader.redoFileTitle, systemImage: "arrow.uturn.forward") { reader.redoChecklist() }.disabled(!reader.canRedoChecklist)
                         if reader.checklistMode { Button("Stop Saving Checkmarks") { reader.stopSavingCheckmarks() } }
                     }
                 } label: { Label("More", systemImage: "ellipsis.circle") }

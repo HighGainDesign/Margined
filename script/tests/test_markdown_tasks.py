@@ -47,7 +47,7 @@ class MarkdownTaskTests(unittest.TestCase):
                        "-Xlinker", "-rpath", "-Xlinker", str(developer / "Platforms/MacOSX.platform/Developer/usr/lib")]
             if READER_STATE:
                 command += ["-D", "MARGINED_READER_STATE_PROBE", str(ROOT / "Tests/ChecklistStateTests.swift"),
-                            str(ROOT / "Tests/ResponseStateTests.swift")]
+                            str(ROOT / "Tests/ResponseStateTests.swift"), str(ROOT / "Tests/ResponseEditorTests.swift")]
             for relative in ("include", "vendor/cmark-gfm/src", "vendor/cmark-gfm/extensions",
                              "PackageSupport/cmark-gfm", "vendor/libyaml/include"):
                 command += ["-I", str(vendor / relative)]

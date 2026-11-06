@@ -289,6 +289,7 @@ targets:
       - Tests/MarkdownSourceEditsTests.swift
       - Tests/MarkdownResponseTests.swift
       - Tests/ResponseStateTests.swift
+      - Tests/ResponseControlBridgeTests.swift
       - Tests/SourceFileEditTests.swift
       - Tests/SourceFileGateTests.swift
       - Tests/DiscussionSessionTests.swift

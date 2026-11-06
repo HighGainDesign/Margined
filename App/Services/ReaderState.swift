@@ -7,7 +7,7 @@ final class ReaderState {
     private let checklistWriter: ChecklistWriter?
     @ObservationIgnored private var sourceGate = SourceFileGate()
     @ObservationIgnored private var classifyUpdateTask: Task<Void, Never>?
-    @ObservationIgnored private var snapshotGeneration: UInt64 = 0
+    private(set) var snapshotGeneration: UInt64 = 0
     @ObservationIgnored private var sourceSnapshot: SourceFileEdit.Snapshot? {
         didSet {
             if sourceSnapshot != oldValue { snapshotGeneration &+= 1 }
@@ -22,6 +22,8 @@ final class ReaderState {
     let announcements: ReaderAnnouncements
     let discussions = DiscussionSession()
     var answerDraft: ShortAnswerDraft?
+    var answerFocusReturnGeneration = 0
+    func answerEditorDidDismiss() { answerFocusReturnGeneration &+= 1 }
     var canSaveAnswer: Bool {
         guard let draft = answerDraft, !draft.saving, draft.validationMessage == nil else { return false }
         return answerUnavailableReason == nil
@@ -449,6 +451,8 @@ final class ReaderState {
     private var checklistUndo: [ChecklistOperation] = []
     private var checklistRedo: [ChecklistOperation] = []
 
+    var undoFileTitle: String { checklistUndo.last?.isResponse == true ? String(localized: "Undo Response Change") : String(localized: "Undo Checkbox Change") }
+    var redoFileTitle: String { checklistRedo.last?.isResponse == true ? String(localized: "Redo Response Change") : String(localized: "Redo Checkbox Change") }
     var canUndoChecklist: Bool { answerDraft == nil && !playbackHolding && !hasPendingFileUpdate && (checklistMode || checklistUndo.last?.isResponse == true) && !fileSaving && !isRendering && !checklistUndo.isEmpty }
     var canRedoChecklist: Bool { answerDraft == nil && !playbackHolding && !hasPendingFileUpdate && (checklistMode || checklistRedo.last?.isResponse == true) && !fileSaving && !isRendering && !checklistRedo.isEmpty }
     var zoom = 1.0

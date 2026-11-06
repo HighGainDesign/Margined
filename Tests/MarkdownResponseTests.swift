@@ -8,6 +8,23 @@ import XCTest
 #endif
 
 final class MarkdownResponseTests: XCTestCase {
+    func testResponseControlsStayOutOfReadOnlySemanticAndPrintedSnapshots() async throws {
+        let source = "**Result (choose one):**\n\n- [X] A\n- [x] B\n\n**Notes (short answer):** Original\n"
+        let app = try await MarkdownRenderer.shared.render(source, mapTasks: true, prepareSpeech: true)
+        XCTAssertEqual(app.responses.choices.count, 1)
+        XCTAssertEqual(app.responses.answers.count, 1)
+        XCTAssertEqual(try SwiftSoup.parse(app.html).select("[data-margined-response-ui],[data-margined-answer-action]").size(), 0)
+        let printed = try await MarkdownRenderer.shared.printHTML(app, title: "Questions", includeDiscussions: false, loadRemoteImages: false)
+        let page = try SwiftSoup.parse(printed)
+        XCTAssertEqual(try page.select("button,[data-margined-response-ui]").size(), 0)
+        XCTAssertEqual(try page.select("input:not([disabled])").size(), 0)
+        XCTAssertTrue(try page.text().contains("Original"))
+        let readOnly = try await MarkdownRenderer.shared.render(source, mapTasks: false, prepareSpeech: true)
+        XCTAssertTrue(readOnly.responses.answers.isEmpty)
+        XCTAssertTrue(readOnly.responses.choices.isEmpty)
+        XCTAssertEqual(try SwiftSoup.parse(readOnly.html).select("button,[data-margined-answer],[data-margined-choice]").size(), 0)
+        XCTAssertEqual(app.speech?.segments.map(\.text), readOnly.speech?.segments.map(\.text))
+    }
     func testExplicitTopLevelQuestionsMapToTheirOwnControls() async throws {
         let source = """
         **Result (choose one):**

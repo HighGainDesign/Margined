@@ -12,6 +12,7 @@ final class ShortAnswerDraft: Identifiable {
     var error: String?
     var saving = false
     var stale = false
+    @ObservationIgnored var endEditing: (() -> Void)?
 
     init(field: MarkdownTextResponse, expected: SourceFileEdit.Snapshot, context: UUID) {
         self.field = field; self.expected = expected; self.context = context
