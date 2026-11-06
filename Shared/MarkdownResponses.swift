@@ -176,7 +176,7 @@ enum MarkdownResponses {
                     // Task IDs already have exact source mappings. They disambiguate
                     // identical labels and prevent author-HTML lookalikes stealing a group.
                     let p = match.paragraph, ul = match.list, inputs = match.inputs
-                    guard try p.text() == label + " (choose one):",
+                    guard matchingText(p) == normalizedMatchingText(label + " (choose one):"),
                           p.children().size() == 1, p.children().first()?.tagName() == "strong" else { continue }
                     guard match.ids == members.map(\.id),
                           ul.children().size() == members.count,
@@ -192,10 +192,10 @@ enum MarkdownResponses {
                           let html = cmark_render_html(paragraph, Int32(CMARK_OPT_UNSAFE), nil) {
                     defer { free(html) }
                     let fragment = try SwiftSoup.parseBodyFragment(String(cString: html))
-                    let text = try fragment.text()
+                    let text = matchingText(fragment)
                     let prefix = match.label + " (short answer):"
-                    guard text.hasPrefix(prefix) else { continue }
                     let uncollapsed = try fragment.select("p").first().map(textPreservingWhitespace) ?? text
+                    guard uncollapsed.hasPrefix(prefix) else { continue }
                     let plain = String(uncollapsed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
                     answers.append(.init(label: match.label, range: (starts[line] + match.valueOffset)..<end,
                         value: match.value, plain: match.value == "_Not answered_" ? "" : plain,
@@ -206,7 +206,7 @@ enum MarkdownResponses {
             var dom: [String: [Element]] = [:]
             for element in elements where element.tagName() == "p" {
                 guard element.children().first()?.tagName() == "strong" else { continue }
-                dom[try element.text(), default: []].append(element)
+                dom[matchingText(element), default: []].append(element)
             }
             var used: [String: Int] = [:]
             for candidate in answers {
@@ -312,6 +312,16 @@ enum MarkdownResponses {
             else { stack.append(contentsOf: current.getChildNodes().reversed()) }
         }
         return result
+    }
+
+    private static func normalizedMatchingText(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func matchingText(_ node: Node) -> String {
+        // SwiftSoup's text() can remove spaces next to CJK text when review
+        // marks split a single text node. Compare the actual text-node stream.
+        normalizedMatchingText(textPreservingWhitespace(node))
     }
 
     private static func withSourceTree<Result>(_ source: String, _ action: (UnsafeMutablePointer<cmark_node>, [UInt8], [Int]) throws -> Result) throws -> Result {

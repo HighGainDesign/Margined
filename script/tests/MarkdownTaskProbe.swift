@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if MARGINED_READER_STATE_PROBE
+import AppKit
+#endif
 @testable import Margined
 
 // Links the actual reader objects without MarginedApp.o or its application loop.
@@ -7,6 +10,19 @@ import XCTest
 struct MarkdownTaskProbe {
     static func main() async {
         do {
+            #if MARGINED_READER_STATE_PROBE
+            // Link actual state objects without the app entrypoint/delegate.
+            // This process is explicitly forbidden from activating or showing UI.
+            let application = NSApplication.shared
+            guard application.setActivationPolicy(.prohibited) else { exit(2) }
+            let suite = XCTestSuite(name: "Noninteractive reader state")
+            suite.addTest(ChecklistStateTests.defaultTestSuite)
+            suite.addTest(ResponseStateTests.defaultTestSuite)
+            guard suite.testCaseCount > 0 else { exit(2) }
+            suite.run()
+            guard suite.testRun?.hasSucceeded == true else { exit(1) }
+            return
+            #else
             let suite = XCTestSuite(name: "Task and response mapping")
             suite.addTest(MarkdownTaskTests.defaultTestSuite)
             suite.addTest(MarkdownResponseTests.defaultTestSuite)
@@ -14,6 +30,7 @@ struct MarkdownTaskProbe {
             suite.run()
             guard suite.testRun?.hasSucceeded == true else { exit(1) }
             try await verify()
+            #endif
         } catch {
             FileHandle.standardError.write(Data("FAIL: \(error.localizedDescription)\n".utf8))
             exit(1)

@@ -4,6 +4,41 @@ import XCTest
 
 @MainActor
 final class ChecklistStateTests: XCTestCase {
+    func testChooseOneConsentSavesWholeGroupAndUndoRestoresUppercase() async throws {
+        let source = "**Result (choose one):**\n\n- [X] A\n- [ ] B\n\n- [ ] Independent\n"
+        // A separate heading keeps the independent task outside the choice list.
+        let original = source.replacingOccurrences(of: "\n\n- [ ] Independent", with: "\n\n## Other\n\n- [ ] Independent")
+        let (reader, file) = try makeReader(original)
+        defer { reader.stop(); try? FileManager.default.removeItem(at: file) }
+        reader.render(); try await settle(reader)
+        XCTAssertTrue(reader.requestTaskChecked(1, checked: true))
+        reader.cancelChecklistConfirmation()
+        XCTAssertEqual(try MarkdownSource.read(file), original)
+        XCTAssertTrue(reader.requestTaskChecked(1, checked: true))
+        reader.confirmChecklistSaving(); try await settle(reader)
+        let changed = original.replacingOccurrences(of: "[X] A", with: "[ ] A").replacingOccurrences(of: "[ ] B", with: "[x] B")
+        XCTAssertEqual(try MarkdownSource.read(file), changed)
+        reader.undoChecklist(); try await settle(reader)
+        XCTAssertEqual(try MarkdownSource.read(file), original)
+        reader.redoChecklist(); try await settle(reader)
+        XCTAssertEqual(try MarkdownSource.read(file), changed)
+        reader.setTaskChecked(2, checked: true); try await settle(reader)
+        XCTAssertEqual(try MarkdownSource.read(file), changed.replacingOccurrences(of: "[ ] Independent", with: "[x] Independent"))
+    }
+
+    func testClickingCheckedConflictingChoiceSelectsItAloneAndUndoRestoresConflict() async throws {
+        let source = "**Result (choose one):**\n\n- [X] A\n- [x] B\n"
+        let (reader, file) = try makeReader(source)
+        defer { reader.stop(); try? FileManager.default.removeItem(at: file) }
+        reader.render(); try await settle(reader)
+        XCTAssertEqual(try MarkdownSource.read(file), source)
+        XCTAssertTrue(reader.requestTaskChecked(0, checked: false))
+        reader.confirmChecklistSaving(); try await settle(reader)
+        XCTAssertEqual(try MarkdownSource.read(file), source.replacingOccurrences(of: "[x] B", with: "[ ] B"))
+        reader.undoChecklist(); try await settle(reader)
+        XCTAssertEqual(try MarkdownSource.read(file), source)
+    }
+
     func testExplicitModeRequiredAndUndoRedoPreserveUppercaseMarker() async throws {
         let source = "- [X] First\n- [ ] Second\n"
         let (reader, file) = try makeReader(source)

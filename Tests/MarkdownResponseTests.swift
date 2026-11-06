@@ -53,6 +53,7 @@ final class MarkdownResponseTests: XCTestCase {
             "**Notes (short answer):** A value\non another line\n",
             "> **Notes (short answer):** Value\n",
             "- **Notes (short answer):** Value\n",
+            "<div>\n\n**Notes (short answer):** Value\n\n</div>\n",
             "| Question | Answer |\n| --- | --- |\n| **Notes (short answer):** Value | Other |\n"
         ]
         for source in sources {
@@ -71,11 +72,13 @@ final class MarkdownResponseTests: XCTestCase {
     }
 
     func testPlainPunctuationLabelsAndDuplicateQuestionsHaveDistinctMappings() async throws {
-        let source = "**Device_OS [test] (short answer):** One\n\n**Device_OS [test] (short answer):** One\n"
-        let output = try await MarkdownRenderer.shared.render(source, mapTasks: true)
-        XCTAssertEqual(output.responses.answers.count, 2)
-        XCTAssertEqual(Set(output.responses.answers.map(\.range)).count, 2)
-        XCTAssertEqual(output.responses.answers.map(\.plainValue), ["One", "One"])
+        for label in ["Device_OS [test]", "Device  OS"] {
+            let source = "**\(label) (short answer):** One\n\n**\(label) (short answer):** One\n"
+            let output = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+            XCTAssertEqual(output.responses.answers.count, 2, label)
+            XCTAssertEqual(Set(output.responses.answers.map(\.range)).count, 2)
+            XCTAssertEqual(output.responses.answers.map(\.plainValue), ["One", "One"])
+        }
         let styled = try await MarkdownRenderer.shared.render("**A *styled* label (short answer):** One\n", mapTasks: true)
         XCTAssertTrue(styled.responses.answers.isEmpty)
     }
@@ -194,5 +197,17 @@ final class MarkdownResponseTests: XCTestCase {
         let output = try await MarkdownRenderer.shared.render(source, mapTasks: true)
         XCTAssertEqual(output.responses.choices.count, 100)
         XCTAssertEqual(output.responses.choices.flatMap(\.tasks).map(\.id), Array(0..<200))
+    }
+
+    func testChangedAnswerRemainsMappedThroughWordReviewAndSpeechMarkers() async throws {
+        let before = "**Notes (short answer):** A **bold** observation.\n"
+        let initial = try await MarkdownRenderer.shared.render(before, mapTasks: true)
+        let field = try XCTUnwrap(initial.responses.answers.first)
+        let text = "New **literal** text, Café 日本語"
+        let edit = try MarkdownResponses.answerEdit(source: before, field: field, text: text)
+        let source = try MarkdownSource.decode(edit.apply(to: Data(before.utf8)))
+        let output = try await MarkdownRenderer.shared.render(source, baseline: before, mapTasks: true, prepareSpeech: true)
+        XCTAssertEqual(output.responses.answers.first?.plainValue, text)
+        XCTAssertEqual(output.changes.count, 1)
     }
 }

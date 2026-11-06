@@ -9,7 +9,10 @@ final class ReaderState {
     @ObservationIgnored private var classifyUpdateTask: Task<Void, Never>?
     @ObservationIgnored private var snapshotGeneration: UInt64 = 0
     @ObservationIgnored private var sourceSnapshot: SourceFileEdit.Snapshot? {
-        didSet { if sourceSnapshot != oldValue { snapshotGeneration &+= 1 } }
+        didSet {
+            if sourceSnapshot != oldValue { snapshotGeneration &+= 1 }
+            if let draft = answerDraft, sourceSnapshot != draft.expected { draft.stale = true }
+        }
     }
     private var pendingDiskSnapshot: SourceFileEdit.Snapshot? {
         didSet { if pendingDiskSnapshot != oldValue { snapshotGeneration &+= 1 } }
@@ -18,6 +21,44 @@ final class ReaderState {
     @ObservationIgnored private var renderedContext: UUID?
     let announcements: ReaderAnnouncements
     let discussions = DiscussionSession()
+    var answerDraft: ShortAnswerDraft?
+    var canSaveAnswer: Bool {
+        guard let draft = answerDraft, !draft.saving, draft.validationMessage == nil else { return false }
+        return answerUnavailableReason == nil
+    }
+    var answerUnavailableReason: String? {
+        guard let draft = answerDraft else { return nil }
+        guard !draft.stale, draft.context == sourceContext, fileURL == draft.expected.url,
+              sourceSnapshot == draft.expected, (try? draft.expected.source.utf8.elementsEqual(source.utf8)) == true else {
+            return String(localized: "The file changed. Copy your answer, close this editor, then reopen it in the latest version.")
+        }
+        if playbackHolding { return String(localized: "Stop Read Aloud before saving this answer.") }
+        if hasPendingFileUpdate { return String(localized: "A newer file version is waiting. Copy your answer and reopen it in the latest version.") }
+        if fileSaving || isRendering || showChecklistConfirmation || isStreamingPreview {
+            return String(localized: "Wait for the file to finish updating before saving this answer.")
+        }
+        return nil
+    }
+    @discardableResult
+    func beginAnswer(_ id: Int) -> Bool {
+        guard answerDraft == nil, !playbackHolding, !hasPendingFileUpdate, !fileSaving, !isRendering,
+              !showChecklistConfirmation, !isStreamingPreview, let fileURL, let captured = sourceSnapshot,
+              captured.url == fileURL, let output = rendered, output.taskSource.utf8.elementsEqual(source.utf8),
+              (try? captured.source.utf8.elementsEqual(source.utf8)) == true,
+              let field = output.responses.answers.first(where: { $0.id == id }) else { return false }
+        answerDraft = .init(field: field, expected: captured, context: sourceContext)
+        return true
+    }
+    func saveAnswer() {
+        guard let draft = answerDraft, !draft.saving else { return }
+        guard canSaveAnswer else { draft.error = answerUnavailableReason ?? draft.validationMessage; return }
+        do {
+            let edit = try MarkdownResponses.answerEdit(source: source, field: draft.field, text: draft.text)
+            if edit.splices.isEmpty { answerDraft = nil; return }
+            if !performResponseChange(edit, history: .normal, draft: draft) { draft.error = checklistError ?? answerUnavailableReason }
+        } catch { draft.error = error.localizedDescription }
+    }
+    func cancelAnswer() { if answerDraft?.saving != true { answerDraft = nil } }
     @ObservationIgnored private var discussionHistoryPositions: [String: DiscussionHistoryPresentationState] = [:]
     @ObservationIgnored var discussionComposerSelections: [DiscussionSession.DraftKey: NSRange] = [:]
     func discussionHistoryPosition(for thread: String) -> DiscussionHistoryPresentationState {
@@ -32,8 +73,8 @@ final class ReaderState {
     var discussionCopySaving = false
     var discussionExportedURL: URL?
     var fileSaving: Bool { checklistSaving || discussionSaving || discussionCopySaving }
-    var canUndoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canUndo(snapshot: sourceSnapshot) }
-    var canRedoDiscussion: Bool { !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canRedo(snapshot: sourceSnapshot) }
+    var canUndoDiscussion: Bool { answerDraft == nil && !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canUndo(snapshot: sourceSnapshot) }
+    var canRedoDiscussion: Bool { answerDraft == nil && !fileSaving && !isRendering && !hasPendingFileUpdate && discussions.canRedo(snapshot: sourceSnapshot) }
 
     var showDiscussions: Bool {
         get { discussions.visible }
@@ -273,7 +314,7 @@ final class ReaderState {
         discussionError = DiscussionSession.Failure.savedCopyRequired.localizedDescription
     }
     func commitDiscussion(_ operation: DiscussionSession.Pending) {
-        guard !fileSaving, fileURL == operation.expected.url, sourceSnapshot == operation.expected else {
+        guard answerDraft == nil, !fileSaving, fileURL == operation.expected.url, sourceSnapshot == operation.expected else {
             discussions.failed(operation, error: SourceFileEdit.Failure.changed)
             discussionError = SourceFileEdit.Failure.changed.localizedDescription
             return
@@ -408,8 +449,8 @@ final class ReaderState {
     private var checklistUndo: [ChecklistOperation] = []
     private var checklistRedo: [ChecklistOperation] = []
 
-    var canUndoChecklist: Bool { !playbackHolding && !hasPendingFileUpdate && checklistMode && !fileSaving && !isRendering && !checklistUndo.isEmpty }
-    var canRedoChecklist: Bool { !playbackHolding && !hasPendingFileUpdate && checklistMode && !fileSaving && !isRendering && !checklistRedo.isEmpty }
+    var canUndoChecklist: Bool { answerDraft == nil && !playbackHolding && !hasPendingFileUpdate && (checklistMode || checklistUndo.last?.isResponse == true) && !fileSaving && !isRendering && !checklistUndo.isEmpty }
+    var canRedoChecklist: Bool { answerDraft == nil && !playbackHolding && !hasPendingFileUpdate && (checklistMode || checklistRedo.last?.isResponse == true) && !fileSaving && !isRendering && !checklistRedo.isEmpty }
     var zoom = 1.0
     var wide = UserDefaults.standard.object(forKey: "wideLayout") as? Bool ?? true
     var documentAppearance = DocumentAppearance.system
@@ -540,6 +581,7 @@ final class ReaderState {
 
     private func receiveDiskSnapshot(_ snapshot: SourceFileEdit.Snapshot) {
         guard snapshot.url == fileURL, let text = try? snapshot.source else { return }
+        if let draft = answerDraft, snapshot != draft.expected { draft.stale = true }
         if let displayed = sourceSnapshot, displayed != snapshot {
             checklistUndo.removeAll(); checklistRedo.removeAll()
         }
@@ -557,6 +599,7 @@ final class ReaderState {
 
     func receiveFileUpdate(_ text: String) {
         guard fileURL != nil, !isStreamingPreview else { return }
+        if !text.utf8.elementsEqual(source.utf8), pendingChecklistSource?.utf8.elementsEqual(text.utf8) != true { answerDraft?.stale = true }
         // Even a return to identical text is a new external version. Only the
         // in-flight marker result may be observed without superseding its save.
         if (pendingChecklistSource?.utf8.elementsEqual(text.utf8) != true) { externalFileRevision += 1 }
@@ -633,16 +676,21 @@ final class ReaderState {
         let source: String
         let task: MarkdownTask
         let checked: Bool
+        let response: MarkdownResponseEdit?
     }
 
     @discardableResult
     func requestTaskChecked(_ id: Int, checked: Bool) -> Bool {
-        guard !playbackHolding, !hasPendingFileUpdate, !fileSaving, !isRendering, !showChecklistConfirmation,
+        guard answerDraft == nil, !playbackHolding, !hasPendingFileUpdate, !fileSaving, !isRendering, !showChecklistConfirmation,
               !isStreamingPreview, let fileURL, let rendered, rendered.taskSource.utf8.elementsEqual(source.utf8),
-              let task = rendered.tasks.first(where: { $0.id == id }), task.checked != checked else { return false }
+              let task = rendered.tasks.first(where: { $0.id == id }),
+              task.checked != checked || rendered.responses.choices.contains(where: { $0.hasConflict && $0.tasks.contains(task) }) else { return false }
+        let response: MarkdownResponseEdit?
+        do { response = try choiceEdit(for: task, checked: checked) }
+        catch { checklistError = error.localizedDescription; return false }
         if checklistMode { setTaskChecked(id, checked: checked) }
         else {
-            pendingChecklistConfirmation = ChecklistConfirmation(fileURL: fileURL, source: source, task: task, checked: checked)
+            pendingChecklistConfirmation = ChecklistConfirmation(fileURL: fileURL, source: source, task: task, checked: checked, response: response)
             showChecklistConfirmation = true
         }
         return true
@@ -665,23 +713,36 @@ final class ReaderState {
         }
         // The consented gesture already has a validated source descriptor.
         // An appearance-only render need not discard that first change.
-        performChecklistChange(task: pending.task, marker: pending.checked ? 120 : 32, history: .normal, allowRendering: true)
+        if let response = pending.response { performResponseChange(response, history: .normal, allowRendering: true) }
+        else { performChecklistChange(task: pending.task, marker: pending.checked ? 120 : 32, history: .normal, allowRendering: true) }
     }
 
     func setTaskChecked(_ id: Int, checked: Bool) {
-        guard !playbackHolding, !hasPendingFileUpdate, let rendered, rendered.taskSource.utf8.elementsEqual(source.utf8),
-              let task = rendered.tasks.first(where: { $0.id == id }), task.checked != checked else { return }
-        performChecklistChange(task: task, marker: checked ? 120 : 32, history: .normal)
+        guard answerDraft == nil, !playbackHolding, !hasPendingFileUpdate, let rendered, rendered.taskSource.utf8.elementsEqual(source.utf8),
+              let task = rendered.tasks.first(where: { $0.id == id }),
+              task.checked != checked || rendered.responses.choices.contains(where: { $0.hasConflict && $0.tasks.contains(task) }) else { return }
+        do {
+            if let response = try choiceEdit(for: task, checked: checked) {
+                guard checklistMode else { return }
+                performResponseChange(response, history: .normal)
+            } else { performChecklistChange(task: task, marker: checked ? 120 : 32, history: .normal) }
+        } catch { checklistError = error.localizedDescription }
     }
 
     func undoChecklist() {
         guard canUndoChecklist, let operation = checklistUndo.last else { return }
-        performChecklistChange(task: operation.task, marker: operation.marker, history: .undo)
+        switch operation {
+        case let .marker(task, marker): performChecklistChange(task: task, marker: marker, history: .undo)
+        case let .response(edit): performResponseChange(edit, history: .undo)
+        }
     }
 
     func redoChecklist() {
         guard canRedoChecklist, let operation = checklistRedo.last else { return }
-        performChecklistChange(task: operation.task, marker: operation.marker, history: .redo)
+        switch operation {
+        case let .marker(task, marker): performChecklistChange(task: task, marker: marker, history: .redo)
+        case let .response(edit): performResponseChange(edit, history: .redo)
+        }
     }
 
     private func performChecklistChange(task: MarkdownTask, marker: UInt8, history: ChecklistHistory, allowRendering: Bool = false) {
@@ -718,7 +779,7 @@ final class ReaderState {
                 let newerVersionWaiting = pendingFileSource != nil && pendingFileSource?.utf8.elementsEqual(updated.utf8) != true
                 sourceSnapshot = saved
                 acceptFileUpdate(updated)
-                let inverse = ChecklistOperation(task: MarkdownTask(id: task.id, utf8Offset: task.utf8Offset, marker: marker, label: task.label), marker: task.marker)
+                let inverse = ChecklistOperation.marker(task: MarkdownTask(id: task.id, utf8Offset: task.utf8Offset, marker: marker, label: task.label), marker: task.marker)
                 if newerVersionWaiting {
                     checklistUndo.removeAll(); checklistRedo.removeAll()
                 } else {
@@ -728,7 +789,7 @@ final class ReaderState {
                     case .redo: if !checklistRedo.isEmpty { checklistRedo.removeLast() }; checklistUndo.append(inverse)
                     }
                 }
-                if checklistUndo.count > 100 { checklistUndo.removeFirst() }
+                trimChecklistHistory()
                 checklistSaving = false
                 pendingChecklistSource = nil
             } catch {
@@ -743,7 +804,85 @@ final class ReaderState {
     }
 
     private enum ChecklistHistory { case normal, undo, redo }
-    private struct ChecklistOperation { let task: MarkdownTask; let marker: UInt8 }
+    private enum ChecklistOperation {
+        case marker(task: MarkdownTask, marker: UInt8)
+        case response(MarkdownResponseEdit)
+        var isResponse: Bool { if case .response = self { true } else { false } }
+        var byteCount: Int {
+            switch self {
+            case let .marker(task, _): task.label.utf8.count + 32
+            case let .response(edit): edit.source.utf8.count + edit.splices.reduce(0) { $0 + $1.replacement.utf8.count + 32 }
+            }
+        }
+    }
+
+    private func choiceEdit(for task: MarkdownTask, checked: Bool) throws -> MarkdownResponseEdit? {
+        guard let group = rendered?.responses.choices.first(where: { $0.tasks.contains(where: { $0.id == task.id }) }) else { return nil }
+        return try MarkdownResponses.choiceEdit(source: source, group: group, taskID: task.id, checked: checked)
+    }
+
+    private func trimChecklistHistory() {
+        while checklistUndo.count + checklistRedo.count > 100 ||
+              checklistUndo.reduce(0, { $0 + $1.byteCount }) + checklistRedo.reduce(0, { $0 + $1.byteCount }) > 16 * 1_024 * 1_024 {
+            if !checklistUndo.isEmpty { checklistUndo.removeFirst() }
+            else if !checklistRedo.isEmpty { checklistRedo.removeFirst() }
+            else { break }
+        }
+    }
+
+    @discardableResult
+    private func performResponseChange(_ edit: MarkdownResponseEdit, history: ChecklistHistory, allowRendering: Bool = false, draft: ShortAnswerDraft? = nil) -> Bool {
+        guard !playbackHolding, !hasPendingFileUpdate, !fileSaving, (!isRendering || allowRendering), !isStreamingPreview,
+              answerDraft == nil || answerDraft === draft,
+              let fileURL, let captured = sourceSnapshot, captured.url == fileURL,
+              edit.source.utf8.elementsEqual(source.utf8),
+              (try? captured.source.utf8.elementsEqual(source.utf8)) == true, !edit.splices.isEmpty else { return false }
+        let inverse: MarkdownResponseEdit
+        do { inverse = try edit.inverse() }
+        catch { checklistError = error.localizedDescription; return false }
+        let context = sourceContext, revision = externalFileRevision
+        pendingChecklistSource = inverse.source
+        checklistSaving = true; checklistError = nil
+        draft?.saving = true; draft?.error = nil
+        let writing = sourceGate.enqueue {
+            try SourceFileEdit.commit(edit.apply(to: captured.data), expected: captured)
+        }
+        Task { [weak self] in
+            do {
+                let saved = try await writing.value(), updated = try saved.source
+                guard let self, sourceContext == context, self.fileURL == fileURL else { draft?.saving = false; draft?.stale = true; return }
+                guard revision == externalFileRevision,
+                      source.utf8.elementsEqual(edit.source.utf8) || source.utf8.elementsEqual(updated.utf8) else {
+                    checklistSaving = false; pendingChecklistSource = nil
+                    checklistUndo.removeAll(); checklistRedo.removeAll()
+                    checklistError = ChecklistError.changed.localizedDescription
+                    draft?.saving = false; draft?.stale = true; draft?.error = checklistError; return
+                }
+                let newerVersionWaiting = pendingFileSource != nil && pendingFileSource?.utf8.elementsEqual(updated.utf8) != true
+                sourceSnapshot = saved
+                acceptFileUpdate(updated)
+                if newerVersionWaiting { checklistUndo.removeAll(); checklistRedo.removeAll() }
+                else {
+                    switch history {
+                    case .normal: checklistUndo.append(.response(inverse)); checklistRedo.removeAll()
+                    case .undo: if !checklistUndo.isEmpty { checklistUndo.removeLast() }; checklistRedo.append(.response(inverse))
+                    case .redo: if !checklistRedo.isEmpty { checklistRedo.removeLast() }; checklistUndo.append(.response(inverse))
+                    }
+                }
+                trimChecklistHistory()
+                checklistSaving = false; pendingChecklistSource = nil
+                draft?.saving = false
+                if let draft, answerDraft === draft { answerDraft = nil }
+            } catch {
+                draft?.saving = false; draft?.error = error.localizedDescription
+                guard let self, sourceContext == context, self.fileURL == fileURL else { draft?.stale = true; return }
+                checklistSaving = false; pendingChecklistSource = nil
+                checklistError = error.localizedDescription
+                checklistUndo.removeAll(); checklistRedo.removeAll(); reload()
+            }
+        }
+        return true
+    }
 
     func render() {
         #if MARGINED_BENCHMARK
@@ -951,6 +1090,7 @@ final class ReaderState {
     func changeZoom(by amount: Double) { zoom = min(2.0, max(0.6, zoom + amount)) }
 
     func stop() {
+        answerDraft?.stale = true
         resetDiscussionActions()
         discussionCardFocusIntent = nil
         discussionMargin = nil; discussionPassageID = nil
