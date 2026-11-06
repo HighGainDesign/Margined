@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Build 17
+## 2.0-beta.5 — 2026-11-06 (Build 17)
 
 - Add opt-in choose-one questions, including visible imported conflicts and one-step file Undo.
 - Add focused short-answer Save/Cancel editing, literal text round trips and recoverable drafts when files change.
