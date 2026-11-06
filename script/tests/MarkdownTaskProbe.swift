@@ -7,7 +7,9 @@ import XCTest
 struct MarkdownTaskProbe {
     static func main() async {
         do {
-            let suite = MarkdownTaskTests.defaultTestSuite
+            let suite = XCTestSuite(name: "Task and response mapping")
+            suite.addTest(MarkdownTaskTests.defaultTestSuite)
+            suite.addTest(MarkdownResponseTests.defaultTestSuite)
             guard suite.testCaseCount > 0 else { exit(2) }
             suite.run()
             guard suite.testRun?.hasSucceeded == true else { exit(1) }

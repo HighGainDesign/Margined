@@ -18,6 +18,7 @@ struct RenderedMarkdown: Sendable {
     var tasks: [MarkdownTask] = []
     var taskSource = ""
     var checkboxCount = 0
+    var responses = MarkdownResponseMap()
     var discussions: DiscussionDocument? = nil
     var discussionText: DiscussionTextProjection? = nil
     var discussionActivity = DiscussionActivity()
@@ -119,6 +120,7 @@ actor MarkdownRenderer {
         }
         let checkboxCount = try document.select("input[type=checkbox]").size()
         let tasks = mapTasks ? try MarkdownTasks.attach(to: document, source: source) : []
+        let responses = mapTasks ? try MarkdownResponses.attach(to: document, source: source, tasks: tasks) : MarkdownResponseMap()
         if includeDiscussionAppendix, !discussions.threads.isEmpty {
             var remaining = MarkdownSource.maximumBytes
             let bodies = try discussions.threads.map {
@@ -148,7 +150,7 @@ actor MarkdownRenderer {
         #if MARGINED_BENCHMARK
         benchmarkMark("serialization_ns")
         #endif
-        let output = RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
+        let output = RenderedMarkdown(html: html, headings: headings, wordCount: count, changes: changes, comparisonBaseline: comparisonBaseline, tasks: tasks, taskSource: source, checkboxCount: checkboxCount, responses: responses, discussions: discussions, discussionText: discussionText, discussionActivity: DiscussionActivity.compare(current: discussions, previous: previousDiscussions), documentLanguage: language, speech: speech)
         #if MARGINED_BENCHMARK
         var measured = output
         measured.benchmarkPhases = benchmarkPhases
@@ -269,7 +271,7 @@ actor MarkdownRenderer {
             let count = message.body.utf8.count + message.author.utf8.count + message.created.utf8.count
             guard count <= remaining else { throw ReaderError.tooLarge }
             remaining -= count
-            bodies.append(try parse(message.body, loadRemoteImages: loadRemoteImages))
+            bodies.append(try parse(message.body, loadRemoteImages: loadRemoteImages, normalizeAnswers: false))
         }
         return bodies
     }
@@ -323,9 +325,11 @@ actor MarkdownRenderer {
         """
     }
 
-    private func parse(_ source: String, loadRemoteImages: Bool) throws -> Document {
+    private func parse(_ source: String, loadRemoteImages: Bool, normalizeAnswers: Bool = true) throws -> Document {
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
+        let answerMask = normalizeAnswers ? try MarkdownResponses.maskLiteralAnswers(in: source) : .init(source: source, values: [:])
+        let renderSource = answerMask.source
         var options = apex_options_for_mode(APEX_MODE_UNIFIED)
         // The C API makes false values explicit; the Swift wrapper only forwards
         // Let Apex emit author HTML, then apply our allowlist in HTMLAdapter.
@@ -355,7 +359,7 @@ actor MarkdownRenderer {
             throw ReaderError.rendererUnavailable
         }
         defer { cmark_syntax_extension_free(cmark_get_default_mem_allocator(), imageExtension) }
-        MathSyntax.install(on: imageExtension, sourceBytes: source.utf8.count)
+        MathSyntax.install(on: imageExtension, sourceBytes: renderSource.utf8.count)
         cmark_syntax_extension_set_postprocess_func(imageExtension) { _, _, root in
             guard let root, let iterator = cmark_iter_new(root) else { return root }
             defer { cmark_iter_free(iterator) }
@@ -408,8 +412,8 @@ actor MarkdownRenderer {
         options.cmark_init = { parser, _, _, data in
             if let data { _ = cmark_parser_attach_syntax_extension(parser, data.assumingMemoryBound(to: cmark_syntax_extension.self)) }
         }
-        let fragment = try source.withCString { markdown in
-            guard let output = apex_markdown_to_html(markdown, source.utf8.count, &options) else {
+        let fragment = try renderSource.withCString { markdown in
+            guard let output = apex_markdown_to_html(markdown, renderSource.utf8.count, &options) else {
                 throw ReaderError.rendererUnavailable
             }
             defer { apex_free_string(output) }
@@ -418,6 +422,7 @@ actor MarkdownRenderer {
         let document = try SwiftSoup.parseBodyFragment(fragment)
         document.outputSettings().prettyPrint(pretty: false)
         try HTMLAdapter.prepare(document, loadRemoteImages: loadRemoteImages)
+        try answerMask.restore(in: document)
         try GitHubAlerts.prepare(document)
         for code in try document.select("pre > code.language-mermaid").array() {
             guard let pre = code.parent() else { continue }

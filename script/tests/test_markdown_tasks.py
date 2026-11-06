@@ -50,6 +50,7 @@ class MarkdownTaskTests(unittest.TestCase):
             command += ["-Xcc", "-fmodule-map-file=" + str(vendor / "include/apex/module.modulemap"),
                         str(ROOT / "script/tests/MarkdownTaskProbe.swift"),
                         str(ROOT / "Tests/MarkdownTaskTests.swift"),
+                        str(ROOT / "Tests/MarkdownResponseTests.swift"),
                         *map(str, objects), str(PRODUCTS / "SwiftSoup.o")]
             for name in ("ApexC", "CcmarkGFM", "CcmarkGFMExtensions", "CcmarkGFMSupport", "CYaml"):
                 modulemap = vendor / "include/module.modulemap" if name == "ApexC" else maps / (name + ".modulemap")
