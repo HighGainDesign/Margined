@@ -8,6 +8,64 @@ import XCTest
 #endif
 
 final class MarkdownResponseTests: XCTestCase {
+    func testCarriageReturnAndMixedLinesPreserveEveryParagraphAndEncodedByte() async throws {
+        for ending in ["\r", "\r\n", "\n"] {
+            let source = "**First (short answer):** Original" + ending + ending +
+                "Ordinary untouched prose.\r\n\r\n**Second (short answer):** _Not answered_\r\rLast paragraph.\n"
+            let output = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+            let page = try SwiftSoup.parse(output.html)
+            XCTAssertTrue(try page.text().contains("Ordinary untouched prose."))
+            XCTAssertTrue(try page.text().contains("Last paragraph."))
+            XCTAssertEqual(output.responses.answers.map(\.label), ["First", "Second"])
+            guard let field = output.responses.answers.first else { continue }
+            let edit = try MarkdownResponses.answerEdit(source: source, field: field, text: "Changed")
+            let expected = source.replacingOccurrences(of: "Original", with: "Changed")
+            for encoding in [String.Encoding.utf8, .utf16LittleEndian, .utf16BigEndian] {
+                let bom: Data = encoding == .utf8 ? Data([0xEF, 0xBB, 0xBF]) : (encoding == .utf16LittleEndian ? Data([0xFF, 0xFE]) : Data([0xFE, 0xFF]))
+                let bytes = bom + (try XCTUnwrap(source.data(using: encoding)))
+                let changed = try edit.apply(to: bytes)
+                XCTAssertEqual(changed, bom + (try XCTUnwrap(expected.data(using: encoding))))
+                XCTAssertEqual(try edit.inverse().apply(to: changed), bytes)
+            }
+        }
+    }
+
+    func testNestedHTMLCannotSubstituteALookalikeForAnAnswer() async throws {
+        for value in ["Value", "**Value**", "_Not answered_"] {
+            for tag in ["div", "blockquote", "object"] {
+                let nested = "<\(tag)>\n\n**Notes (short answer):** \(value)\n\n</\(tag)>\n"
+                let html = "<p><strong>Notes (short answer):</strong> \(value == "_Not answered_" ? "<em>Not answered</em>" : "Value")</p>\n"
+                for source in [nested + "\n" + html, html + "\n" + nested] {
+                    let output = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+                    XCTAssertTrue(output.responses.answers.isEmpty, source)
+                    XCTAssertEqual(try SwiftSoup.parse(output.html).select("[data-margined-answer]").size(), 0, source)
+                }
+            }
+        }
+        let source = "**Notes (short answer):** Value\n\n> **Notes (short answer):** Value\n"
+        let output = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+        XCTAssertEqual(output.responses.answers.count, 1, "A quoted example must not disable a separate proven field")
+        let field = try XCTUnwrap(output.responses.answers.first)
+        let changed = try MarkdownResponses.answerEdit(source: source, field: field, text: "Changed").apply(to: Data(source.utf8))
+        XCTAssertEqual(String(decoding: changed, as: UTF8.self), source.replacingOccurrences(of: "** Value\n\n>", with: "** Changed\n\n>"))
+    }
+
+    func testCombiningMarksDoNotTurnLiteralAnswerDelimitersIntoMarkup() async throws {
+        let source = "**Notes (short answer):** _Not answered_\n"
+        let initial = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+        let field = try XCTUnwrap(initial.responses.answers.first)
+        for text in ["*\u{FE0F}\u{20E3}hello*\u{FE0F}\u{20E3}", "`\u{0301}literal`\u{0301}",
+                     "_\u{0301}literal_\u{0301}", "**\u{FE0F}literal**\u{FE0F}"] {
+            let edit = try MarkdownResponses.answerEdit(source: source, field: field, text: text)
+            let bytes = try edit.apply(to: Data(source.utf8))
+            let output = try await MarkdownRenderer.shared.render(String(decoding: bytes, as: UTF8.self), mapTasks: true, prepareSpeech: true)
+            let reopened = try XCTUnwrap(output.responses.answers.first?.plainValue)
+            XCTAssertTrue(reopened.utf8.elementsEqual(text.utf8), "Literal input changed: \(text)")
+            XCTAssertEqual(try SwiftSoup.parse(output.html).select("p em,p code,p strong strong").size(), 0)
+            XCTAssertEqual(try edit.inverse().apply(to: bytes), Data(source.utf8))
+        }
+    }
+
     func testResponseControlsStayOutOfReadOnlySemanticAndPrintedSnapshots() async throws {
         let source = "**Result (choose one):**\n\n- [X] A\n- [x] B\n\n**Notes (short answer):** Original\n"
         let app = try await MarkdownRenderer.shared.render(source, mapTasks: true, prepareSpeech: true)
@@ -104,6 +162,9 @@ final class MarkdownResponseTests: XCTestCase {
         let source = "<p><strong>Notes (short answer):</strong> Value</p>\n\n**Notes (short answer):** Value\n"
         let output = try await MarkdownRenderer.shared.render(source, mapTasks: true)
         XCTAssertTrue(output.responses.answers.isEmpty)
+        let ordinary = "**Notes (short answer):** Value\n\nNotes (short answer): Value\n"
+        let separate = try await MarkdownRenderer.shared.render(ordinary, mapTasks: true)
+        XCTAssertEqual(separate.responses.answers.count, 1, "An ordinary unformatted paragraph must not disable a proven field")
     }
 
     func testGroupSwitchClearAndConflictResolutionAreOneReversibleEdit() async throws {

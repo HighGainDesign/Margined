@@ -14,6 +14,8 @@ The maintained source is `skills/margined-markdown/` in the [Margined repository
 
 Build 17 implementation (2026-11-06) adds the visible choose-one and short-answer conventions. Core/state commits `e57d1fc` and `09c9d84`, UI commit `9dbbabe`; local parser, exact-file-edit and native-editor checks pass. This is an implementation verification, not a public release claim. The new `assets/responses-example.md` is checked with the actual mapper, literal-answer round trip and exact Undo. Preserve the older examples for earlier readers.
 
+The final Build 17 verification also covers CR-only and mixed line endings, source-owned DOM identity against nested HTML lookalikes, and literal punctuation joined to Unicode combining marks. These are save-safety regressions, with no change to the author-facing format.
+
 ## When Margined changes
 
 Check this skill during changes to Markdown options, sanitization, task mapping/writes, discussion format/anchors/exports, image access, math/diagrams, or file limits. Update only affected guidance and examples. Record the source revision/build and verification date. Distinguish an internal fix from one released to the intended reader; keep older-build workarounds where needed.

@@ -89,13 +89,13 @@ enum MarkdownResponses {
         if text.utf8.elementsEqual(field.plainValue.utf8) { return .init(source: source, splices: []) }
         let value = try normalizedAnswer(text)
         if value.utf8.elementsEqual(field.plainValue.utf8) { return .init(source: source, splices: []) }
-        let replacement = value.isEmpty ? "_Not answered_" : value.reduce(into: "") { result, character in
+        let replacement = value.isEmpty ? "_Not answered_" : value.unicodeScalars.reduce(into: "") { result, scalar in
             // Apex's preprocessing can interpret backslash-escaped brackets,
             // URLs and tildes before cmark sees their escapes. Ordinary Markdown
             // character references keep those literal throughout both stages.
-            if "\\*_`[]<>!&$|{}~:@+=^".contains(character), let ascii = character.asciiValue {
-                result += "&#\(ascii);"
-            } else { result.append(character) }
+            if "\\*_`[]<>!&$|{}~:@+=^".unicodeScalars.contains(scalar) {
+                result += "&#\(scalar.value);"
+            } else { result.unicodeScalars.append(scalar) }
         }
         return .init(source: source, splices: [.init(range: field.range, replacement: replacement)])
     }
@@ -108,7 +108,7 @@ enum MarkdownResponses {
         return value == "_Not answered_" ? "" : value
     }
 
-    static func attach(to document: Document, source: String, tasks: [MarkdownTask]) throws -> MarkdownResponseMap {
+    static func attach(to document: Document, source: String, tasks: [MarkdownTask], answerOrigins: [Int: Element] = [:]) throws -> MarkdownResponseMap {
         guard source.contains(" (choose one):**") || source.contains(" (short answer):** ") else { return .init() }
         return try withSourceTree(source) { root, bytes, starts in
             guard let body = document.body() else { return .init() }
@@ -202,21 +202,24 @@ enum MarkdownResponses {
                         key: text))
                 }
             }
-            let candidates = Dictionary(grouping: answers, by: \.key)
-            var dom: [String: [Element]] = [:]
+            let sourceCounts = Dictionary(grouping: answers, by: \.key).mapValues(\.count)
+            var displayedCounts: [String: Int] = [:]
             for element in elements where element.tagName() == "p" {
                 guard element.children().first()?.tagName() == "strong" else { continue }
-                dom[matchingText(element), default: []].append(element)
+                displayedCounts[matchingText(element), default: 0] += 1
             }
-            var used: [String: Int] = [:]
             for candidate in answers {
-                // An extra HTML lookalike makes this mapping ambiguous: fail closed.
-                guard let matches = dom[candidate.key], matches.count == candidates[candidate.key]?.count else { continue }
-                let index = used[candidate.key, default: 0]
-                used[candidate.key] = index + 1
+                // Equal text/counts cannot prove identity when authored HTML
+                // nests, drops or duplicates paragraphs. The rendering copy
+                // carries a unique source-owned token to this exact DOM node.
+                guard displayedCounts[candidate.key] == sourceCounts[candidate.key],
+                      let paragraph = answerOrigins[candidate.range.lowerBound],
+                      paragraph.parent() === body, paragraph.tagName() == "p",
+                      paragraph.children().first()?.tagName() == "strong",
+                      matchingText(paragraph) == candidate.key else { continue }
                 let field = MarkdownTextResponse(id: result.answers.count, label: candidate.label,
                     range: candidate.range, sourceValue: candidate.value, plainValue: candidate.plain)
-                try matches[index].attr("data-margined-answer", String(field.id))
+                try paragraph.attr("data-margined-answer", String(field.id))
                 result.answers.append(field)
             }
             return result
@@ -226,10 +229,13 @@ enum MarkdownResponses {
     struct LiteralAnswerMask: Sendable {
         let source: String
         let values: [String: String]
+        var positions: [String: Int] = [:]
+        var anchors: [String: Int] = [:]
+        var prefix = ""
 
-        func restore(in document: Document) throws {
-            guard !values.isEmpty, let body = document.body() else { return }
-            var stack: [Node] = [body], found: Set<String> = []
+        func restore(in document: Document) throws -> [Int: Element] {
+            guard !values.isEmpty || !anchors.isEmpty, let body = document.body() else { return [:] }
+            var stack: [Node] = [body], origins: [Int: Element] = [:]
             while let node = stack.popLast() {
                 if let text = node as? TextNode {
                     let raw = text.getWholeText()
@@ -237,26 +243,36 @@ enum MarkdownResponses {
                     let token = String(raw.dropFirst())
                     if let value = values[token] {
                         try text.text(" " + value)
-                        found.insert(token)
+                        if let position = positions[token], let parent = text.parent() as? Element {
+                            origins[position] = parent
+                        }
                     }
                 } else { stack.append(contentsOf: node.getChildNodes()) }
             }
-            // Never show an internal render token if unusual author markup
-            // prevented the renderer from retaining its exact text node.
-            guard found.count == values.count else { throw ReaderError.rendererUnavailable }
+            for marker in try document.select("span[class]").array() {
+                guard let position = anchors[try marker.attr("class")] else { continue }
+                if let parent = marker.parent() { origins[position] = parent }
+                try marker.remove()
+            }
+            // Sanitization may remove a source-owned node entirely. It then has
+            // no editable counterpart. Any surviving unrecognized token must
+            // fail closed rather than reach semantic snapshots or final HTML.
+            if !prefix.isEmpty, try document.outerHtml().contains(prefix) { throw ReaderError.rendererUnavailable }
+            return origins
         }
     }
 
-    /// Temporarily shield source-proven plain answers from Apex's autolink and
-    /// emoji postprocessing. Tokens exist only in this rendering copy and are
-    /// restored as text before semantic snapshots or HTML leave the renderer.
-    /// Explicitly authored inline Markdown follows the normal rendering path.
+    /// Render-only tokens bind source-proven answers to their exact DOM nodes.
+    /// Plain values also bypass Apex's autolink/emoji rewriting; formatted values
+    /// follow normal rendering with an empty provenance marker. All tokens and
+    /// markers disappear before semantic snapshots or HTML leave the renderer.
     static func maskLiteralAnswers(in source: String) throws -> LiteralAnswerMask {
         guard source.contains(" (short answer):** ") else { return .init(source: source, values: [:]) }
         var prefix = "marginedA" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
         while source.contains(prefix) { prefix += "x" }
-        let candidates: [(Range<Int>, String)] = try withSourceTree(source) { root, bytes, starts in
-            var result: [(Range<Int>, String)] = []
+        struct Candidate { let start: Int; let range: Range<Int>; let plain: String? }
+        let candidates: [Candidate] = try withSourceTree(source) { root, bytes, starts in
+            var result: [Candidate] = []
             var node = cmark_node_first_child(root)
             while let paragraph = node {
                 node = cmark_node_next(paragraph)
@@ -277,31 +293,41 @@ enum MarkdownResponses {
                     if cmark_node_get_type(current) != CMARK_NODE_TEXT { literal = false }
                     value = cmark_node_next(current)
                 }
-                guard literal else { continue }
                 let fragment = try SwiftSoup.parseBodyFragment(String(cString: html))
                 guard let p = try fragment.select("p").first() else { continue }
                 let labelText = match.label + " (short answer): "
                 let rawText = textPreservingWhitespace(p)
                 guard rawText.hasPrefix(labelText) else { continue }
-                result.append(((starts[line] + match.valueOffset)..<end, String(rawText.dropFirst(labelText.count))))
+                result.append(.init(start: starts[line], range: (starts[line] + match.valueOffset)..<end,
+                    plain: literal ? String(rawText.dropFirst(labelText.count)) : nil))
             }
             return result
         }
         guard !candidates.isEmpty else { return .init(source: source, values: [:]) }
         let bytes = Array(source.utf8)
         var result = Data(), previous = 0, values: [String: String] = [:]
+        var positions: [String: Int] = [:], anchors: [String: Int] = [:]
         for (index, candidate) in candidates.enumerated() {
             let token = prefix + String(index)
-            result.append(contentsOf: bytes[previous..<candidate.0.lowerBound])
-            result.append(contentsOf: token.utf8)
-            values[token] = candidate.1
-            previous = candidate.0.upperBound
+            if let plain = candidate.plain {
+                result.append(contentsOf: bytes[previous..<candidate.range.lowerBound])
+                result.append(contentsOf: token.utf8)
+                values[token] = plain
+                positions[token] = candidate.range.lowerBound
+                previous = candidate.range.upperBound
+            } else {
+                result.append(contentsOf: bytes[previous..<candidate.start])
+                result.append(contentsOf: "<span class=\"\(token)\"></span>".utf8)
+                anchors[token] = candidate.range.lowerBound
+                previous = candidate.start
+            }
         }
         result.append(contentsOf: bytes[previous...])
         // This is an internal, bounded rendering copy; it never changes the
         // file's 8 MB limit or goes through the source-write API.
-        guard result.count <= MarkdownSource.maximumBytes * 3 else { throw ReaderError.tooLarge }
-        return .init(source: String(decoding: result, as: UTF8.self), values: values)
+        guard result.count <= MarkdownSource.maximumBytes * 4 else { throw ReaderError.tooLarge }
+        return .init(source: String(decoding: result, as: UTF8.self), values: values,
+            positions: positions, anchors: anchors, prefix: prefix)
     }
 
     private static func textPreservingWhitespace(_ node: Node) -> String {
@@ -327,7 +353,14 @@ enum MarkdownResponses {
     private static func withSourceTree<Result>(_ source: String, _ action: (UnsafeMutablePointer<cmark_node>, [UInt8], [Int]) throws -> Result) throws -> Result {
         let bytes = Array(source.utf8)
         guard bytes.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
-        let starts = [0] + bytes.indices.filter { bytes[$0] == 10 }.map { $0 + 1 }
+        var starts = [0], offset = 0
+        while offset < bytes.count {
+            if bytes[offset] == 13 {
+                if offset + 1 < bytes.count, bytes[offset + 1] == 10 { offset += 1 }
+                starts.append(offset + 1)
+            } else if bytes[offset] == 10 { starts.append(offset + 1) }
+            offset += 1
+        }
         guard let parser = cmark_parser_new(0), let ext = cmark_syntax_extension_new("margined-response-math") else { throw ReaderError.rendererUnavailable }
         defer {
             cmark_parser_free(parser)

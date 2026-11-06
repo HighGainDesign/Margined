@@ -70,7 +70,8 @@ actor MarkdownRenderer {
         #if MARGINED_BENCHMARK
         benchmarkMark("note_parse_ns")
         #endif
-        let document = try parse(proseSource, loadRemoteImages: loadRemoteImages)
+        var answerOrigins: [Int: Element] = [:]
+        let document = try parse(proseSource, loadRemoteImages: loadRemoteImages, responseOrigins: { answerOrigins = $0 })
         #if MARGINED_BENCHMARK
         benchmarkMark("markdown_parse_ns")
         #endif
@@ -120,7 +121,7 @@ actor MarkdownRenderer {
         }
         let checkboxCount = try document.select("input[type=checkbox]").size()
         let tasks = mapTasks ? try MarkdownTasks.attach(to: document, source: source) : []
-        let responses = mapTasks ? try MarkdownResponses.attach(to: document, source: source, tasks: tasks) : MarkdownResponseMap()
+        let responses = mapTasks ? try MarkdownResponses.attach(to: document, source: source, tasks: tasks, answerOrigins: answerOrigins) : MarkdownResponseMap()
         if includeDiscussionAppendix, !discussions.threads.isEmpty {
             var remaining = MarkdownSource.maximumBytes
             let bodies = try discussions.threads.map {
@@ -325,7 +326,8 @@ actor MarkdownRenderer {
         """
     }
 
-    private func parse(_ source: String, loadRemoteImages: Bool, normalizeAnswers: Bool = true) throws -> Document {
+    private func parse(_ source: String, loadRemoteImages: Bool, normalizeAnswers: Bool = true,
+                       responseOrigins: (([Int: Element]) -> Void)? = nil) throws -> Document {
         try Task.checkCancellation()
         guard source.utf8.count <= MarkdownSource.maximumBytes else { throw ReaderError.tooLarge }
         let answerMask = normalizeAnswers ? try MarkdownResponses.maskLiteralAnswers(in: source) : .init(source: source, values: [:])
@@ -422,7 +424,8 @@ actor MarkdownRenderer {
         let document = try SwiftSoup.parseBodyFragment(fragment)
         document.outputSettings().prettyPrint(pretty: false)
         try HTMLAdapter.prepare(document, loadRemoteImages: loadRemoteImages)
-        try answerMask.restore(in: document)
+        let origins = try answerMask.restore(in: document)
+        responseOrigins?(origins)
         try GitHubAlerts.prepare(document)
         for code in try document.select("pre > code.language-mermaid").array() {
             guard let pre = code.parent() else { continue }
