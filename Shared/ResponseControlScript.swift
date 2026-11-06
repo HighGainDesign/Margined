@@ -1,6 +1,9 @@
 import Foundation
 
 enum ResponseControlScript {
+    static var choiceConsent: String { String(localized: "Choosing an answer clears the other checkmarks in its group. Each choice saves as one change you can undo.") }
+    static var choiceStatus: String { String(localized: "Checkmarks save to this file. Choices update their whole group.") }
+
     static let script: String = {
         guard let url = Bundle(for: ResponseScriptBundle.self).url(forResource: "reader-responses", withExtension: "js"),
               let source = try? String(contentsOf: url, encoding: .utf8) else { return "return false;" }

@@ -46,6 +46,8 @@ jobs:
           node script/tests/test_reader_resize.cjs App/Resources/reader-document.js
           node script/tests/test_native_reading_position.cjs iOS/Resources/native-reading-position.js
           node script/tests/test_native_scroll_lock.cjs iOS/Resources/native-resize-scroll-lock.js
+          node --test script/tests/test_response_controls.cjs
+          python3 script/tests/test_response_contract.py
           node --test script/tests/test_discussion_layout.cjs
           xcodegen generate
       - name: Test on iPhone

@@ -90,11 +90,14 @@ final class ResponseControlsTests: XCTestCase {
         input.selectedRange = NSRange(location: 0, length: input.text.utf16.count)
         input.insertText("A *literal* https://example.com :smile:")
         let expected = input.text!
+        let initialFontSize = input.font?.pointSize ?? 0
         f.host.presentedViewController?.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
         f.window.frame.size = CGSize(width: 820, height: 1000)
         f.host.view.layoutIfNeeded()
         XCTAssertTrue(editor(in: f.host.presentedViewController?.view) === input)
         XCTAssertEqual(input.text, expected)
+        let scaled = try await poll { (input.font?.pointSize ?? 0) > initialFontSize }
+        XCTAssertTrue(scaled, "Accessibility text sizing must reach the retained native input")
         f.reader.saveAnswer()
         let saved = try await poll { f.reader.answerDraft == nil && !f.reader.fileSaving && !f.reader.isRendering }
         XCTAssertTrue(saved)

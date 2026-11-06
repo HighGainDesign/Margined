@@ -22,6 +22,7 @@ final class ResponseEditorTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         let input = try XCTUnwrap(editor(in: host))
         XCTAssertEqual(input.accessibilityLabel(), "Notes")
+        XCTAssertGreaterThan(input.bounds.width, 200, "The native input must fill its scroll view and wrap text")
         window.makeFirstResponder(input)
         input.insertText(" changed", replacementRange: NSRange(location: input.string.utf16.count, length: 0))
         XCTAssertEqual(draft.text, "Original changed")

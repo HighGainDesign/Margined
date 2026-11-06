@@ -63,7 +63,8 @@ class MarkdownTaskTests(unittest.TestCase):
             compiled = subprocess.run(command, capture_output=True, text=True, timeout=60)
             self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
             samples = [ROOT / "skills/margined-markdown/assets/review-example.md",
-                       ROOT / "skills/margined-markdown/assets/build14-checklist.md"]
+                       ROOT / "skills/margined-markdown/assets/build14-checklist.md",
+                       ROOT / "skills/margined-markdown/assets/responses-example.md"]
             if authored := os.environ.get("MARGINED_AUTHORING_FIXTURE"):
                 samples.append(Path(authored))
             result = subprocess.run([str(executable), *map(str, samples)],

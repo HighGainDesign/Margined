@@ -138,12 +138,12 @@ struct ReaderView: View {
             DiscussionPassagePickerView(reader: reader, request: request)
         }
         .sheet(item: Binding(get: { reader.answerDraft }, set: { value in
-                if value == nil, reader.answerDraft?.stale != true { reader.cancelAnswer() }
-            }), onDismiss: { reader.answerEditorDidDismiss() }) { draft in
-                ShortAnswerEditor(draft: draft, canSave: reader.canSaveAnswer,
-                    unavailableReason: reader.answerUnavailableReason,
-                    onSave: { reader.saveAnswer() }, onCancel: { reader.cancelAnswer() })
-            }
+            if value == nil, reader.answerDraft?.stale != true { reader.cancelAnswer() }
+        }), onDismiss: { reader.answerEditorDidDismiss() }) { draft in
+            ShortAnswerEditor(draft: draft, canSave: reader.canSaveAnswer,
+                unavailableReason: reader.answerUnavailableReason,
+                onSave: { reader.saveAnswer() }, onCancel: { reader.cancelAnswer() })
+        }
         .task { reader.documentAppearance = documentAppearance; await reader.watchFile() }
         .onChange(of: documentAppearance) { reader.documentAppearance = documentAppearance; reader.render() }
         .onChange(of: reader.wide) { reader.render() }
@@ -168,7 +168,7 @@ struct ReaderView: View {
         if reader.hasPendingFileUpdate { return String(localized: "Resume updates before saving more checkmarks.") }
         return reader.rendered?.tasks.isEmpty == true
             ? String(localized: "This checklist cannot be mapped safely. Checkboxes remain disabled.")
-            : String(localized: "Checkmarks save to this file.")
+            : (reader.rendered?.responses.choices.isEmpty == false ? ResponseControlScript.choiceStatus : String(localized: "Checkmarks save to this file."))
     }
 
     private var documentPane: some View {

@@ -84,6 +84,42 @@ struct MarkdownTaskProbe {
         for path in CommandLine.arguments.dropFirst(2) {
             let source = try String(contentsOfFile: path, encoding: .utf8)
             let rendered = try await MarkdownRenderer.shared.render(source, mapTasks: true)
+            if URL(fileURLWithPath: path).lastPathComponent == "Build 17 Response Practice.md" {
+                guard rendered.checkboxCount == 11, rendered.tasks.count == 11,
+                      rendered.responses.choices.count == 3, rendered.responses.answers.count == 3,
+                      rendered.responses.choices.map(\.hasConflict) == [false, false, true] else {
+                    throw failure("Combined response practice must map 3 groups, 3 text fields and 2 independent checks")
+                }
+                for group in rendered.responses.choices {
+                    let edit = try MarkdownResponses.choiceEdit(source: source, group: group, taskID: group.tasks[0].id, checked: true)
+                    guard try edit.inverse().apply(to: edit.apply(to: Data(source.utf8))) == Data(source.utf8) else {
+                        throw failure("Practice group Undo changed unrelated source")
+                    }
+                }
+                print("PASS combined Build 17 practice: 11 tasks, 3 groups, 3 fields, imported conflict and exact group Undo")
+                continue
+            }
+            if URL(fileURLWithPath: path).lastPathComponent == "responses-example.md" {
+                guard rendered.checkboxCount == 4, rendered.tasks.count == 4,
+                      rendered.responses.choices.count == 1, rendered.responses.answers.count == 2,
+                      let group = rendered.responses.choices.first, group.label == "Result",
+                      let field = rendered.responses.answers.first, field.label == "Device and OS", field.plainValue.isEmpty,
+                      try DiscussionCodec.parse(source).diagnostics.isEmpty else {
+                    throw failure("Response authoring sample failed the real parser/mapping contract")
+                }
+                let bytes = Data(source.utf8)
+                let choice = try MarkdownResponses.choiceEdit(source: source, group: group, taskID: group.tasks[1].id, checked: true)
+                let selected = try choice.apply(to: bytes)
+                guard try choice.inverse().apply(to: selected) == bytes else { throw failure("Sample choice Undo changed source") }
+                let text = "MacBook Pro · macOS 27.2, **literal** :smile:"
+                let answer = try MarkdownResponses.answerEdit(source: source, field: field, text: text)
+                let saved = try answer.apply(to: bytes)
+                let roundTrip = try await MarkdownRenderer.shared.render(String(decoding: saved, as: UTF8.self), mapTasks: true)
+                guard roundTrip.responses.answers.first?.plainValue == text,
+                      try answer.inverse().apply(to: saved) == bytes else { throw failure("Sample literal answer round trip failed") }
+                print("PASS Build 17 response authoring sample: 4 tasks, 1 group, 2 answers, exact Undo and literal round trip")
+                continue
+            }
             guard rendered.checkboxCount == 3, rendered.tasks.count == 3 else {
                 throw failure("Build 14 authoring sample must have 3 exact task mappings")
             }
