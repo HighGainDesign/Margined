@@ -3,6 +3,13 @@ import SwiftSoup
 @testable import MarginediOS
 
 final class RenderingTests: XCTestCase {
+    #if os(iOS)
+    override func setUp() async throws {
+        try await super.setUp()
+        try await WebKitTestReadiness.diagramRendering()
+    }
+    #endif
+
     func testPipelineAndFencedTasksKeepTheirSourceMappings() async throws {
         for source in ["- [ ] One `echo a | cat`.\n- [x] Two `echo b | cat`.\n",
                        "- [ ] Run commands.\n  ```sh\n  echo a | cat\n  ```\n- [x] Finish.\n"] {

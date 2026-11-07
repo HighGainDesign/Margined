@@ -8,6 +8,13 @@ import XCTest
 #endif
 
 final class DiscussionRenderingTests: XCTestCase {
+    #if os(iOS)
+    override func setUp() async throws {
+        try await super.setUp()
+        try await WebKitTestReadiness.diagramRendering()
+    }
+    #endif
+
     func testReplayPreparationUsesTheMountedHistoryImagePolicy() async throws {
         let address = "https://example.invalid/saved-comment.png"
         let thread = DiscussionThread(id: "t-image-policy", state: .open,
