@@ -5,6 +5,16 @@ import XCTest
 
 @MainActor
 final class ResponseEditorTests: XCTestCase {
+    func testResponseControlsDoNotRestoreFocusAfterThePageIsReleased() {
+        let reader = ReaderState()
+        let coordinator = MarkdownWebView.Coordinator(reader: reader)
+        XCTAssertNil(coordinator.webView)
+        let arguments = coordinator.responseArguments(enabled: false, token: "closed-page")
+        XCTAssertEqual(arguments["restoreFocus"] as? Bool, false)
+        XCTAssertEqual(arguments["enabled"] as? Bool, false)
+        reader.stop()
+    }
+
     func testUnorderedNativeEditorUsesTypingUndoAndRetainsDraftAcrossResize() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
         let source = "**Notes (short answer):** Original\n"

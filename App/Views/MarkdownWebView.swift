@@ -355,7 +355,8 @@ struct MarkdownWebView: NSViewRepresentable {
                         });
                     }
                     """, arguments: ["holding": reader.playbackHolding, "holdingTitle": String(localized: "Stop Read Aloud before saving checkmarks."), "enabled": enabled, "canSave": canSave, "token": token, "saving": reader.checklistSaving, "rendering": reader.isRendering, "focusID": focusID, "focusIntent": focusIntent, "restoreFocus": Self.hasDocumentFocus(webView), "saveTitle": String(localized: "Save this checkbox change to the Markdown file"), "consentTitle": String(localized: "Click to save checkmarks in this file")], in: nil, contentWorld: Self.taskWorld)
-                    guard contentReady, String(activeLoadGeneration) == token, taskConfiguration == configuration else { return }
+                    guard contentReady, self.webView === webView,
+                          String(activeLoadGeneration) == token, taskConfiguration == configuration else { return }
                     _ = try await webView.callAsyncJavaScript(ResponseControlScript.script,
                         arguments: responseArguments(enabled: enabled, token: token), in: nil, contentWorld: Self.taskWorld)
                 } catch {
@@ -372,11 +373,11 @@ struct MarkdownWebView: NSViewRepresentable {
                 reader.rendered?.taskSource.utf8.elementsEqual(reader.source.utf8) == true
         }
 
-        private func responseArguments(enabled: Bool, token: String) -> [String: Any] {
+        func responseArguments(enabled: Bool, token: String) -> [String: Any] {
             let fields = reader.rendered?.responses.answers ?? []
             return ["enabled": enabled, "token": token, "tokenAttribute": "",
                 "documentID": loadedVersion?.context.uuidString ?? "", "focusIntent": reader.focusIntentGeneration,
-                "focusReturn": reader.answerFocusReturnGeneration, "restoreFocus": Self.hasDocumentFocus(webView!),
+                "focusReturn": reader.answerFocusReturnGeneration, "restoreFocus": webView.map(Self.hasDocumentFocus) ?? false,
                 "answerKeys": ResponseControlScript.identities(fields), "answerLabels": ResponseControlScript.labels(fields),
                 "editTitle": String(localized: "Edit answer"),
                 "conflictText": String(localized: "More than one option is selected. Choose one to resolve this conflict.")]

@@ -6,6 +6,7 @@
 - Add focused short-answer Save/Cancel editing, literal text round trips and recoverable drafts when files change.
 - Keep ordinary checklists independent and update the portable authoring guide and example.
 - Align Mac, iOS and embedded extension build numbers.
+- Keep Mac preview updates safe when navigating or closing windows.
 
 ## 2.0-beta.4 — 2026-11-04
 
