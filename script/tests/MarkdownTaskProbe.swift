@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-#if MARGINED_READER_STATE_PROBE
+#if MARGINED_READER_STATE_PROBE || MARGINED_READING_POSITION_PROBE
 import AppKit
 #endif
 @testable import Margined
@@ -10,15 +10,21 @@ import AppKit
 struct MarkdownTaskProbe {
     static func main() async {
         do {
-            #if MARGINED_READER_STATE_PROBE
+            #if MARGINED_READER_STATE_PROBE || MARGINED_READING_POSITION_PROBE
             // Link actual state objects without the app entrypoint/delegate.
             // This process is explicitly forbidden from activating or showing UI.
             let application = NSApplication.shared
             guard application.setActivationPolicy(.prohibited) else { exit(2) }
             let suite = XCTestSuite(name: "Noninteractive reader state")
+            #if MARGINED_READING_POSITION_PROBE
+            for test in ReadingPositionTests.defaultTestSuite.tests where test.name.contains("testFocusedHeadingSurvivesAnExternalInsertion") {
+                suite.addTest(test)
+            }
+            #else
             suite.addTest(ChecklistStateTests.defaultTestSuite)
             suite.addTest(ResponseStateTests.defaultTestSuite)
             suite.addTest(ResponseEditorTests.defaultTestSuite)
+            #endif
             guard suite.testCaseCount > 0 else { exit(2) }
             suite.run()
             guard suite.testRun?.hasSucceeded == true else { exit(1) }

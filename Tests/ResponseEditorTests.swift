@@ -15,6 +15,40 @@ final class ResponseEditorTests: XCTestCase {
         reader.stop()
     }
 
+    func testEncodingOnlySnapshotChangeRotatesResponseTokenAndRejectsOldMessage() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let source = "**Notes (short answer):** Original\n"
+        try Data(source.utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let reader = ReaderState()
+        defer { reader.stop() }
+        reader.fileURL = file; reader.source = source; reader.render()
+        for _ in 0..<200 where reader.isRendering { try await Task.sleep(for: .milliseconds(10)) }
+        let html = try XCTUnwrap(reader.rendered?.html)
+        let coordinator = MarkdownWebView.Coordinator(reader: reader)
+        coordinator.synchronizeDocument(html)
+        let originalToken = coordinator.responseToken
+        let documentID = coordinator.responseArguments(enabled: true, token: originalToken)["documentID"] as? String
+        let utf16 = Data([0xff, 0xfe]) + (try XCTUnwrap(source.data(using: .utf16LittleEndian)))
+        try utf16.write(to: file)
+        reader.installLoadedSnapshot(try SourceFileEdit.read(file))
+        coordinator.synchronizeDocument(html)
+        XCTAssertNotEqual(coordinator.responseToken, originalToken)
+        XCTAssertEqual(coordinator.loadedVersion, reader.currentDiscussionVersion)
+        let request: [String: Any] = ["kind": "answer", "id": 0, "token": originalToken]
+        XCTAssertNil(ResponseControlBridge.answerID(request, isMainFrame: true, enabled: true,
+            token: coordinator.responseToken, allowed: [0]))
+        var fresh = request; fresh["token"] = coordinator.responseToken
+        XCTAssertEqual(ResponseControlBridge.answerID(fresh, isMainFrame: true, enabled: true,
+            token: coordinator.responseToken, allowed: [0]), 0)
+        let unchangedToken = coordinator.responseToken
+        coordinator.synchronizeDocument(html)
+        XCTAssertEqual(coordinator.responseToken, unchangedToken)
+        coordinator.loadedVersion = nil
+        XCTAssertEqual(coordinator.responseArguments(enabled: false, token: coordinator.responseToken)["documentID"] as? String, documentID,
+            "A temporary unbound snapshot must preserve the native answer's document identity")
+    }
+
     func testUnorderedNativeEditorUsesTypingUndoAndRetainsDraftAcrossResize() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
         let source = "**Notes (short answer):** Original\n"
