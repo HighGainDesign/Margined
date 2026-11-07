@@ -51,15 +51,20 @@ targets these next steps; build numbers may move if additional fixes are needed:
   remain pending feedback and acceptance.
 - **Build 15:** Mac public TestFlight beta with the Quick Look entitlement repair.
   Combined Build 11–14 manual acceptance remains open.
-- **Build 16:** repair iOS reading-position restoration during resizing and
-  unfinished-reply browsing. Public Mac and iOS TestFlight and the GitHub beta
-  now match Build 16; combined manual acceptance remains open.
-- **Build 17:** required compact choose-one checkboxes and focused text responses,
-  with explicit readable Markdown conventions, safe saves/Undo and a matching
-  authoring-skill update. The implementation passes local Mac checks and full
-  iOS 26.4/27.2 suites. Manual acceptance and distribution remain.
-- **Build 18:** release candidate, remaining accessibility/performance and manual
-  acceptance checks, documentation and verified distribution.
+- **Build 16:** delivered iOS reading-position restoration during resizing and
+  unfinished-reply browsing, with matching Mac/iOS TestFlight and GitHub builds.
+  Combined manual acceptance remains open.
+- **Build 17:** delivered compact choose-one checkboxes and focused text responses,
+  readable Markdown conventions, safe saves/Undo and the matching authoring skill.
+  Public Mac TestFlight, iPhone/iPad TestFlight and
+  [GitHub beta.5](https://github.com/HighGainDesign/Margined/releases/tag/v2.0-beta.5)
+  now match **2.0 (17)** from the same product source; testers were notified.
+  Combined manual acceptance remains open.
+- **Build 18:** planned release candidate after remaining manual acceptance,
+  accessibility/performance, documentation and distribution checks. The intermittent
+  hosted iOS WebKit/diagram-startup test failure remains an RC blocker; the CI
+  process split has not fully resolved it. Track current evidence in the
+  [delivery tracker](https://github.com/HighGainDesign/Margined/issues/24).
 
 Keep the maintained Markdown authoring skill aligned with each release's actual
 formats and limits; package its committed ZIP/checksum with that release. Internal
