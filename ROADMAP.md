@@ -61,10 +61,12 @@ targets these next steps; build numbers may move if additional fixes are needed:
   now match **2.0 (17)** from the same product source; testers were notified.
   Combined manual acceptance remains open.
 - **Build 18:** planned release candidate after remaining manual acceptance,
-  accessibility/performance, documentation and distribution checks. The intermittent
-  hosted iOS WebKit/diagram-startup test failure remains an RC blocker; the CI
-  process split has not fully resolved it. Track current evidence in the
-  [delivery tracker](https://github.com/HighGainDesign/Margined/issues/24).
+  accessibility/performance, documentation and distribution checks. The hosted
+  iOS diagram-startup CI blocker is resolved in
+  [PR #30](https://github.com/HighGainDesign/Margined/pull/30): trusted WebKit
+  readiness now precedes functional assertions, with full local iOS and hosted
+  pre-/post-merge validation passing. Track evidence and remaining acceptance in
+  the [delivery tracker](https://github.com/HighGainDesign/Margined/issues/24).
 
 Keep the maintained Markdown authoring skill aligned with each release's actual
 formats and limits; package its committed ZIP/checksum with that release. Internal
