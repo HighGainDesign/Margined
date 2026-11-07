@@ -303,7 +303,13 @@ final class ReadingPositionTests: XCTestCase {
         let controller = NSHostingController(rootView: ReaderView(reader: reader))
         let window = NSWindow(contentViewController: controller)
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 700, height: 500)); window.makeKeyAndOrderFront(nil)
+        window.setContentSize(NSSize(width: 700, height: 500))
+        #if MARGINED_READING_POSITION_PROBE
+        window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertFalse(window.isVisible)
+        #else
+        window.makeKeyAndOrderFront(nil)
+        #endif
         for _ in 0..<200 {
             if !reader.isRendering, let web = findWebView(controller.view), !web.isLoading,
                let ready = try? await web.evaluateJavaScript("!!document.getElementById('margined-section-30') && !document.querySelector('input').disabled") as? Bool, ready {

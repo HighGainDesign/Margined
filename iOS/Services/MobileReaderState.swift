@@ -10,6 +10,43 @@ final class MobileReaderState {
     let playback: MobilePlaybackOwner
     let access: MobileDocumentAccess
     let discussions = DiscussionSession()
+    var answerDraft: ShortAnswerDraft?
+    var answerFocusReturnGeneration = 0
+    func answerEditorDidDismiss() { answerFocusReturnGeneration &+= 1 }
+    var canSaveAnswer: Bool {
+        guard let draft = answerDraft, !draft.saving, draft.validationMessage == nil else { return false }
+        return answerUnavailableReason == nil
+    }
+    var answerUnavailableReason: String? {
+        guard let draft = answerDraft else { return nil }
+        guard !draft.stale, let current = snapshot, draft.context == current.leaseID,
+              fileURL == draft.expected.url, current.sourceSnapshot == draft.expected,
+              (try? draft.expected.source.utf8.elementsEqual(source.utf8)) == true else {
+            return String(localized: "The file changed. Copy your answer, close this editor, then reopen it in the latest version.")
+        }
+        if playbackHolding { return String(localized: "Stop Read Aloud before saving this answer.") }
+        if hasPendingFileUpdate { return String(localized: "A newer file version is waiting. Copy your answer and reopen it in the latest version.") }
+        if !answerFileReady { return String(localized: "Wait for the file to finish updating before saving this answer.") }
+        return nil
+    }
+    @discardableResult
+    func beginAnswer(_ id: Int) -> Bool {
+        guard canWrite, let captured = snapshot, let output = rendered,
+              output.taskSource.utf8.elementsEqual(source.utf8), captured.source.utf8.elementsEqual(source.utf8),
+              let field = output.responses.answers.first(where: { $0.id == id }) else { return false }
+        answerDraft = .init(field: field, expected: captured.sourceSnapshot, context: captured.leaseID)
+        return true
+    }
+    func saveAnswer() {
+        guard let draft = answerDraft, !draft.saving else { return }
+        guard canSaveAnswer else { draft.error = answerUnavailableReason ?? draft.validationMessage; return }
+        do {
+            let edit = try MarkdownResponses.answerEdit(source: source, field: draft.field, text: draft.text)
+            if edit.splices.isEmpty { answerDraft = nil; return }
+            if !saveResponse(edit, history: .normal, draft: draft) { draft.error = errorMessage ?? answerUnavailableReason }
+        } catch { draft.error = error.localizedDescription }
+    }
+    func cancelAnswer() { if answerDraft?.saving != true { answerDraft = nil } }
     enum Inspector: Hashable { case changes, discussions }
     var inspector: Inspector? {
         didSet {
@@ -155,7 +192,7 @@ final class MobileReaderState {
         }
     }
     var canEditDiscussions: Bool {
-        !isOpening && !isRendering && !fileSaving && !showChecklistConfirmation && !hasPendingFileUpdate
+        answerDraft == nil && !isOpening && !isRendering && !fileSaving && !showChecklistConfirmation && !hasPendingFileUpdate
     }
     func offerDiscussionCopy() {
         discussionCopyOffered = true
@@ -290,9 +327,12 @@ final class MobileReaderState {
     var selectedChange: DocumentChange? {
         changes.entries.isEmpty ? nil : changes.entries[min(currentChangeIndex, changes.count - 1)]
     }
+    var undoFileTitle: String { undoStack.last?.isResponse == true ? String(localized: "Undo Response Change") : String(localized: "Undo Checkbox Change") }
+    var redoFileTitle: String { redoStack.last?.isResponse == true ? String(localized: "Redo Response Change") : String(localized: "Redo Checkbox Change") }
     var canUndoChecklist: Bool { canWrite && !undoStack.isEmpty }
     var canRedoChecklist: Bool { canWrite && !redoStack.isEmpty }
-    var canWrite: Bool {
+    var canWrite: Bool { answerDraft == nil && answerFileReady }
+    private var answerFileReady: Bool {
         fileURL != nil && !isOpening && !isRendering && !fileSaving &&
         !showChecklistConfirmation && !hasPendingFileUpdate && !playbackHolding
     }
@@ -360,6 +400,7 @@ final class MobileReaderState {
     }
 
     private func resetForOpen() {
+        answerDraft?.stale = true
         cancelSpeechPreparation()
         suspendedProse = nil
         printRequest = nil
@@ -423,6 +464,7 @@ final class MobileReaderState {
         guard let current = snapshot, value.leaseID == current.leaseID else { return }
         fileURL = value.url; title = value.url.lastPathComponent
         guard value != current || pendingSnapshot != nil else { return }
+        answerDraft?.stale = true
         externalRevision += 1; undoStack.removeAll(); redoStack.removeAll()
         cancelChecklistConfirmation()
         errorMessage = nil
@@ -480,11 +522,18 @@ final class MobileReaderState {
 
     @discardableResult
     func requestTaskChecked(_ id: Int, checked: Bool) -> Bool {
-        guard canWrite, let snapshot, rendered?.taskSource.utf8.elementsEqual(source.utf8) == true,
-              let task = rendered?.tasks.first(where: { $0.id == id }), task.checked != checked else { return false }
-        if checklistMode { save(task: task, marker: checked ? 120 : 32, history: .normal) }
+        guard canWrite, let snapshot, let output = rendered, output.taskSource.utf8.elementsEqual(source.utf8),
+              let task = output.tasks.first(where: { $0.id == id }),
+              task.checked != checked || output.responses.choices.contains(where: { $0.hasConflict && $0.tasks.contains(task) }) else { return false }
+        let response: MarkdownResponseEdit?
+        do { response = try choiceEdit(for: task, checked: checked) }
+        catch { errorMessage = error.localizedDescription; return false }
+        if checklistMode {
+            if let response { saveResponse(response, history: .normal) }
+            else { save(task: task, marker: checked ? 120 : 32, history: .normal) }
+        }
         else {
-            pendingConsent = Consent(leaseID: snapshot.leaseID, source: source, task: task, checked: checked)
+            pendingConsent = Consent(leaseID: snapshot.leaseID, source: source, task: task, checked: checked, response: response)
             showChecklistConfirmation = true
         }
         return true
@@ -498,11 +547,24 @@ final class MobileReaderState {
             errorMessage = ChecklistError.changed.localizedDescription; return
         }
         checklistMode = true
-        save(task: consent.task, marker: consent.checked ? 120 : 32, history: .normal)
+        if let response = consent.response { saveResponse(response, history: .normal, allowRendering: true) }
+        else { save(task: consent.task, marker: consent.checked ? 120 : 32, history: .normal) }
     }
     func stopSavingCheckmarks() { checklistMode = false; cancelChecklistConfirmation() }
-    func undoChecklist() { if canUndoChecklist, let operation = undoStack.last { save(task: operation.task, marker: operation.marker, history: .undo) } }
-    func redoChecklist() { if canRedoChecklist, let operation = redoStack.last { save(task: operation.task, marker: operation.marker, history: .redo) } }
+    func undoChecklist() {
+        guard canUndoChecklist, let operation = undoStack.last else { return }
+        switch operation {
+        case let .marker(task, marker): save(task: task, marker: marker, history: .undo)
+        case let .response(edit): saveResponse(edit, history: .undo)
+        }
+    }
+    func redoChecklist() {
+        guard canRedoChecklist, let operation = redoStack.last else { return }
+        switch operation {
+        case let .marker(task, marker): save(task: task, marker: marker, history: .redo)
+        case let .response(edit): saveResponse(edit, history: .redo)
+        }
+    }
 
     private func save(task: MarkdownTask, marker: UInt8, history: History) {
         guard canWrite, checklistMode || history != .normal, let captured = snapshot else { return }
@@ -517,13 +579,13 @@ final class MobileReaderState {
                     undoStack.removeAll(); redoStack.removeAll()
                     errorMessage = ChecklistError.changed.localizedDescription; return
                 }
-                let inverse = Operation(task: MarkdownTask(id: task.id, utf8Offset: task.utf8Offset, marker: marker, label: task.label), marker: task.marker)
+                let inverse = Operation.marker(task: MarkdownTask(id: task.id, utf8Offset: task.utf8Offset, marker: marker, label: task.label), marker: task.marker)
                 switch history {
                 case .normal: undoStack.append(inverse); redoStack.removeAll()
                 case .undo: undoStack.removeLast(); redoStack.append(inverse)
                 case .redo: redoStack.removeLast(); undoStack.append(inverse)
                 }
-                if undoStack.count > 100 { undoStack.removeFirst() }
+                trimChecklistHistory()
                 apply(updated)
             } catch {
                 guard let self, snapshot?.leaseID == captured.leaseID else { return }
@@ -532,6 +594,63 @@ final class MobileReaderState {
                 await refresh()
             }
         }
+    }
+
+    private func choiceEdit(for task: MarkdownTask, checked: Bool) throws -> MarkdownResponseEdit? {
+        guard let group = rendered?.responses.choices.first(where: { $0.tasks.contains(where: { $0.id == task.id }) }) else { return nil }
+        return try MarkdownResponses.choiceEdit(source: source, group: group, taskID: task.id, checked: checked)
+    }
+
+    private func trimChecklistHistory() {
+        while undoStack.count + redoStack.count > 100 ||
+              undoStack.reduce(0, { $0 + $1.byteCount }) + redoStack.reduce(0, { $0 + $1.byteCount }) > 16 * 1_024 * 1_024 {
+            if !undoStack.isEmpty { undoStack.removeFirst() }
+            else if !redoStack.isEmpty { redoStack.removeFirst() }
+            else { break }
+        }
+    }
+
+    @discardableResult
+    private func saveResponse(_ edit: MarkdownResponseEdit, history: History, allowRendering: Bool = false, draft: ShortAnswerDraft? = nil) -> Bool {
+        let ready = answerFileReady || (allowRendering && fileURL != nil && !isOpening && !fileSaving &&
+            !showChecklistConfirmation && !hasPendingFileUpdate && !playbackHolding)
+        guard ready, answerDraft == nil || answerDraft === draft,
+              let captured = snapshot, edit.source.utf8.elementsEqual(source.utf8),
+              captured.source.utf8.elementsEqual(source.utf8), !edit.splices.isEmpty else { return false }
+        let inverse: MarkdownResponseEdit, replacement: Data
+        do { inverse = try edit.inverse(); replacement = try edit.apply(to: captured.data) }
+        catch { errorMessage = error.localizedDescription; return false }
+        let revision = externalRevision
+        checklistSaving = true; errorMessage = nil
+        draft?.saving = true; draft?.error = nil
+        saveTask = Task { [weak self, access] in
+            do {
+                let updated = try await access.replace(expected: captured, with: replacement)
+                guard let self, snapshot?.leaseID == captured.leaseID else { draft?.saving = false; draft?.stale = true; return }
+                checklistSaving = false
+                guard revision == externalRevision, source.utf8.elementsEqual(edit.source.utf8), access.snapshot == updated else {
+                    undoStack.removeAll(); redoStack.removeAll()
+                    errorMessage = ChecklistError.changed.localizedDescription
+                    draft?.saving = false; draft?.stale = true; draft?.error = errorMessage; return
+                }
+                switch history {
+                case .normal: undoStack.append(.response(inverse)); redoStack.removeAll()
+                case .undo: if !undoStack.isEmpty { undoStack.removeLast() }; redoStack.append(.response(inverse))
+                case .redo: if !redoStack.isEmpty { redoStack.removeLast() }; undoStack.append(.response(inverse))
+                }
+                trimChecklistHistory()
+                apply(updated)
+                draft?.saving = false
+                if let draft, answerDraft === draft { answerDraft = nil }
+            } catch {
+                draft?.saving = false; draft?.error = error.localizedDescription
+                guard let self, snapshot?.leaseID == captured.leaseID else { draft?.stale = true; return }
+                checklistSaving = false; errorMessage = error.localizedDescription
+                undoStack.removeAll(); redoStack.removeAll()
+                await refresh()
+            }
+        }
+        return true
     }
 
     func render() {
@@ -740,7 +859,17 @@ final class MobileReaderState {
         }
     }
     func waitForSaving() async { await saveTask?.value }
-    private struct Consent { let leaseID: UUID; let source: String; let task: MarkdownTask; let checked: Bool }
-    private struct Operation { let task: MarkdownTask; let marker: UInt8 }
+    private struct Consent { let leaseID: UUID; let source: String; let task: MarkdownTask; let checked: Bool; let response: MarkdownResponseEdit? }
+    private enum Operation {
+        case marker(task: MarkdownTask, marker: UInt8)
+        case response(MarkdownResponseEdit)
+        var isResponse: Bool { if case .response = self { true } else { false } }
+        var byteCount: Int {
+            switch self {
+            case let .marker(task, _): task.label.utf8.count + 32
+            case let .response(edit): edit.source.utf8.count + edit.splices.reduce(0) { $0 + $1.replacement.utf8.count + 32 }
+            }
+        }
+    }
     private enum History: Equatable { case normal, undo, redo }
 }

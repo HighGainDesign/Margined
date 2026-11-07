@@ -45,6 +45,9 @@ struct MobileWebView: UIViewRepresentable {
         let confirmation: Bool
         let checklist: Bool
         let holding: Bool
+        let answerPresented: Bool
+        let answerFocusReturn: Int
+        let sourceVersion: MobileDiscussionVersion
         let pendingUpdate: Bool
         let speechRequest: UUID?
         let speechMode: String
@@ -77,6 +80,9 @@ struct MobileWebView: UIViewRepresentable {
             confirmation = reader.showChecklistConfirmation
             checklist = reader.checklistMode
             holding = reader.playbackHolding
+            answerPresented = reader.answerDraft != nil
+            answerFocusReturn = reader.answerFocusReturnGeneration
+            sourceVersion = reader.currentDiscussionVersion
             pendingUpdate = reader.hasPendingFileUpdate
             speechRequest = reader.speechStartRequest
             speechMode = reader.speechStartMode
@@ -225,6 +231,7 @@ struct MobileWebView: UIViewRepresentable {
         }
         private var html: String?
         private var documentGeneration: UUID?
+        private var loadedVersion: MobileDiscussionVersion?
         private var loadedFile: URL?
         private var resourceToken = UUID().uuidString
         private var imageGeneration = -1
@@ -285,6 +292,7 @@ struct MobileWebView: UIViewRepresentable {
                 nativeSelection = nil
                 contentReady = false
                 html = nil
+                loadedVersion = nil
                 loadedFile = nil
                 readingPosition = nil
                 pendingNavigation = nil
@@ -300,7 +308,9 @@ struct MobileWebView: UIViewRepresentable {
             images.generation = resourceToken
             if let rendered = reader.rendered {
                 let resourceChange = imageGeneration != reader.imageReloadGeneration || loadedFile != reader.fileURL
-                if html != rendered.html || resourceChange {
+                let readyVersion = !reader.isRendering && rendered.taskSource.utf8.elementsEqual(reader.source.utf8)
+                if html != rendered.html || resourceChange || (readyVersion && loadedVersion != reader.currentDiscussionVersion) {
+                    loadedVersion = readyVersion ? reader.currentDiscussionVersion : nil
                     if resourceChange { resourceToken = UUID().uuidString }
                     images.generation = resourceToken
                     imageGeneration = reader.imageReloadGeneration
@@ -437,18 +447,18 @@ struct MobileWebView: UIViewRepresentable {
         }
 
         private var tasksEnabled: Bool {
-            contentReady && !isInvalidated && documentGeneration == reader.documentGeneration &&
+            contentReady && !isInvalidated && loadedVersion == reader.currentDiscussionVersion && reader.answerDraft == nil && documentGeneration == reader.documentGeneration &&
                 reader.fileURL != nil && loadedFile == reader.fileURL &&
                 !reader.playbackHolding && !reader.hasPendingFileUpdate && !reader.fileSaving &&
                 !reader.isRendering && !reader.showChecklistConfirmation && html == reader.rendered?.html &&
-                reader.rendered?.taskSource == reader.source
+                reader.rendered?.taskSource.utf8.elementsEqual(reader.source.utf8) == true
         }
 
         private func configureTasks() {
             guard contentReady, let webView else { return }
             let enabled = tasksEnabled, canSave = reader.checklistMode
             let token = token
-            let key = "\(token):\(enabled):\(canSave):\(reader.fileSaving):\(reader.isRendering):\(reader.playbackHolding)"
+            let key = "\(reader.answerFocusReturnGeneration):\(reader.searchGeneration):\(reader.navigationGeneration):\(token):\(enabled):\(canSave):\(reader.fileSaving):\(reader.isRendering):\(reader.playbackHolding)"
             guard taskKey != key else { return }
             taskKey = key
             let expectedGeneration = generation
@@ -487,6 +497,17 @@ struct MobileWebView: UIViewRepresentable {
                     "holdingTitle": String(localized: "Stop Read Aloud before saving checkmarks."),
                     "saveTitle": String(localized: "Save this checkbox change to the Markdown file"),
                     "consentTitle": String(localized: "Click to save checkmarks in this file")],
+                    in: nil, contentWorld: Self.contentWorld)
+                guard valid(expectedGeneration), taskKey == key else { return }
+                let fields = reader.rendered?.responses.answers ?? []
+                _ = try? await webView.callAsyncJavaScript(ResponseControlScript.script, arguments: [
+                    "enabled": enabled, "token": token, "tokenAttribute": "data-margined-mobile-token",
+                    "documentID": reader.documentGeneration.uuidString,
+                    "focusIntent": "\(reader.searchGeneration):\(reader.navigationGeneration)",
+                    "focusReturn": reader.answerFocusReturnGeneration, "restoreFocus": Self.hasDocumentFocus(webView),
+                    "answerKeys": ResponseControlScript.identities(fields), "answerLabels": ResponseControlScript.labels(fields),
+                    "editTitle": String(localized: "Edit answer"),
+                    "conflictText": String(localized: "More than one option is selected. Choose one to resolve this conflict.")],
                     in: nil, contentWorld: Self.contentWorld)
             }
         }
@@ -662,6 +683,13 @@ struct MobileWebView: UIViewRepresentable {
                     case .clearSelection: nativeSelection = nil
                     }
                 }
+                return
+            }
+            if message.name == "taskToggle", (message.body as? [String: Any])?["kind"] != nil {
+                if let id = ResponseControlBridge.answerID(message.body, isMainFrame: message.frameInfo.isMainFrame,
+                    enabled: tasksEnabled, token: token,
+                    allowed: Set(reader.rendered?.responses.answers.map(\.id) ?? [])) { _ = reader.beginAnswer(id) }
+                taskKey = ""; configureTasks()
                 return
             }
             guard message.name == "taskToggle",

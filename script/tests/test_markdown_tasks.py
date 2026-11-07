@@ -17,6 +17,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTS = Path(os.environ.get("MARGINED_TASK_PRODUCTS", "/tmp/Margined-preview-mac/Build/Products/Debug"))
 PARSER_PRODUCTS = Path(os.environ.get("MARGINED_TASK_PARSER_PRODUCTS", str(PRODUCTS)))
+READER_STATE = os.environ.get("MARGINED_READER_STATE_PROBE") == "1"
+READING_POSITION = os.environ.get("MARGINED_READING_POSITION_PROBE") == "1"
 
 
 class MarkdownTaskTests(unittest.TestCase):
@@ -32,6 +34,7 @@ class MarkdownTaskTests(unittest.TestCase):
             executable = bundle / "Contents/MacOS/task-probe"
             executable.parent.mkdir(parents=True)
             shutil.copytree(ROOT / "Shared/Resources", bundle / "Contents/Resources")
+            shutil.copytree(ROOT / "App/Resources", bundle / "Contents/Resources", dirs_exist_ok=True)
             (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps({
                 "CFBundleIdentifier": "design.highgain.margined.tests.cpu",
                 "CFBundleExecutable": "task-probe", "CFBundlePackageType": "BNDL"}))
@@ -44,12 +47,18 @@ class MarkdownTaskTests(unittest.TestCase):
                        "-I", str(developer / "Platforms/MacOSX.platform/Developer/usr/lib"),
                        "-L", str(developer / "Platforms/MacOSX.platform/Developer/usr/lib"),
                        "-Xlinker", "-rpath", "-Xlinker", str(developer / "Platforms/MacOSX.platform/Developer/usr/lib")]
+            if READER_STATE:
+                command += ["-D", "MARGINED_READER_STATE_PROBE", str(ROOT / "Tests/ChecklistStateTests.swift"),
+                            str(ROOT / "Tests/ResponseStateTests.swift"), str(ROOT / "Tests/ResponseEditorTests.swift")]
+            if READING_POSITION:
+                command += ["-D", "MARGINED_READING_POSITION_PROBE", str(ROOT / "Tests/ReadingPositionTests.swift")]
             for relative in ("include", "vendor/cmark-gfm/src", "vendor/cmark-gfm/extensions",
                              "PackageSupport/cmark-gfm", "vendor/libyaml/include"):
                 command += ["-I", str(vendor / relative)]
             command += ["-Xcc", "-fmodule-map-file=" + str(vendor / "include/apex/module.modulemap"),
                         str(ROOT / "script/tests/MarkdownTaskProbe.swift"),
                         str(ROOT / "Tests/MarkdownTaskTests.swift"),
+                        str(ROOT / "Tests/MarkdownResponseTests.swift"),
                         *map(str, objects), str(PRODUCTS / "SwiftSoup.o")]
             for name in ("ApexC", "CcmarkGFM", "CcmarkGFMExtensions", "CcmarkGFMSupport", "CYaml"):
                 modulemap = vendor / "include/module.modulemap" if name == "ApexC" else maps / (name + ".modulemap")
@@ -58,11 +67,12 @@ class MarkdownTaskTests(unittest.TestCase):
             compiled = subprocess.run(command, capture_output=True, text=True, timeout=60)
             self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
             samples = [ROOT / "skills/margined-markdown/assets/review-example.md",
-                       ROOT / "skills/margined-markdown/assets/build14-checklist.md"]
+                       ROOT / "skills/margined-markdown/assets/build14-checklist.md",
+                       ROOT / "skills/margined-markdown/assets/responses-example.md"]
             if authored := os.environ.get("MARGINED_AUTHORING_FIXTURE"):
                 samples.append(Path(authored))
             result = subprocess.run([str(executable), *map(str, samples)],
-                                    capture_output=True, text=True, timeout=20)
+                                    capture_output=True, text=True, timeout=120 if READER_STATE or READING_POSITION else 20)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             print(result.stdout + result.stderr, end="")
 

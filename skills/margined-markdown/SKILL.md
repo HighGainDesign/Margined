@@ -31,6 +31,28 @@ In Build 13 and earlier affected readers, adjacent checklist items containing in
 
 This is an Apex parser defect, not invalid Markdown or a Dropbox permission issue: [Margined #22](https://github.com/HighGainDesign/Margined/issues/22), [Apex #37](https://github.com/ApexMarkdown/apex/issues/37). Build 14 fixes this defect and the separate nested-fence mapping limitation while retaining exact source validation. The separator can be omitted for that verified source, but keep the compatible form when sharing with Build 13 or an unknown version. Confirm the recipient has Build 14 or later before using the new form.
 
+## Responses (Build 17 and later)
+
+Confirm the recipient has Build 17 or later. Earlier readers display the same Markdown, but their checkboxes are independent and they have no short-answer editor. Use [the complete response contract](references/responses.md) and the [working example](assets/responses-example.md).
+
+```markdown
+**Result (choose one):**
+
+- [ ] Accepted
+- [ ] Changes required
+- [ ] Not tested
+
+**Device and OS (short answer):** _Not answered_
+
+**Notes (short answer):** A readable answer.
+```
+
+Use these exact case-sensitive suffixes inside bold literal labels. Choose-one labels must be their own top-level paragraph, immediately followed by an unordered list of at least two task items, with no nested lists or intervening blocks. Blank lines are fine. Ordinary checklists remain independent. Multiple selected options produce a visible conflict; do not silently repair the user's answer.
+
+A short answer occupies one top-level paragraph on one physical source line: bold label, one space, value. Use the exact `_Not answered_` placeholder when empty. The editor has Save/Cancel and a 1,000-character, one-paragraph limit; changed answers are escaped literal text. Unchanged Save preserves existing formatting and bytes. Empty Save restores the placeholder. Saving a text answer does not authorize automatic checkbox saving. Stale saves preserve the draft for recovery. Quoted, nested, code and malformed lookalikes stay ordinary content.
+
+Preserve existing response values when updating a document, just as you preserve user checkmarks and discussions. Duplicate labels are allowed, but use descriptive questions. App controls and warnings do not belong in saved Markdown, speech or printed output.
+
 ## Images and richer content
 
 | Content | Authoring guidance |

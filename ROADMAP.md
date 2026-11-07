@@ -52,12 +52,12 @@ targets these next steps; build numbers may move if additional fixes are needed:
 - **Build 15:** Mac public TestFlight beta with the Quick Look entitlement repair.
   Combined Build 11–14 manual acceptance remains open.
 - **Build 16:** repair iOS reading-position restoration during resizing and
-  unfinished-reply browsing; validate locally before public iPhone/iPad and
-  GitHub beta distribution. Keep the existing Mac TestFlight beta available.
+  unfinished-reply browsing. Public Mac and iOS TestFlight and the GitHub beta
+  now match Build 16; combined manual acceptance remains open.
 - **Build 17:** required compact choose-one checkboxes and focused text responses,
   with explicit readable Markdown conventions, safe saves/Undo and a matching
-  authoring-skill update. The exact grammar and UX need focused review; these
-  controls are not implemented yet.
+  authoring-skill update. The implementation passes local Mac checks and full
+  iOS 26.4/27.2 suites. Manual acceptance and distribution remain.
 - **Build 18:** release candidate, remaining accessibility/performance and manual
   acceptance checks, documentation and verified distribution.
 

@@ -25826,6 +25826,686 @@
           }
         }
       }
+    },
+    "%lld / 1,000": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / 1.000"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / 1,000"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / 1,000"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / 1,000"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / 1 000"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / 1.000"
+          }
+        }
+      }
+    },
+    "A newer file version is waiting. Copy your answer and reopen it in the latest version.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hay una versión más reciente del archivo. Copia tu respuesta y vuelve a abrirla en la última versión."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件有新版本等待载入。请复制回答，然后在最新版本中重新打开。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檔案有新版本等待載入。請複製回答，然後在最新版本中重新開啟。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しいファイルバージョンがあります。回答をコピーし、最新バージョンで開き直してください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une version plus récente du fichier est disponible. Copiez votre réponse et rouvrez-la dans la dernière version."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine neuere Dateiversion wartet. Kopiere deine Antwort und öffne sie in der neuesten Version erneut."
+          }
+        }
+      }
+    },
+    "Edit answer": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar respuesta"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑回答"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編輯回答"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答を編集"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifier la réponse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwort bearbeiten"
+          }
+        }
+      }
+    },
+    "Edit answer for %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar respuesta para %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑“%@”的回答"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編輯「%@」的回答"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ の回答を編集"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifier la réponse à %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwort für %@ bearbeiten"
+          }
+        }
+      }
+    },
+    "Keep this answer to 1,000 characters or fewer.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limita esta respuesta a 1.000 caracteres."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答不能超过 1,000 个字符。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答不能超過 1,000 個字元。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答は1,000文字以内にしてください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limitez cette réponse à 1 000 caractères."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beschränke diese Antwort auf höchstens 1.000 Zeichen."
+          }
+        }
+      }
+    },
+    "More than one option is selected. Choose one to resolve this conflict.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hay varias opciones seleccionadas. Elige una para resolver el conflicto."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已选择多个选项。请选择一个以解决冲突。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已選取多個選項。請選取一個以解決衝突。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複数の選択肢が選ばれています。1つ選んで競合を解消してください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plusieurs options sont sélectionnées. Choisissez-en une pour résoudre ce conflit."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mehrere Optionen sind ausgewählt. Wähle eine aus, um diesen Konflikt zu lösen."
+          }
+        }
+      }
+    },
+    "One paragraph, up to 1,000 characters.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un párrafo de hasta 1.000 caracteres."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一个段落，最多 1,000 个字符。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一個段落，最多 1,000 個字元。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1段落、1,000文字以内。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un paragraphe de 1 000 caractères maximum."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein Absatz mit höchstens 1.000 Zeichen."
+          }
+        }
+      }
+    },
+    "Redo Response Change": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rehacer cambio de respuesta"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重做回答更改"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重做回答變更"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答の変更をやり直す"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rétablir la modification de réponse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwortänderung wiederholen"
+          }
+        }
+      }
+    },
+    "Remove control characters from this answer.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elimina los caracteres de control de esta respuesta."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请删除回答中的控制字符。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請刪除回答中的控制字元。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答から制御文字を削除してください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimez les caractères de contrôle de cette réponse."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entferne Steuerzeichen aus dieser Antwort."
+          }
+        }
+      }
+    },
+    "Save": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sichern"
+          }
+        }
+      }
+    },
+    "Stop Read Aloud before saving this answer.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detén la lectura en voz alta antes de guardar esta respuesta."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先停止朗读，再保存回答。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請先停止朗讀，再儲存回答。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答を保存する前に読み上げを停止してください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêtez la lecture à voix haute avant d’enregistrer cette réponse."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beende das Vorlesen, bevor du diese Antwort sicherst."
+          }
+        }
+      }
+    },
+    "The file changed. Copy your answer, close this editor, then reopen it in the latest version.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El archivo ha cambiado. Copia tu respuesta, cierra este editor y vuelve a abrirlo en la última versión."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件已更改。请复制回答，关闭编辑器，然后在最新版本中重新打开。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檔案已更改。請複製回答，關閉編輯器，然後在最新版本中重新開啟。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイルが変更されました。回答をコピーしてこのエディタを閉じ、最新バージョンで開き直してください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le fichier a changé. Copiez votre réponse, fermez cet éditeur, puis rouvrez-le dans la dernière version."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Datei wurde geändert. Kopiere deine Antwort, schließe diesen Editor und öffne ihn in der neuesten Version erneut."
+          }
+        }
+      }
+    },
+    "Undo Response Change": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deshacer cambio de respuesta"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撤销回答更改"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還原回答變更"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答の変更を取り消す"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler la modification de réponse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwortänderung widerrufen"
+          }
+        }
+      }
+    },
+    "Use one paragraph without line breaks for this answer.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa un solo párrafo sin saltos de línea para esta respuesta."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答须为一个段落，不能包含换行。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答須為一個段落，不能包含換行。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答は改行せずに1段落にしてください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisez un seul paragraphe sans saut de ligne pour cette réponse."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verwende für diese Antwort einen Absatz ohne Zeilenumbrüche."
+          }
+        }
+      }
+    },
+    "Wait for the file to finish updating before saving this answer.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espera a que el archivo termine de actualizarse antes de guardar esta respuesta."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请等待文件更新完成后再保存回答。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請等待檔案更新完成後再儲存回答。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイルの更新が完了してから回答を保存してください。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attendez la fin de la mise à jour du fichier avant d’enregistrer cette réponse."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warte, bis die Datei vollständig aktualisiert wurde, bevor du diese Antwort sicherst."
+          }
+        }
+      }
+    },
+    "Choosing an answer clears the other checkmarks in its group. Each choice saves as one change you can undo.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elegir una respuesta desmarca las demás opciones del grupo. Cada elección se guarda como un único cambio que puedes deshacer."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择一个回答会清除同组的其他勾选。每次选择保存为一个可撤销的更改。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選取一個回答會清除同組的其他勾選。每次選取儲存為一個可還原的變更。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回答を選ぶとグループ内の他のチェックが外れます。各選択は1回で取り消せる変更として保存されます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir une réponse décoche les autres options du groupe. Chaque choix est enregistré comme une seule modification annulable."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Auswahl einer Antwort entfernt die anderen Häkchen in ihrer Gruppe. Jede Auswahl wird als eine widerrufbare Änderung gesichert."
+          }
+        }
+      }
+    },
+    "Checkmarks save to this file. Choices update their whole group.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las marcas se guardan en este archivo. Las elecciones actualizan todo su grupo."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "勾选保存到此文件。选择会更新整个组。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "勾選儲存到此檔案。選取會更新整個群組。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェックはこのファイルに保存されます。選択するとグループ全体が更新されます。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les coches sont enregistrées dans ce fichier. Les choix mettent à jour tout leur groupe."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Häkchen werden in dieser Datei gesichert. Eine Auswahl aktualisiert ihre gesamte Gruppe."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

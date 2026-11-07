@@ -97,6 +97,13 @@ struct MobileDocumentWorkspace: View {
                 guard let value else { return }
                 reader.discussionUsesMargin = value
             }
+            .sheet(item: Binding(get: { reader.answerDraft }, set: { value in
+                if value == nil, reader.answerDraft?.stale != true { reader.cancelAnswer() }
+            }), onDismiss: { reader.answerEditorDidDismiss() }) { draft in
+                ShortAnswerEditor(draft: draft, canSave: reader.canSaveAnswer,
+                    unavailableReason: reader.answerUnavailableReason,
+                    onSave: { reader.saveAnswer() }, onCancel: { reader.cancelAnswer() })
+            }
             .background {
                 MobileDiscussionKeyboardViewport(typing: reader.discussionFocus != nil) { keyboardAvailableHeight = $0 }
                     .allowsHitTesting(false).accessibilityHidden(true)

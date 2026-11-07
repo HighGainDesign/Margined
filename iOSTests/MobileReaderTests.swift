@@ -10,6 +10,39 @@ final class MobileReaderTests: XCTestCase {
         return url
     }
 
+    func testChooseOneConsentSavesWholeGroupAndUndoRestoresUppercase() async throws {
+        let original = "**Result (choose one):**\n\n- [X] A\n- [ ] B\n\n## Other\n\n- [ ] Independent\n"
+        let url = try file(original), reader = MobileReaderState()
+        await reader.open(url: url); await reader.waitForRendering()
+        XCTAssertTrue(reader.requestTaskChecked(1, checked: true))
+        reader.cancelChecklistConfirmation()
+        XCTAssertEqual(try MarkdownSource.read(url), original)
+        XCTAssertTrue(reader.requestTaskChecked(1, checked: true))
+        reader.confirmChecklistSaving(); await reader.waitForSaving(); await reader.waitForRendering()
+        let changed = original.replacingOccurrences(of: "[X] A", with: "[ ] A").replacingOccurrences(of: "[ ] B", with: "[x] B")
+        XCTAssertEqual(try MarkdownSource.read(url), changed)
+        reader.undoChecklist(); await reader.waitForSaving(); await reader.waitForRendering()
+        XCTAssertEqual(try MarkdownSource.read(url), original)
+        reader.redoChecklist(); await reader.waitForSaving(); await reader.waitForRendering()
+        XCTAssertEqual(try MarkdownSource.read(url), changed)
+        XCTAssertTrue(reader.requestTaskChecked(2, checked: true)); await reader.waitForSaving(); await reader.waitForRendering()
+        XCTAssertEqual(try MarkdownSource.read(url), changed.replacingOccurrences(of: "[ ] Independent", with: "[x] Independent"))
+        await reader.close()
+    }
+
+    func testClickingCheckedConflictingChoiceSelectsItAloneAndUndoRestoresConflict() async throws {
+        let source = "**Result (choose one):**\n\n- [X] A\n- [x] B\n"
+        let url = try file(source), reader = MobileReaderState()
+        await reader.open(url: url); await reader.waitForRendering()
+        XCTAssertEqual(try MarkdownSource.read(url), source)
+        XCTAssertTrue(reader.requestTaskChecked(0, checked: false))
+        reader.confirmChecklistSaving(); await reader.waitForSaving(); await reader.waitForRendering()
+        XCTAssertEqual(try MarkdownSource.read(url), source.replacingOccurrences(of: "[x] B", with: "[ ] B"))
+        reader.undoChecklist(); await reader.waitForSaving(); await reader.waitForRendering()
+        XCTAssertEqual(try MarkdownSource.read(url), source)
+        await reader.close()
+    }
+
     func testFirstClickCancelDoesNotWriteAndConsentSupportsUndoRedo() async throws {
         let url = try file("# Tasks\n\n- [ ] Review the scope\n")
         let reader = MobileReaderState()

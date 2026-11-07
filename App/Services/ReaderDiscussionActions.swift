@@ -1,6 +1,6 @@
 import Foundation
 
-struct ReaderDiscussionVersion {
+struct ReaderDiscussionVersion: Equatable {
     let context: UUID
     let snapshot: SourceFileEdit.Snapshot?
 }

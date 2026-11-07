@@ -1,4 +1,4 @@
 interface:
   display_name: "Margined Markdown"
   short_description: "Write portable Markdown for Margined"
-  default_prompt: "Use $margined-markdown to create a checkable Markdown document with portable discussions."
+  default_prompt: "Use $margined-markdown to create a checkable Markdown document with portable discussions and, on supported builds, choose-one questions and short answers."

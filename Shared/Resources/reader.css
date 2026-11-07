@@ -44,6 +44,12 @@ tbody tr:nth-child(even) { background: var(--wash); }
 img { max-width: 100%; }
 input[type=checkbox] { accent-color: var(--link); vertical-align: middle; width: 20px; height: 20px; }
 input[type=checkbox]:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
+.margined-answer-button { font: inherit; font-size: .85em; margin-inline-start: .6em; padding: .25em .55em; color: var(--link); background: transparent; border: 1px solid currentColor; border-radius: .35em; cursor: pointer; user-select: none; }
+.margined-answer-button:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
+.margined-answer-button:disabled { opacity: .55; cursor: default; }
+.margined-response-warning { color: var(--link); font-size: .9em; font-weight: 600; margin-block: .4em; }
+@media (pointer: coarse) { .margined-answer-button { min-height: 44px; } }
+@media print { [data-margined-response-ui] { display: none !important; } }
 .margined-change { scroll-margin-top: 28px; border-inline-start: 3px solid #c38b18; background-color: rgba(240, 185, 50, .10); }
 .margined-added { border-inline-start-color: #318457; background-color: rgba(63, 155, 94, .12); }
 .margined-word-change { background: #ffe39a; color: inherit; border-radius: 3px; padding: 0 .08em; }

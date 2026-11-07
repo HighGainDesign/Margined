@@ -58,6 +58,36 @@ final class ChecklistWebViewTests: XCTestCase {
         XCTAssertEqual(try MarkdownSource.read(file), "- [ ] First\n- [x] Second\n- [ ] Third\n")
     }
 
+    func testChooseOneBridgeRestoresFocusAfterWholeGroupSave() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
+        let text = "**Result (choose one):**\n\n- [X] First\n- [ ] Second\n- [ ] Third\n"
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        let reader = ReaderState(); reader.fileURL = file; reader.source = text; reader.render()
+        let controller = NSHostingController(rootView: ReaderView(reader: reader))
+        let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 600, height: 400)); window.makeKeyAndOrderFront(nil)
+        defer { window.close(); reader.stop(); try? FileManager.default.removeItem(at: file) }
+        try await waitForDisabled(false, in: controller.view)
+        let webView = try XCTUnwrap(findWebView(controller.view))
+        window.makeFirstResponder(webView)
+        // Exercise the real isolated-world message handler and reload path.
+        // Production change listeners additionally require a trusted user event.
+        let request = "window.webkit.messageHandlers.taskToggle.postMessage({id: 1, checked: true, token: window.marginedTaskState.token});"
+        _ = try await webView.callAsyncJavaScript(request, arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld)
+        try await waitForDisabled(true, in: controller.view)
+        reader.cancelChecklistConfirmation()
+        try await waitForDisabled(false, in: controller.view)
+        try await waitForFocus("1", in: webView)
+        XCTAssertEqual(try MarkdownSource.read(file), text)
+        _ = try await webView.callAsyncJavaScript(request, arguments: [:], in: nil, contentWorld: MarkdownWebView.Coordinator.taskWorld)
+        try await waitForDisabled(true, in: controller.view)
+        reader.confirmChecklistSaving()
+        try await waitForDisabled(false, in: controller.view)
+        try await waitForFocus("1", in: webView)
+        XCTAssertEqual(try MarkdownSource.read(file), "**Result (choose one):**\n\n- [ ] First\n- [x] Second\n- [ ] Third\n")
+    }
+
     func testConsentDismissesOutsideHostingLayout() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".md")
         let text = "- [ ] Check consent dismissal\n"

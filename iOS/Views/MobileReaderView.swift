@@ -128,8 +128,8 @@ struct MobileReaderView: View {
                         Button("Smaller Text", systemImage: "textformat.size.smaller") { reader.changeZoom(by: -0.1) }
                     }
                     Section {
-                        Button("Undo Checkbox Change", systemImage: "arrow.uturn.backward") { reader.undoChecklist() }.disabled(!reader.canUndoChecklist)
-                        Button("Redo Checkbox Change", systemImage: "arrow.uturn.forward") { reader.redoChecklist() }.disabled(!reader.canRedoChecklist)
+                        Button(reader.undoFileTitle, systemImage: "arrow.uturn.backward") { reader.undoChecklist() }.disabled(!reader.canUndoChecklist)
+                        Button(reader.redoFileTitle, systemImage: "arrow.uturn.forward") { reader.redoChecklist() }.disabled(!reader.canRedoChecklist)
                         if reader.checklistMode { Button("Stop Saving Checkmarks") { reader.stopSavingCheckmarks() } }
                     }
                 } label: { Label("More", systemImage: "ellipsis.circle") }
@@ -158,7 +158,8 @@ struct MobileReaderView: View {
             Button("Cancel", role: .cancel) { reader.cancelChecklistConfirmation() }
             Button("Save Checkmarks") { reader.confirmChecklistSaving() }
         } message: {
-            Text("Each checkbox change saves automatically to the Markdown file. You can undo it. Other apps and agents will see your progress.")
+            Text(String(localized: "Each checkbox change saves automatically to the Markdown file. You can undo it. Other apps and agents will see your progress.") +
+                (reader.rendered?.responses.choices.isEmpty == false ? "\n\n" + ResponseControlScript.choiceConsent : ""))
         }
         .onChange(of: reader.wide) { _, _ in reader.render() }
         .onChange(of: reader.loadRemoteImages) { _, _ in reader.render() }
@@ -196,7 +197,7 @@ struct MobileReaderView: View {
     }
     private var checklistBar: some View {
         HStack {
-            Label("Checkmarks save to this file.", systemImage: "checklist")
+            Label(reader.rendered?.responses.choices.isEmpty == false ? ResponseControlScript.choiceStatus : String(localized: "Checkmarks save to this file."), systemImage: "checklist")
             Spacer()
             Button("Undo") { reader.undoChecklist() }.disabled(!reader.canUndoChecklist)
         }.font(.caption).padding(12).background(.bar)

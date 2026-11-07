@@ -279,12 +279,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         }
         if menuItem.action == #selector(undoCheckbox(_:)) {
             menuItem.title = undoActions.isEditingText ? String(localized: "Undo") :
-                reader?.canUndoDiscussion == true ? String(localized: "Undo Discussion Change") : String(localized: "Undo Checkbox Change")
+                reader?.canUndoDiscussion == true ? String(localized: "Undo Discussion Change") : (reader?.undoFileTitle ?? String(localized: "Undo Checkbox Change"))
             return undoActions.canUndo
         }
         if menuItem.action == #selector(redoCheckbox(_:)) {
             menuItem.title = undoActions.isEditingText ? String(localized: "Redo") :
-                reader?.canRedoDiscussion == true ? String(localized: "Redo Discussion Change") : String(localized: "Redo Checkbox Change")
+                reader?.canRedoDiscussion == true ? String(localized: "Redo Discussion Change") : (reader?.redoFileTitle ?? String(localized: "Redo Checkbox Change"))
             return undoActions.canRedo
         }
         return true

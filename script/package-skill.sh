@@ -7,7 +7,7 @@ SOURCE_REF="${2:-HEAD}"
 [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]] || { echo 'Invalid skill package version.' >&2; exit 1; }
 COMMIT=$(git rev-parse --verify --end-of-options "$SOURCE_REF^{commit}")
 SKILL_PATH='skills/margined-markdown'
-for REQUIRED in SKILL.md LICENSE agents/openai.yaml references/discussions.md references/maintenance.md assets/review-example.md; do
+for REQUIRED in SKILL.md LICENSE agents/openai.yaml references/discussions.md references/maintenance.md references/responses.md assets/review-example.md assets/responses-example.md; do
   git cat-file -e "$COMMIT:$SKILL_PATH/$REQUIRED" || { echo "Missing committed skill file: $REQUIRED" >&2; exit 1; }
 done
 mkdir -p dist

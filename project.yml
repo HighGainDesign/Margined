@@ -17,7 +17,7 @@ settings:
     AppStoreRelease:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) MARGINED_APP_STORE
       MARKETING_VERSION: '2.0'
-      CURRENT_PROJECT_VERSION: 15
+      CURRENT_PROJECT_VERSION: 17
   base:
     SWIFT_VERSION: '6.0'
     SWIFT_STRICT_CONCURRENCY: complete
@@ -25,7 +25,7 @@ settings:
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: UX8BPNLPX5
     MARKETING_VERSION: '2.0'
-    CURRENT_PROJECT_VERSION: 16
+    CURRENT_PROJECT_VERSION: 17
     ENABLE_DEBUG_DYLIB: NO
     SWIFT_EMIT_LOC_STRINGS: YES
 packages:
@@ -215,7 +215,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined
         PRODUCT_MODULE_NAME: MarginediOS
         MARKETING_VERSION: '2.0'
-        CURRENT_PROJECT_VERSION: 16
+        CURRENT_PROJECT_VERSION: 17
         TARGETED_DEVICE_FAMILY: '1,2'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
@@ -262,7 +262,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: design.highgain.margined.quicklook
         MARKETING_VERSION: '2.0'
-        CURRENT_PROJECT_VERSION: 16
+        CURRENT_PROJECT_VERSION: 17
         TARGETED_DEVICE_FAMILY: '1,2'
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
@@ -287,6 +287,9 @@ targets:
       - Tests/PrintContentTests.swift
       - Tests/ConversationPlaybackTests.swift
       - Tests/MarkdownSourceEditsTests.swift
+      - Tests/MarkdownResponseTests.swift
+      - Tests/ResponseStateTests.swift
+      - Tests/ResponseControlBridgeTests.swift
       - Tests/SourceFileEditTests.swift
       - Tests/SourceFileGateTests.swift
       - Tests/DiscussionSessionTests.swift

@@ -93,6 +93,10 @@ If an agent changed the file since the displayed version, the tick is refused an
 the file refreshes. External edits clear checkbox Undo history. Unmappable tasks,
 Quick Look, snapshots and live streams remain read-only.
 
+## Responses
+
+Build 17 adds optional [choose-one questions and short answers](RESPONSES.md) using readable Markdown, focused Save/Cancel editing and file Undo. Ordinary checklists remain independent.
+
 ## Read Aloud and print
 
 On Mac, **Read Aloud** starts or resumes playback; click again to pause.

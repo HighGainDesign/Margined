@@ -50,6 +50,9 @@ struct ReaderChecklistConsent: NSViewRepresentable {
             let alert = NSAlert()
             alert.messageText = String(localized: "Save checkmarks to this file?")
             alert.informativeText = String(localized: "Checkmarks in “\(request.fileURL.lastPathComponent)” save automatically. Other text stays unchanged, and you can undo each change.")
+            if reader.rendered?.responses.choices.isEmpty == false {
+                alert.informativeText += "\n\n" + ResponseControlScript.choiceConsent
+            }
             alert.addButton(withTitle: String(localized: "Save Checkmarks"))
             alert.addButton(withTitle: String(localized: "Cancel"))
             active = (request.id, alert)

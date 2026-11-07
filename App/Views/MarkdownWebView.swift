@@ -18,6 +18,9 @@ struct MarkdownWebView: NSViewRepresentable {
     var checklistSaving = false
     var checklistRendering = false
     var checklistPromptPresented = false
+    var answerPresented = false
+    var answerFocusReturn = 0
+    var sourceVersionGeneration: UInt64 = 0
 
     func makeCoordinator() -> Coordinator { Coordinator(reader: reader) }
 
@@ -48,12 +51,7 @@ struct MarkdownWebView: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.images.documentURL = reader.fileURL
         webView.pageZoom = reader.zoom
-        if coordinator.html != html || coordinator.imageReloadGeneration != reader.imageReloadGeneration {
-            let resourcesChanged = coordinator.imageReloadGeneration != reader.imageReloadGeneration
-            coordinator.html = html
-            coordinator.imageReloadGeneration = reader.imageReloadGeneration
-            coordinator.load(html, forceNavigation: resourcesChanged)
-        }
+        coordinator.synchronizeDocument(html)
         if coordinator.navigationGeneration != reader.navigationGeneration, let request = reader.navigationRequest {
             coordinator.navigationGeneration = reader.navigationGeneration
             coordinator.navigate(request)
@@ -85,7 +83,7 @@ struct MarkdownWebView: NSViewRepresentable {
         private var nativeSelectionInFlight = false
         var canDiscussNativeSelection: Bool {
             guard contentReady, !reader.isRendering, html == reader.rendered?.html,
-                  !reader.fileSaving, !reader.showChecklistConfirmation, !reader.isStreamingPreview,
+                  reader.answerDraft == nil, !reader.fileSaving, !reader.showChecklistConfirmation, !reader.isStreamingPreview,
                   reader.fileURL != nil, reader.currentDiscussionVersion.snapshot != nil,
                   !reader.hasPendingFileUpdate, !reader.playbackHolding, let cached = nativeSelection else { return false }
             return cached.selection.renderID == String(activeLoadGeneration) &&
@@ -130,6 +128,12 @@ struct MarkdownWebView: NSViewRepresentable {
         let reader: ReaderState
         private(set) var images = ImageSchemeHandler()
         weak var webView: WKWebView?
+        var loadedVersion: ReaderDiscussionVersion? {
+            didSet { if loadedVersion != oldValue { responseVersion &+= 1 } }
+        }
+        private var responseVersion: UInt64 = 0
+        var responseToken: String { "\(activeLoadGeneration):\(responseVersion)" }
+        private var documentContext: UUID?
         var html: String?
         var imageReloadGeneration = -1
         var navigationGeneration = -1
@@ -166,6 +170,25 @@ struct MarkdownWebView: NSViewRepresentable {
         func bindImages(_ handler: ImageSchemeHandler) {
             images = handler
             images.loadFailed = { [weak reader] in reader?.localImageError = $0 }
+        }
+
+        func synchronizeDocument(_ html: String) {
+            let version = reader.currentDiscussionVersion
+            let readyVersion = !reader.isRendering && html == reader.rendered?.html &&
+                reader.rendered?.taskSource.utf8.elementsEqual(reader.source.utf8) == true
+            let contextChanged = documentContext != version.context
+            let resourcesChanged = imageReloadGeneration != reader.imageReloadGeneration
+            let contentChanged = self.html != html
+            // A snapshot can arrive independently of SwiftUI's HTML value. Bind
+            // current writes without reloading an unchanged page or interrupting
+            // an in-flight reconciliation with a second navigation.
+            if readyVersion { loadedVersion = version }
+            else if contentChanged || contextChanged { loadedVersion = nil }
+            guard contentChanged || resourcesChanged || contextChanged else { return }
+            documentContext = version.context
+            self.html = html
+            imageReloadGeneration = reader.imageReloadGeneration
+            load(html, forceNavigation: resourcesChanged || contextChanged)
         }
 
         func load(_ html: String, forceNavigation: Bool = false) {
@@ -274,11 +297,11 @@ struct MarkdownWebView: NSViewRepresentable {
         func configureTasks() {
             guard contentReady, let webView else { return }
             defer { configureDiscussions() }
-            let enabled = !reader.playbackHolding && reader.fileURL != nil && !reader.isStreamingPreview && !reader.hasPendingFileUpdate && !reader.checklistSaving && !reader.isRendering && !reader.showChecklistConfirmation && html == reader.rendered?.html
+            let enabled = responseControlsEnabled
             let canSave = reader.checklistMode
-            let token = String(activeLoadGeneration)
+            let token = responseToken
             let focusIntent = reader.focusIntentGeneration
-            let configuration = "\(focusIntent):\(token):\(enabled):\(canSave):\(reader.checklistSaving):\(reader.isRendering):\(reader.showChecklistConfirmation):\(reader.playbackHolding)"
+            let configuration = "\(reader.answerFocusReturnGeneration):\(focusIntent):\(token):\(enabled):\(canSave):\(reader.checklistSaving):\(reader.isRendering):\(reader.showChecklistConfirmation):\(reader.playbackHolding)"
             guard taskConfiguration != configuration else { return }
             taskConfiguration = configuration
             var focusID = -1
@@ -294,7 +317,7 @@ struct MarkdownWebView: NSViewRepresentable {
                 taskFocus = nil
             }
             Task { [weak self] in
-                guard let self, contentReady, String(activeLoadGeneration) == token, taskConfiguration == configuration, reader.focusIntentGeneration == focusIntent else { return }
+                guard let self, contentReady, responseToken == token, taskConfiguration == configuration, reader.focusIntentGeneration == focusIntent else { return }
                 do {
                     // Restore DOM focus only while WebKit still owns the native
                     // responder. Ordinary Tab/click moves must win over this save.
@@ -306,7 +329,7 @@ struct MarkdownWebView: NSViewRepresentable {
                             if (pending && event.target !== pending.node) pending.moved = true;
                         });
                     }
-                    if (!enabled && !window.marginedPendingTaskFocus) {
+                    if (!enabled && !window.marginedPendingTaskFocus && !document.activeElement?.closest?.('[data-margined-response-ui]')) {
                         const selection = getSelection();
                         window.marginedPendingTaskFocus = {node:document.activeElement, intent:focusIntent, moved:false,
                             selection:selection?.rangeCount ? {anchor:selection.anchorNode, anchorOffset:selection.anchorOffset,
@@ -349,10 +372,32 @@ struct MarkdownWebView: NSViewRepresentable {
                         });
                     }
                     """, arguments: ["holding": reader.playbackHolding, "holdingTitle": String(localized: "Stop Read Aloud before saving checkmarks."), "enabled": enabled, "canSave": canSave, "token": token, "saving": reader.checklistSaving, "rendering": reader.isRendering, "focusID": focusID, "focusIntent": focusIntent, "restoreFocus": Self.hasDocumentFocus(webView), "saveTitle": String(localized: "Save this checkbox change to the Markdown file"), "consentTitle": String(localized: "Click to save checkmarks in this file")], in: nil, contentWorld: Self.taskWorld)
+                    guard contentReady, self.webView === webView,
+                          responseToken == token, taskConfiguration == configuration else { return }
+                    _ = try await webView.callAsyncJavaScript(ResponseControlScript.script,
+                        arguments: responseArguments(enabled: enabled, token: token), in: nil, contentWorld: Self.taskWorld)
                 } catch {
                     if reader.checklistMode { reader.checklistError = String(localized: "Could not activate checklist controls: \(error.localizedDescription)") }
                 }
             }
+        }
+
+        private var responseControlsEnabled: Bool {
+            contentReady && loadedVersion == reader.currentDiscussionVersion && reader.answerDraft == nil &&
+                !reader.playbackHolding && reader.fileURL != nil && !reader.isStreamingPreview &&
+                !reader.hasPendingFileUpdate && !reader.fileSaving && !reader.isRendering &&
+                !reader.showChecklistConfirmation && html == reader.rendered?.html &&
+                reader.rendered?.taskSource.utf8.elementsEqual(reader.source.utf8) == true
+        }
+
+        func responseArguments(enabled: Bool, token: String) -> [String: Any] {
+            let fields = reader.rendered?.responses.answers ?? []
+            return ["enabled": enabled, "token": token, "tokenAttribute": "",
+                "documentID": reader.currentDiscussionVersion.context.uuidString, "focusIntent": reader.focusIntentGeneration,
+                "focusReturn": reader.answerFocusReturnGeneration, "restoreFocus": webView.map(Self.hasDocumentFocus) ?? false,
+                "answerKeys": ResponseControlScript.identities(fields), "answerLabels": ResponseControlScript.labels(fields),
+                "editTitle": String(localized: "Edit answer"),
+                "conflictText": String(localized: "More than one option is selected. Choose one to resolve this conflict.")]
         }
 
         private func configureDiscussions() {
@@ -441,16 +486,31 @@ struct MarkdownWebView: NSViewRepresentable {
                 return
             }
 
-            guard contentReady, message.frameInfo.isMainFrame, message.name == "taskToggle",
+            if message.name == "taskToggle", (message.body as? [String: Any])?["kind"] != nil {
+                if let id = ResponseControlBridge.answerID(message.body, isMainFrame: message.frameInfo.isMainFrame,
+                    enabled: responseControlsEnabled, token: responseToken,
+                    allowed: Set(reader.rendered?.responses.answers.map(\.id) ?? [])) { _ = reader.beginAnswer(id) }
+                taskConfiguration = nil; configureTasks()
+                return
+            }
+            guard responseControlsEnabled, message.frameInfo.isMainFrame, message.name == "taskToggle",
                   let body = message.body as? [String: Any],
-                  body["token"] as? String == String(activeLoadGeneration),
+                  body["token"] as? String == responseToken,
                   let id = body["id"] as? Int, let checked = body["checked"] as? Bool else { return }
             guard let file = reader.fileURL, let task = reader.rendered?.tasks.first(where: { $0.id == id }),
-                  let patched = try? MarkdownTasks.patch(Data(reader.source.utf8), expectedSource: reader.source, task: task, checked: checked) else { return }
+                  let patched = predictedTaskSource(task: task, checked: checked) else { return }
             let source = reader.source
             if reader.requestTaskChecked(id, checked: checked) {
-                taskFocus = (file, source, String(decoding: patched, as: UTF8.self), task, reader.focusIntentGeneration)
+                taskFocus = (file, source, patched, task, reader.focusIntentGeneration)
             }
+        }
+
+        private func predictedTaskSource(task: MarkdownTask, checked: Bool) -> String? {
+            if let group = reader.rendered?.responses.choices.first(where: { $0.tasks.contains(where: { $0.id == task.id }) }),
+               let edit = try? MarkdownResponses.choiceEdit(source: reader.source, group: group, taskID: task.id, checked: checked),
+               let bytes = try? edit.apply(to: Data(reader.source.utf8)) { return String(decoding: bytes, as: UTF8.self) }
+            guard let bytes = try? MarkdownTasks.patch(Data(reader.source.utf8), expectedSource: reader.source, task: task, checked: checked) else { return nil }
+            return String(decoding: bytes, as: UTF8.self)
         }
 
         private static func hasDocumentFocus(_ webView: WKWebView) -> Bool {
